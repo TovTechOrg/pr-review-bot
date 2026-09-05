@@ -64,15 +64,31 @@ Turing-complete, so there is no bounded vocabulary of "ways to read a file."
   `scripts.encode_credential` step ever opens them. Locking those down via
   file permissions is being handled separately, manually, by the user, and
   is **out of scope** for this design.)
+- **A closed-vocabulary "mutation guard"** in the hook (deny `rm`/`mv`/`cp`/
+  `chmod`/`chown`/`setfacl`/`sed -i`/`truncate`/redirect-into targeting
+  `.env`, in the shell-command text) was designed, then rejected once its
+  implementation was worked through: it has exactly the same two structural
+  problems as the scan it was meant to replace. It's incomplete (misses
+  `python -c "open('.env','w')..."`, `dd`, `tee`, `install`, an editor, a
+  symlink swap — no closed verb vocabulary covers "ways to mutate a file"
+  any more than one covers "ways to read one") and it's imprecise (it still
+  has to scan the *whole* command string, including a git/gh commit
+  message's `-m` value — so a commit message documenting this very feature,
+  e.g. one that says the hook "denies `chmod`/`rm` targeting `.env`", trips
+  its own guard on prose). Reusing the existing
+  `_neutralize_git_message_values` machinery to work around that would have
+  just re-imported the complexity this whole design exists to remove.
+  Replaced by an OS-level fix instead — see Section 2's mutation-prevention
+  row.
 
 ## 2. Confirmed decisions
 
 | Decision | Choice |
 |---|---|
 | Structured tools (`Read`/`Edit`/`Write`/`NotebookEdit`) | **Unchanged.** Path-field deny stays exactly as it is today — no false-positive history, no reason to touch it. |
-| Shell tools (`Bash`/`PowerShell`) — detection model | Replace the single "does the text mention `.env`" scan with **two independent checks**: a narrow mutation guard (deny), and a universal output-redaction wrapper (rewrite via `updatedInput`). |
-| Mutation guard vocabulary | Deny only a closed set of verbs that would alter/relocate/delete `.env` itself: `rm`, `mv`, `cp` *onto* `.env`, output redirection (`>`/`>>`) *into* `.env`, `chmod`/`chown`/`setfacl` on `.env`, `sed -i`/`truncate` on `.env`. Everything else (grep patterns, doc prose, commit messages mentioning the word) is untouched by this check — it fires on verb+target shape, not on the substring appearing anywhere. |
-| Output redaction mechanism | Every shell command not denied by the mutation guard is rewritten via `PreToolUse`'s `updatedInput.command` to pipe its real combined output through a redaction filter *before* the result reaches Claude, rather than scanning the command text for risk. |
+| Shell tools (`Bash`/`PowerShell`) — detection model | Replace the "does the text mention `.env`" scan entirely with a **single, unconditional check**: every `Bash`/`PowerShell` command is rewritten via `updatedInput` to pipe its real output through the redaction filter. No command-shape detection of any kind — no verb list, no mutation guard, no git/gh message handling. |
+| Mutation prevention | **Moved out of the hook entirely, onto the filesystem.** `.env` gets `chmod 400` (blocks in-place write/truncate/append/`sed -i` for any command shape, since those need write permission on the file itself) plus `chattr +i` (blocks delete/rename/hardlink too, and — unlike chmod — can't be reversed without root, so Claude Code cannot lift it under any circumstance). Applied once, manually, by the user — **out of scope for the hook implementation**, tracked here only so the design record explains why the hook has no mutation logic. A mutating command that still reaches the shell (e.g. `rm .env`) simply fails with a normal OS permission error; that error text is harmless and passes through the same redaction wrapper as any other output. |
+| Output redaction mechanism | Every shell command is unconditionally rewritten via `PreToolUse`'s `updatedInput.command` to pipe its real combined output through a redaction filter *before* the result reaches Claude, rather than scanning the command text for risk. |
 | Redaction filter secret source | `dotenv_values(".env")` (python-dotenv) — reuses the exact parser this project's `scripts/_override.py` and `providers/credentials.py` already trust, and gives multi-line-value support for free (no live case today, since this project deliberately base64-encodes anything that would otherwise be multi-line, but nothing extra to build for it). |
 | Redaction granularity | Match on secret **values**, not key names, above a minimum-length threshold of **8 characters** (to avoid pathological over-redaction of short/generic values like a single-digit slot index or `"true"`) — tunable later if real values in practice fall below it, but fixed as a concrete default now rather than left open. |
 | Filter failure mode | **Fail closed.** Any internal error in the redaction filter (can't read `.env`, parse failure, unexpected exception) denies the whole command outright rather than letting output through unredacted. |
@@ -85,30 +101,27 @@ Turing-complete, so there is no bounded vocabulary of "ways to read a file."
 PreToolUse(tool=Bash|PowerShell)
         │
         ▼
-  mutation guard: does `command` target .env with rm/mv/cp-onto/
-  redirect-into/chmod/chown/setfacl/sed-i/truncate?
+  updatedInput.command =
+  "set -o pipefail; { <original>; } 2>&1 \
+   | uv run --no-project python \
+     .claude/hooks/redact_output.py <env_path>"
         │
-    yes │                              no
-        ▼                               ▼
-     deny                    updatedInput.command =
-   (existing                 "set -o pipefail; { <original>; } 2>&1 \
-    _REASON                   | uv run --no-project python \
-    message,                   .claude/hooks/redact_output.py"
-    same shape                            │
-    as today)                             ▼
-                                 (command executes; its real
-                                  stdout+stderr is piped through
-                                  redact_output.py before Claude
-                                  ever sees it)
+        ▼
+  (command executes — including a mutating command like `rm .env`,
+   which just fails at the OS level thanks to chmod 400 + chattr +i;
+   its real stdout+stderr, success or failure, is piped through
+   redact_output.py before Claude ever sees it)
 ```
 
 `redact_output.py` runs as its own short-lived process for every wrapped
 command:
 
 1. Read stdin fully (the original command's real combined output).
-2. Call `dotenv_values(env_path)` on `.env`, resolved relative to the
-   project directory (same resolution convention the hook already uses via
-   `${CLAUDE_PROJECT_DIR}`).
+2. Call `dotenv_values(env_path)`, where `env_path` is the absolute path to
+   `.env` passed in as `sys.argv[1]` — `check_env_access.py` computes this
+   itself (it already resolves its own absolute location via `__file__`)
+   and embeds it in the wrapped command line, so `redact_output.py` never
+   has to guess a project root on its own.
 3. Build the set of values with length ≥ the minimum threshold.
 4. For each such value, replace every literal occurrence in the buffered
    input with a fixed marker (e.g. `[REDACTED-SECRET]`).
@@ -127,37 +140,36 @@ don't execute a shell command at all.
 
 - **`.claude/hooks/check_env_access.py`** (modified) — keeps the existing
   `_PATH_FIELDS` deny logic verbatim. Replaces the current
-  `_texts_to_check`/`_PATTERN` shell-command scanning with:
-  - a small, closed-vocabulary mutation-guard matcher (deny), and
-  - construction of the `updatedInput.command` rewrite (allow, with
-    modification) for everything else.
-  The git/gh message-exemption machinery (`_neutralize_git_message_values`
-  and its heredoc/quote-shape helpers) is deleted — it existed solely to
-  make the substring scan usable for commit messages, and the substring
-  scan itself is going away.
+  `_texts_to_check`/`_PATTERN` shell-command scanning entirely with
+  unconditional construction of the `updatedInput.command` rewrite for every
+  `Bash`/`PowerShell` call. The git/gh message-exemption machinery
+  (`_neutralize_git_message_values` and its heredoc/quote-shape helpers) and
+  the substring scan it supported are both deleted outright — there is no
+  shell-command detection left that needs them.
 - **`.claude/hooks/redact_output.py`** (new) — the filter process described
-  above. Takes no arguments; reads stdin, writes stdout, resolves `.env`
-  itself. Must be invoked the same portable way the existing hook already
-  guarantees (`uv run --no-project python ...`), so it needs no dependency
-  beyond what the hook's own invocation already provides — confirm
-  `python-dotenv` is available in that context (it's already a dependency
-  of this project's `pr-review-bot` package; `--no-project` must still
-  resolve it, or the filter needs its
-  own minimal parsing fallback — a task-level detail for the implementation
-  plan, not a design ambiguity, since the fail-closed behavior means "can't
-  import dotenv" already degrades safely to "deny the command" rather than
-  to a silent leak).
+  above. Takes exactly one argument (the absolute `.env` path); reads
+  stdin, writes stdout. Must be invoked the same portable way the existing
+  hook already guarantees (`uv run --no-project python ...`), so it needs
+  no dependency beyond what the hook's own invocation already provides —
+  confirm `python-dotenv` is importable under `--no-project` (it's already
+  a dependency of this project's `pr-review-bot` package, but `--no-project`
+  skips the workspace sync, so this needs to be verified rather than
+  assumed; a task-level detail for the implementation plan, not a design
+  ambiguity, since the fail-closed behavior means "can't import dotenv"
+  already degrades safely to "deny the command" rather than to a silent
+  leak).
 - **`.claude/settings.json`** — no change; the same `PreToolUse` hook
   registration already routes every `Bash`/`PowerShell` call through
   `check_env_access.py`.
 
 ## 5. Error handling
 
-- Mutation guard false negative risk (a mutating command shaped in a way
-  the closed vocabulary doesn't recognize) is accepted as a known residual
-  risk, same posture the current hook already has for anything outside its
-  own vocabulary — the guard is deliberately narrow specifically to avoid
-  reintroducing the false-positive problem this design exists to fix.
+- Mutation via a shell command reaching the OS (`rm .env`, `chmod .env`,
+  an in-place `sed -i`, ...) is prevented by `chmod 400` + `chattr +i` on
+  `.env` (applied manually, outside this design — see Section 2), not by
+  the hook. The command simply fails with a normal OS permission error;
+  that failure text carries no secret content and passes through the
+  redaction wrapper like any other output.
 - Redaction filter crash → fail closed (Section 3, step 6) — the command is
   denied, never silently unredacted.
 - `.env` missing entirely (e.g. a fresh checkout before setup) → treated
@@ -168,13 +180,12 @@ don't execute a shell command at all.
 
 ## 6. Testing
 
-- Unit tests for `check_env_access.py`'s mutation guard: each verb in the
-  closed vocabulary, targeting `.env`, is denied; the same verbs targeting
-  `.env.config`/`.env.example`/an unrelated file are not; a command that
-  merely mentions the word `.env` in prose (grep pattern, `git commit -m`)
-  is not denied and is *not* rewritten by the mutation-guard branch (falls
-  through to the redaction-wrapper branch, which is a no-op for output that
-  contains no real secret value).
+- Unit tests for `check_env_access.py`: `Read`/`Edit`/`Write`/`NotebookEdit`
+  path-field deny is unchanged (existing tests keep passing as-is); every
+  `Bash`/`PowerShell` command — including ones that mention `.env` in prose,
+  ones that don't mention it at all, and ones that would have tripped the
+  old substring scan — comes back as an `allow` with `updatedInput.command`
+  set to the wrapped form, never a `deny`.
 - Unit tests for `redact_output.py`: a real secret value present in stdin is
   replaced; a value below the minimum-length threshold is left alone; a
   multi-line value (constructed via a quoted `dotenv_values()`-parsed test
