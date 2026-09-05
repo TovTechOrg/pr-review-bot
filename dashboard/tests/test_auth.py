@@ -130,17 +130,18 @@ async def _client() -> AsyncClient:
     return AsyncClient(transport=transport, base_url="http://test")
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _no_login_delay(monkeypatch):
-    """Every test in this file gets a no-op delay by default; the one test
-    that verifies the delay actually fires overrides this itself."""
+    """Requested by name from route tests that hit /api/login, so the fixed
+    delay doesn't slow the suite down. Deliberately not autouse: the tests
+    above this point never touch the route layer or this function at all."""
     async def _noop() -> None:
         return None
 
     monkeypatch.setattr(auth, "_delay_after_login_failure", _noop)
 
 
-async def test_login_with_correct_credentials_sets_a_session_cookie():
+async def test_login_with_correct_credentials_sets_a_session_cookie(_no_login_delay):
     client = await _client()
     resp = await client.post(
         "/api/login",
@@ -151,7 +152,7 @@ async def test_login_with_correct_credentials_sets_a_session_cookie():
     assert auth.SESSION_COOKIE_NAME in resp.cookies
 
 
-async def test_login_with_wrong_password_returns_the_generic_reason_and_no_cookie():
+async def test_login_with_wrong_password_returns_the_generic_reason_and_no_cookie(_no_login_delay):
     client = await _client()
     resp = await client.post(
         "/api/login",
@@ -162,7 +163,7 @@ async def test_login_with_wrong_password_returns_the_generic_reason_and_no_cooki
     assert auth.SESSION_COOKIE_NAME not in resp.cookies
 
 
-async def test_login_with_wrong_username_returns_the_identical_generic_reason():
+async def test_login_with_wrong_username_returns_the_identical_generic_reason(_no_login_delay):
     client = await _client()
     resp = await client.post(
         "/api/login",
@@ -171,7 +172,7 @@ async def test_login_with_wrong_username_returns_the_identical_generic_reason():
     assert resp.json() == {"valid": False, "reason": "invalid_credentials"}
 
 
-async def test_login_with_non_ascii_password_returns_invalid_credentials_not_500():
+async def test_login_with_non_ascii_password_returns_invalid_credentials_not_500(_no_login_delay):
     """hmac.compare_digest raises TypeError on non-ASCII str input -- before
     the fix, this would 500 instead of degrading to a normal wrong-password
     response. A hostile (or simply non-English-keyboard) visitor submitting a
@@ -187,7 +188,7 @@ async def test_login_with_non_ascii_password_returns_invalid_credentials_not_500
 
 
 async def test_login_succeeds_when_the_configured_credential_itself_is_non_ascii(
-    monkeypatch,
+    monkeypatch, _no_login_delay,
 ):
     """A Hebrew or accented DASHBOARD_USERNAME/DASHBOARD_PASSWORD is a
     realistic operator choice, given this app's own Hebrew-language login
@@ -219,7 +220,7 @@ async def test_login_failure_triggers_the_fixed_delay(monkeypatch):
     assert calls == [1]
 
 
-async def test_login_remember_true_sets_the_30_day_max_age():
+async def test_login_remember_true_sets_the_30_day_max_age(_no_login_delay):
     client = await _client()
     resp = await client.post(
         "/api/login",

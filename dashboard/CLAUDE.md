@@ -31,8 +31,8 @@ Dockerfile — see `Dockerfile`), not as its own service.
 - `main.py` mounts `dashboard.router.router` and `dashboard.auth.router`
   — the one place the root app depends on `dashboard`. Neither project
   declares the other in its own `pyproject.toml` `dependencies` (see the
-  2026-08-29 project-restructure design spec, section A) — they coexist as
-  workspace members sharing one venv.
+  2026-08-29 project-restructure design spec, section A) — the root project
+  is the workspace root and `dashboard` its one member, sharing one venv.
 
 ## Contracts
 

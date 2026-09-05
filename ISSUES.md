@@ -148,6 +148,7 @@ accidentally exercise the refusal path instead of the real one._
   5. `SPEC.md`'s module-layout listing omits `providers/catalog.py` — predates this restructure (drift from an earlier change), not introduced by the flatten; noted here only because the final review's file-by-file sweep surfaced it.
 - **Why parked:** All five are cosmetic/doc-accuracy nits with no functional, security, or test impact; the final-review fix wave was scoped to the 4 Important findings (all fixed — see the restructure plan's ledger/commit `10bbf46`) plus items cheap enough to bundle in without expanding scope. These five didn't meet that bar on their own.
 - **Follow-up:** Fix opportunistically whenever one of these five files is next touched for an unrelated reason; none block anything else.
+- **Update (2026-09-06):** closed, all five. (1) `dashboard/CLAUDE.md` now says the root project is the workspace root and `dashboard` its one member, rather than "workspace members" (plural, implying peers). (2) `guide/background/providers.md`'s two path references now explicitly say "now-removed" so the historical narrative doesn't read as describing current files. (3) The wrapped URL in this section's own `deploy.py`/`set_override.py` entry is fixed. (4) Root `__init__.py` was empty and served no purpose (`[tool.uv] package = false`) — deleted, along with its now-unnecessary `COPY` line in `Dockerfile`. (5) `SPEC.md`'s module-layout listing now includes `providers/catalog.py`.
 
 ### Standalone-repo restructure: onboarding/ __pycache__ cleanup and unported WSL/gh-CLI troubleshooting notes
 - **Found during:** Task 1 review and Task 2 review, `docs/superpowers/plans/2026-09-05-standalone-repo-restructure.md`
@@ -156,12 +157,14 @@ accidentally exercise the refusal path instead of the real one._
   2. `docs/2026-08-05-first-hosted-run-findings.md` (deleted as part of the loose-docs cleanup, on the basis that its content was already duplicated elsewhere) actually contained one section of genuinely unique content with no home elsewhere: a ~30-line WSL/`gh`-CLI credential-troubleshooting narrative (symlinked `gh.exe`, SSH host-key failures, the native-Linux-`gh`-install fix). Confirmed via grep against `guide/` and `docs/superpowers/` that this specific content (not its neighbors, which were correctly preserved elsewhere) is not preserved anywhere in the live tree — only recoverable via `git show <pre-restructure-commit>:docs/2026-08-05-first-hosted-run-findings.md`.
 - **Why parked:** (1) is pure filesystem hygiene with zero functional impact — a `find . -name __pycache__ -exec rm -rf {} +` closes it whenever convenient. (2) is a real, if narrow, instance of this restructure's own stated goal ("no piece of unique information is lost without being ported somewhere durable first") not being fully met — but the final whole-branch review judged it acceptable to leave: it's one operator's local-environment troubleshooting record, not project design knowledge, it's fully recoverable via git history, and its more load-bearing neighbors in the same source doc (the `driver=None` conftest fix, the Ryuk workaround, the CRLF-drift discovery) were all correctly preserved elsewhere before deletion.
 - **Follow-up:** (1) Run a repo-wide `__pycache__` sweep next time it's convenient. (2) If this WSL/`gh`-CLI troubleshooting knowledge is ever needed again, it's recoverable via `git log`/`git show` against the pre-restructure commit; optionally add a one-line pointer to that commit in this entry if it comes up again.
+- **Update (2026-09-06):** item 1 closed — `onboarding/`'s stray `__pycache__` dirs were removed along with the rest of the leftover `onboarding/`/`bot/` directories during manual post-merge cleanup. Item 2 (the unported WSL/`gh`-CLI notes) is unchanged — still only recoverable via git history, still judged acceptable to leave as-is.
 
 ### onboarding/render_client.py constructs a fresh httpx.AsyncClient per validate_key() call
 - **Found during:** Task 2 review and final whole-branch review, `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md`
 - **What:** `validate_key()` opens a new `httpx.AsyncClient` context on every call instead of reusing/injecting one.
 - **Why parked:** Correct and cheap at current call volume (one validation per visitor per wizard session); a shared client would need lifespan management that `onboarding/main.py` deliberately doesn't have (this service has no app-level state).
 - **Follow-up:** Revisit only if a future frame in this wizard starts making many calls to the same external API in a hot path.
+- **Update (2026-09-06):** closed as moot — `onboarding/` was removed from this repo entirely by the 2026-09-05 standalone-repo restructure; the wizard now lives in its own separate repo (`~/onboarding-wizard`, fresh history, no connection to this one). This finding no longer has a home here; if still relevant, it belongs in that repo's own tracker.
 
 ### onboarding/static/index.html: minor Render-key-frame UX gaps
 - **Found during:** Task 4 review and final whole-branch review, `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md`
@@ -170,12 +173,14 @@ accidentally exercise the refusal path instead of the real one._
 - **Follow-up:** Bind `keydown` → Enter on the password input to call `validateRenderKey()`; add the empty-input test.
 - **Update (2026-08-27, parked-minors fix wave):** the third original sub-item here (the self-contradictory "Not started — checking…" label) is closed — `setFrameStatus(id, "ready", "checking")` was generalized to a dedicated `"checking"` status with its own `badge_checking` STRINGS key, applied to every frame that had the same composed-label shape (render-key, render-service, uptime-pinger), not just this one. The two items above are still open.
 - **Update (2026-09-05):** closed — `render-key-input` now has a `keydown` listener that submits on Enter (mirroring every other frame's click-to-submit UX for a mobile keyboard's "Go" key), and `test_validate_render_key_rejects_an_empty_key_client_side`/`test_render_key_input_submits_on_enter` cover both remaining gaps in `onboarding/tests/test_onboarding_page.py`.
+- **Update (2026-09-06):** moot regardless — `onboarding/` was removed from this repo entirely by the standalone-repo restructure; it now lives in its own separate repo (`~/onboarding-wizard`).
 
 ### onboarding/tests/test_onboarding_i18n.py: one RTL test asserts an exact whole-line literal string
 - **Found during:** Final whole-branch review, `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md`
 - **What:** `test_language_switch_sets_dir_for_rtl` asserts a full literal source line rather than a more targeted substring, making it more brittle than necessary to a harmless refactor of that one line.
 - **Why parked:** The reviewer's own assessment: the brittleness is doing real work here — it pins that the RTL direction is genuinely derived from the selected language, not just that `dir` is set to *something*. Not worth loosening.
 - **Follow-up:** None planned; revisit only if that line needs a legitimate refactor and the test starts failing on unrelated changes.
+- **Update (2026-09-06):** moot — `onboarding/` was removed from this repo entirely by the standalone-repo restructure; it now lives in its own separate repo (`~/onboarding-wizard`).
 
 ### onboarding/static/index.html: `code`, base-URL, and error-message minor gaps from sub-project 2 (GitHub App automation)
 - **Found during:** Final whole-branch review and its fix-wave re-review, `docs/superpowers/plans/2026-08-26-onboarding-github-app-frame.md`
@@ -191,12 +196,14 @@ accidentally exercise the refusal path instead of the real one._
 - **Follow-up:** Each is independently fixable in isolation whenever one of these endpoints gets touched again; none block anything else in the wizard's remaining sub-projects.
 - **Note (2026-09-05):** most of this frame's original interactive install/create flow was subsequently removed entirely for an unrelated reason (repeated GitHub account suspensions during live testing — see `onboarding/CLAUDE.md`'s sub-project 2 section for the current, fully-manual design). Items 1, 4, 5, 6, 7 above concern the manifest/install redirect code paths that design replaced; left here rather than re-verified against the current file, since none were ever fixed and the replacement may have mooted some of them.
 - **Update (2026-09-05):** closed as moot, re-verified against the current code. `exchange_manifest_code`, `verify_installation`, `handleGithubManifestCallback`, `GITHUB_MANIFEST_STATE_KEY`, `/api/github/exchange-manifest-code`, and `/api/github/verify-installation` no longer exist anywhere in `onboarding/github_client.py`/`router.py`/`static/index.html` — the fully-manual redesign (`validate_app()`, no manifest, no install redirect) replaced the entire code surface every one of these 7 items was about. Nothing to fix.
+- **Update (2026-09-06):** entry closed entirely regardless — `onboarding/` was removed from this repo by the standalone-repo restructure; it now lives in its own separate repo (`~/onboarding-wizard`).
 
 ### onboarding/render_client.py and router.py: no server-side structural logging
 - **Found during:** Final whole-branch review, `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md`
 - **What:** The design spec (section 5) anticipated a structural log line on validation failure (e.g. `"render key validation: invalid (401)"`, name/outcome only, never the value). The implementation logs nothing at all — safe, but means a production report of "validation keeps failing" is currently undebuggable (can't distinguish a wave of `invalid_key` submissions from a genuine Render outage).
 - **Why parked:** Zero logging is the stricter, safer default, and this project has a documented history of secret-handling incidents (see the entries above this one) — adding logging under the time pressure of a single fix wave felt like the wrong moment to touch this area.
 - **Follow-up:** Add the structural log line the spec already specifies (status code / outcome enum only, never the key) once this service is closer to being actually deployed.
+- **Update (2026-09-06):** moot — `onboarding/` was removed from this repo entirely by the standalone-repo restructure; it now lives in its own separate repo (`~/onboarding-wizard`).
 
 ### onboarding/static/index.html: minor UX/robustness gaps from sub-project 3 (Supabase provisioning)
 - **Found during:** Task 6 review, Task 7 review, and the final whole-branch review + its fix-wave re-review, `docs/superpowers/plans/2026-08-26-onboarding-supabase-provisioning-frame.md`
@@ -208,6 +215,7 @@ accidentally exercise the refusal path instead of the real one._
 - **Follow-up:** Wrap `generateDbPassword()`'s body in try/catch for consistency, even though it essentially never throws; disable `supabase-check-status-submit` for the duration of its own in-flight check, matching the pattern every credential-submit button now has.
 - **Note (2026-09-05):** the Supabase frame's own connection method (OAuth vs. visitor-pasted PAT) and its session-storage/relay architecture were both replaced since this was written — see the Design Gaps section below and `docs/superpowers/specs/2026-09-04-supabase-pat-frame-design.md`, `docs/superpowers/specs/2026-09-01-onboarding-server-side-session-design.md`. Re-verify these three items still apply to the current `onboarding/static/index.html` before spending time on any of them.
 - **Update (2026-09-05):** re-verified. Items 1 and 2 are moot — `generateDbPassword()` no longer exists client-side at all; `db_pass` generation moved server-side to `onboarding/router.py` (`secrets.token_urlsafe(24)`, part of the 2026-09-01 server-side-session redesign), which has neither the modulo bias nor any realistic exception path. Item 3 is fixed: `checkSupabaseStatusOnce()` now disables `supabase-check-status-submit` for the duration of its own in-flight check and re-enables it only on a timeout, mirroring `checkRenderDeployStatusOnce()`'s identical pattern exactly; covered by `test_supabase_check_again_button_disables_itself_while_in_flight`.
+- **Update (2026-09-06):** entry closed entirely regardless — `onboarding/` was removed from this repo by the standalone-repo restructure; it now lives in its own separate repo (`~/onboarding-wizard`).
 
 ### onboarding/router.py: four Supabase request models repeat access_token's Field constraint verbatim
 - **Found during:** Task 5 review, `docs/superpowers/plans/2026-08-26-onboarding-supabase-provisioning-frame.md`
@@ -215,18 +223,21 @@ accidentally exercise the refusal path instead of the real one._
 - **Why parked:** Matches this file's existing style — `RenderKeyRequest`/`GithubManifestCodeRequest` don't share a base model either, and four repetitions of one field isn't yet enough duplication to justify introducing one.
 - **Follow-up:** Revisit only if a future sub-project adds enough additional `access_token`-bearing request models that the duplication becomes harder to keep in sync by hand.
 - **Update (2026-09-05):** closed as moot. The 2026-09-01 server-side-session redesign means `create-project`/`project-status`/`connection-info` now read the credential from the session (`session_store.read_frame`), never from the request body — `SupabaseListOrgsRequest`, `SupabaseProjectStatusRequest`, and `SupabaseConnectionInfoRequest` don't exist anymore. Only one Supabase credential model remains (`SupabaseKeyRequest.key`), so there's no duplication left to consolidate.
+- **Update (2026-09-06):** entry closed entirely regardless — `onboarding/` was removed from this repo by the standalone-repo restructure; it now lives in its own separate repo (`~/onboarding-wizard`).
 
 ### onboarding/tests/test_onboarding_page.py: one Supabase restore-from-session test only checks substrings, not structural nesting
 - **Found during:** Task 7 review, `docs/superpowers/plans/2026-08-26-onboarding-supabase-provisioning-frame.md`
 - **What:** `test_restore_from_session_resumes_polling_for_a_ref_without_a_connection_string` only asserts that `showSupabaseProvisioning()`, `pollUntilReady(Date.now())`, and `function restoreFromSession` each appear somewhere in the served page — it doesn't confirm they're inside the same `else if` branch. The implementation itself was independently verified correct by direct code reading during task review; the test is just a weaker regression guard than its name implies.
 - **Why parked:** This test file is a content-substring harness by design (matching this repo's `tests/test_dashboard_page.py` convention), not a JS execution environment — a more structural assertion isn't cheaply available without changing that convention project-wide.
 - **Follow-up:** None planned; revisit only if a real regression here ever slips through undetected, which would be the concrete signal that a substring check is no longer enough for this file.
+- **Update (2026-09-06):** moot — `onboarding/` was removed from this repo entirely by the standalone-repo restructure; it now lives in its own separate repo (`~/onboarding-wizard`).
 
 ### Spec section 6 (onboarding-uptimerobot-frame-design.md) described a browser-behavior test this project's suite cannot execute
 - **Found during:** Final whole-branch review of `docs/superpowers/plans/2026-08-27-onboarding-uptimerobot-frame.md` (sub-project 5).
 - **What:** The spec asked for a test where "mocked `sessionStorage` without [the Render-URL] key renders the blocked message, no form" — this project's onboarding page tests are all static-HTML-source-substring assertions (`onboarding/tests/test_onboarding_page.py`'s established convention, since there is no JS test runner anywhere in this project — no `package.json`, no jsdom/playwright/selenium). The implementer correctly substituted a static-source check for the blocked-state markup/logic's *presence*, matching every prior frame's convention, but this means the blocked-state *behavior* has zero executable coverage — only its source text does.
 - **Why parked:** Not a defect in any implementation — the gap is in how the spec was written, describing a test shape the project's suite structurally cannot run.
 - **Follow-up:** Either add a lightweight JS test runner to this project (a real architecture decision, its own brainstorm), or have future specs stop describing browser-behavior tests in this style.
+- **Update (2026-09-06):** moot — `onboarding/` was removed from this repo entirely by the standalone-repo restructure; it now lives in its own separate repo (`~/onboarding-wizard`).
 
 ### onboarding/static/index.html: minor UX/robustness gaps from sub-project 4 (LLM provider credential UI)
 - **Found during:** Final whole-branch review and its fix-wave re-review, `docs/superpowers/plans/2026-08-27-onboarding-llm-provider-frame.md`
@@ -235,18 +246,21 @@ accidentally exercise the refusal path instead of the real one._
   2. `atob()` on a service-account JSON containing non-ASCII bytes would mis-decode and reject client-side a file the server's `json.loads` would accept fine (UTF-8) — vanishingly rare for GCP-issued keys.
 - **Why parked:** Both deliberately not worth fixing (see each item's own reasoning above) — the other three items in this entry's original bundle (the badge not resetting after a later successful retry; the raw internal provider id shown instead of its localized label; the missing throwaway-key comment in `tests/test_onboarding_llm_client.py`) were fixed in the 2026-08-27 parked-minors fix wave.
 - **Follow-up:** None planned for either remaining item; revisit only if either ever causes a real, reported problem.
+- **Update (2026-09-06):** moot — `onboarding/` was removed from this repo entirely by the standalone-repo restructure; it now lives in its own separate repo (`~/onboarding-wizard`).
 
 ### dashboard/tests/test_auth.py's `_no_login_delay` autouse fixture applies file-wide, not just to the route tests
 - **Found during:** Task 3 review, `docs/superpowers/plans/2026-08-28-dashboard-authentication.md`
 - **What:** The autouse fixture that patches out the fixed post-login-failure delay applies to every test in `dashboard/tests/test_auth.py`, including the earlier Task 2 tests that only exercise credential/token/cookie logic and never touch the route layer or the delay function at all.
 - **Why parked:** Harmless in practice — the Task 2 tests never reference `_delay_after_login_failure`, so the patch is simply inert for them — but it's a wider blast radius than necessary as the file keeps growing (each new test added to this file silently inherits a patched-out internal function it may not know about). Confirmed still accurate, not worsened, by the branch's final whole-branch review.
 - **Follow-up:** Scope the fixture to just the route tests (a separate test class, a marker, or an explicit non-autouse fixture requested by name) if this file grows enough that the blast radius starts mattering in practice.
+- **Update (2026-09-06):** closed. `_no_login_delay` is no longer `autouse` — it's now requested by name from each of the 6 route tests that hit `/api/login` (the ones that call `_client().post("/api/login", ...)`); the earlier credential/token/cookie unit tests no longer receive it at all. Full suite green afterward.
 
 ### dashboard/tests/test_login_page.py asserts on raw JS source text rather than behavior
 - **Found during:** Final whole-branch review of `docs/superpowers/plans/2026-08-28-dashboard-authentication.md`, deliberately excluded from that review's own fix wave.
 - **What:** `test_login_page_posts_json_to_api_login` asserts `'method: "POST"' in body` — a literal match against the login page's inline `<script>` source text, not against actual request behavior. Any reformatting of that JS (e.g. rewording the `fetch()` call, a future prettifier pass) would break the test without indicating a real regression.
 - **Why parked:** Low value relative to the risk of touching a currently-passing test's assertions this late in an already-large fix wave that closed every other final-review finding.
 - **Follow-up:** Rewrite the assertion to check actual behavior (e.g. a DOM/JS-execution check that the form's submit handler issues a POST) rather than matching JS source text, or drop it if the file's other two tests (page reachability, form fields present) already cover what matters.
+- **Update (2026-09-06):** partially closed. No JS-execution test runner exists anywhere in this project (matching the same structural gap noted elsewhere in this section for `onboarding/`'s uptimerobot frame), so real behavioral execution wasn't pursued — that would be new test infrastructure, disproportionate to one Minor finding. Instead, the two exact-literal-source assertions (`'"/api/login"' in body`, `'method: "POST"' in body`) were replaced with regexes (`fetch\(\s*["\']/api/login["\']`, `method\s*:\s*["\']POST["\']`) that still require a real `fetch()` call targeting the right endpoint with the right method, but tolerate incidental reformatting (spacing, quote style) that would have broken the old literal match. Meaningfully less brittle, though still a static-source check rather than executed behavior.
 
 ### Unused `openai` dependency bumped to a major version by the workspace re-lock
 - **Found during:** Task 1 review and final whole-branch review, `docs/superpowers/plans/2026-08-29-project-restructure.md`
@@ -290,6 +304,7 @@ accidentally exercise the refusal path instead of the real one._
 - **Why parked:** Both are content/architecture decisions (what should the guide teach now that the onboarding wizard exists? what does onboarding's own Render service actually need in `envVars`?) rather than mechanical renames.
 - **Follow-up:** Decide whether the guide's Render step should be rewritten to describe using the onboarding wizard instead of a direct Blueprint deploy, or something else; swap `render.yaml`'s `envVars` list to onboarding's actual required env vars.
 - **Still open (2026-09-05):** the actual content/architecture decision above is untouched -- deliberately deferred to batch D of this cleanup pass, since it needs its own brainstorm, not a mechanical fix. Only a stale path in `render.yaml`'s own comment got fixed in passing (it still described the removed root `Dockerfile` copying `app/`; now correctly names `onboarding/Dockerfile` and `onboarding/`), which is unrelated to the `envVars`/guide-content question this entry is actually about.
+- **Update (2026-09-06):** closed as moot — the whole premise (onboarding-is-primary, `render.yaml` building `onboarding/Dockerfile`) no longer holds. The 2026-09-05 standalone-repo restructure removed `onboarding/` from this repo entirely; `render.yaml` now builds the root `Dockerfile` again and its `envVars` list is (and always was) correctly bot-shaped. `guide/setup/06-render.md`'s Blueprint-deploy instructions describe the bot again, matching reality, with no warning banner needed.
 
 ### Docker images ship the test suite, scripts, and fixtures with no `.dockerignore`
 - **Found during:** Final whole-branch review, `docs/superpowers/plans/2026-08-29-project-restructure.md`
@@ -322,14 +337,14 @@ accidentally exercise the refusal path instead of the real one._
   5. `bot/queue/store.py`'s `_due_after_cooldown` docstring line was 108 chars, over the plan's stated 100-char guideline (ruff's default `select` doesn't flag `E501` at that column).
   6. `enqueue_or_update`'s docstring doesn't mention the level escalate/reset behavior in its done/failed-branch description — the line most likely to be read by the next person touching Site A.
 - **Why parked:** graded as optional polish by the final review, not merge-blocking; this entry itself was missed at the time (pre-dating this file's own creation) and is being backfilled now, per `CLAUDE.md`'s Plan-execution rule that every parked Minor finding must be logged here before a branch is considered done, as part of the 2026-09-05 standalone-repo restructure's documentation cleanup.
-- **Status:** mixed — re-verified against current `bot/queue/store.py`/`bot/tests/` while backfilling this entry (2026-09-05). Items 1-5 are **decided-non-issue** (all fixed since 2026-07-31, unrelated to this backfill); item 6 is **still open**:
+- **Status:** all six closed. Items 1-5 are **decided-non-issue** (all fixed since 2026-07-31, unrelated to this backfill); item 6 is **fixed (2026-09-06)**:
   1. Fixed — the docstring's first line now reads `min(base * factor^min(level, _MAX_COOLDOWN_LEVEL), cap)` (`bot/queue/store.py:277`).
   2. Fixed — `mark_failed`'s docstring now explicitly names the escalate/reset of `cooldown_level` (`bot/queue/store.py:640-648`).
   3. Fixed — `test_finalize_non_dirty_leaves_nonzero_cooldown_level` (`bot/tests/test_queue_store.py:725`) seeds level 3 and asserts it survives a non-dirty finalize.
   4. Fixed — `test_sustained_churn_escalates_then_plateaus` (`bot/tests/test_dispatcher.py:897`) walks a single ticket through the full 300→600→1200→2400→3600→3600 ramp end-to-end.
   5. Fixed — the longest line in `review_queue/store.py` is 100 chars as of this check; none exceed the guideline.
-  6. **Open** — `enqueue_or_update`'s docstring (`review_queue/store.py:334`) still only describes the transaction/locking mechanics, with no mention of `cooldown_level` escalate/reset anywhere in its done/failed-branch behavior.
-- **Follow-up:** items 1-5 closed, no further action. Item 6: add a sentence to `enqueue_or_update`'s docstring describing the done/failed-branch's escalate-on-churn/reset-on-quiet behavior for `cooldown_level`, next time that function is touched — low urgency (the behavior itself is correct and covered by tests; this is a documentation gap only).
+  6. Fixed — `enqueue_or_update`'s docstring (`review_queue/store.py:334`) now names the done/failed-branch's escalate-on-churn/reset-on-quiet behavior for `cooldown_level`, pointing at `effective_cooldown`/`next_cooldown_level`.
+- **Follow-up:** none — all six items closed.
 
 ---
 
@@ -378,8 +393,8 @@ Proactive findings, not incidents — nothing here actually happened. Format:
   env vars non-empty before the dashboard is reachable at all; the
   dashboard Environment tab is the normal day-to-day path once it's up.
   No script changes needed, no doc changes needed beyond the path-prefix
-  sweep in task 3 of `docs/superpowers/plans/
-  2026-09-05-standalone-repo-restructure.md`.
+  sweep in task 3 of
+  `docs/superpowers/plans/2026-09-05-standalone-repo-restructure.md`.
 
 ---
 

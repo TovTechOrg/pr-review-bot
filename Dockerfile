@@ -13,7 +13,7 @@ COPY pyproject.toml uv.lock ./
 COPY dashboard ./dashboard
 RUN uv sync --frozen --no-dev --package pr-review-bot
 
-COPY __init__.py config.py config_deps.py diff_utils.py formatting.py \
+COPY config.py config_deps.py diff_utils.py formatting.py \
      github_app.py hmac_verify.py main.py orchestrator.py render_client.py \
      webhook.py ./
 COPY providers ./providers

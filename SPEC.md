@@ -99,6 +99,8 @@ providers/
   registry.py                  single provider -> env-var-name mapping, shared by root app and scripts/
   validate.py                  validate-and-repair (one repair retry → typed empty-with-error)
   pricing.py                   per-provider/model rate table → est_cost_usd
+  catalog.py                   live model-catalog listing per provider, for the dashboard's
+                             guided credential setup/replace flow and model picker
 review_queue/
   store.py                    durable Postgres ticket store: enqueue_or_update, claim_next_due,
                              defer, mark_done, recover_on_startup, get_ticket (section 12);

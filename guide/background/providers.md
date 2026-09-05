@@ -161,7 +161,8 @@ caveat, flagged but not addressed: free-tier rate limits are modest
 (single-digit RPM / ~150 requests per day on low-access models) — fine for a
 demo, a real constraint at any sustained volume.
 
-**A real bug was caught by live testing** (`providers/github_models.py`):
+**A real bug was caught by live testing** (in the now-removed
+`providers/github_models.py`, deleted when this provider was retired below):
 OpenAI's strict `json_schema` mode requires `"additionalProperties": false`
 explicitly present on **every** object schema, including nested `$defs`
 entries — Pydantic's `model_json_schema()` doesn't set this anywhere by
@@ -174,7 +175,7 @@ path). It was fixed with a generic recursive walker
 any nesting shape Pydantic produces is covered — and both cases are locked
 in by tests, not just fixed ad hoc.
 
-It was live-verified end-to-end: a single-schema call via
+It was live-verified end-to-end: a single-schema call via the now-removed
 `scripts/manual_verify_github_models.py`, then the real nested
 `SecurityFindings` schema directly, then a full 3-specialist
 `orchestrator.run_review()` run against PR #3 — 7.5 seconds, all three

@@ -337,7 +337,10 @@ def enqueue_or_update(
     """Enqueue/update a ticket under the per-state re-review policy. The whole
     read-branch-write runs in one transaction; SELECT ... FOR UPDATE locks the
     row so a concurrent writer cannot interleave (Postgres analogue of the old
-    SQLite BEGIN IMMEDIATE)."""
+    SQLite BEGIN IMMEDIATE). The done/failed re-arm branch also escalates
+    `cooldown_level` on churn (a push arriving before the current cooldown
+    elapses) and resets it to 0 once a PR goes quiet for a full window --
+    see `effective_cooldown`/`next_cooldown_level`."""
     with _require_pool().connection() as conn:
         row = conn.execute(
             "SELECT * FROM tickets WHERE repo_full_name = %s AND pr_number = %s FOR UPDATE",

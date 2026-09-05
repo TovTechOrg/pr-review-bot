@@ -1,6 +1,8 @@
 """Tests for GET /login — the static HTML login page shell."""
 from __future__ import annotations
 
+import re
+
 from httpx import ASGITransport, AsyncClient
 
 from main import app
@@ -33,7 +35,12 @@ async def test_login_page_has_username_password_and_remember_me_fields():
 
 
 async def test_login_page_posts_json_to_api_login():
+    """Pinned via regex rather than an exact literal chunk of source, so a
+    harmless reformatting of the fetch() call (spacing, quote style, argument
+    order) doesn't fail this test without an actual behavior change -- it
+    still requires a real fetch(...) call targeting /api/login with a POST
+    method, not just each substring appearing anywhere in the page."""
     client = await _client()
     body = (await client.get("/login")).text
-    assert '"/api/login"' in body
-    assert 'method: "POST"' in body
+    assert re.search(r'fetch\(\s*["\']/api/login["\']', body)
+    assert re.search(r'method\s*:\s*["\']POST["\']', body)
