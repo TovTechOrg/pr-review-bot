@@ -288,12 +288,6 @@ def test_provider_history_survives_the_migration():
     assert "gemini-2.5-flash" in text, "the Vertex catalog finding"
 
 
-def test_rehearsal_history_keeps_the_measured_timings():
-    text = (_BG / "rehearsals.md").read_text(encoding="utf-8")
-    assert "PR #3" in text or "#3" in text
-    assert "8s" in text or "8 s" in text
-
-
 def test_background_is_not_in_the_setup_reading_path():
     setup_pages = list((_ROOT / "guide" / "setup").rglob("*.md"))
     assert setup_pages

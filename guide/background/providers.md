@@ -183,12 +183,11 @@ specialists succeeded with real findings, comment posted and independently
 confirmed via `gh api`.
 
 **GitHub Models was then genuinely retired**, on 2026-07-30 — not a
-simulated failure. See [Live rehearsal history](rehearsals.md) (PR #5) for
-what that looked like against the deployed service: a redeploy onto
-`LLM_PROVIDER=github_models` made all three specialists fail visibly, then a
-redeploy back onto `groq` recovered, with the review ticket surviving both
-restarts intact. It is the reason `groq` — not `github_models` — is the
-provider actually left configured today.
+simulated failure. A redeploy onto `LLM_PROVIDER=github_models` made all
+three specialists fail visibly, then a redeploy back onto `groq` recovered,
+with the review ticket surviving both restarts intact. It is the reason
+`groq` — not `github_models` — is the provider actually left configured
+today.
 
 ## Current state
 

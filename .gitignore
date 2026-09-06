@@ -4,17 +4,12 @@ Thumbs.db
 
 # Secrets
 .env
-# Explicit per-subfolder form too (e.g. onboarding/.env) -- the bare
-# pattern above already matches at any depth per gitignore semantics,
-# this just makes it unambiguous for every service's own .env file.
-**/.env
 *.pem
 # GCP service-account key files (default name + any numbered local siblings)
 gcp-service-account-key*.json
 
 # Operational config (no secrets, but machine-specific)
 .env.config
-**/.env.config
 
 .venv/
 __pycache__/
@@ -25,18 +20,9 @@ __pycache__/
 # MkDocs build output (guide/ is the source; this is generated)
 site/
 
-# Local session state (machine-specific, not shared)
-memory.md
-auth-link.txt
-
 # Zoom-demo-only scaffolding (not part of the graded/documented feature set)
 fixtures/demo_bulk_bad_code/
 scripts/seed_bulk_demo_pr.py
-
-# Durable queue database
-queue.db
-queue.db-wal
-queue.db-shm
 
 # Local git worktrees (superpowers subagent-driven-development scratch)
 .worktrees/

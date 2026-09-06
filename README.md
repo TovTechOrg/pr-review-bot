@@ -146,9 +146,7 @@ every push.
 
 A handful of scripts under `scripts/manual_verify_*.py` make real calls
 against real accounts instead, each proving one specific integration (GitHub
-App auth, or one LLM provider's structured-output path) — see the guide's
-[Live rehearsal history](guide/background/rehearsals.md) for a real,
-repeated end-to-end run through the actual GitHub webhook path.
+App auth, or one LLM provider's structured-output path).
 
 ## Known limitations
 
