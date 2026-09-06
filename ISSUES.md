@@ -116,6 +116,30 @@ whose "Suggested CLAUDE.md change" explicitly says it wasn't made yet; and
   Mutation prevention (`rm`/`chmod`/etc. targeting `.env`) is handled
   separately, at the filesystem level (`chmod 400` + `chattr +i` on
   `.env`), applied manually by the user — not part of this fix.
+- **Update (2026-09-06, follow-up):** the fix above left one gap on record
+  as a Parked Issue — Claude Code's own structured `Grep`/`Glob` tools
+  don't go through a shell, so the redaction wrapper (which only rewrites
+  `Bash`/`PowerShell` commands) doesn't cover them; an unscoped `Grep`
+  over a directory containing `.env` looked like the same risk as the
+  `grep -rn` incident above. Investigated further and closed with **no
+  code change needed**: `Grep` is built on ripgrep and always respects
+  `.gitignore` with no caller-facing override anywhere in its input schema
+  (confirmed both from Claude Code's own docs and by extracting the real
+  tool schema from the installed CLI binary — no `CLAUDE_CODE_GREP_*`/
+  `CLAUDE_CODE_SEARCH_*` env var exists, unlike `Glob`'s
+  `CLAUDE_CODE_GLOB_NO_IGNORE`). `.env` is itself gitignored (`.gitignore`
+  line 6), so an unscoped recursive `Grep` already cannot reach its
+  content — the only way to make `Grep` touch `.env` is to name its exact
+  path directly, which `check_env_access.py`'s existing path-field check
+  already denies (same as `Read`/`Edit`/`Write`). `Glob` does *not*
+  respect `.gitignore` by default and does include hidden files, so it can
+  list `.env` as a matched path — but `Glob`'s result is filenames only,
+  never content (confirmed from its schema and output type), so the worst
+  case is confirming a file named `.env` exists at a given location, which
+  is not a secret and is no different from what `ls -la` already reveals
+  in an ordinary `Bash` call — never treated as an exposure anywhere in
+  this log. The Parked Issue entry for this has been removed; this note is
+  its resolution.
 
 ## Working-tree CRLF drift (2026-07-31, closed)
 - **When:** 2026-07-31, while staging a task commit during the escalating-cooldown implementation.
@@ -137,32 +161,6 @@ Recorded here so they aren't silently lost. Format:
 - **Why parked:** why it didn't get fixed in-session
 - **Follow-up:** what closing it would take
 ```
-
-### Claude Code's structured Grep/Glob tools aren't covered by the .env output-redaction wrapper
-- **Found during:** implementing the .env-protection hook hardening
-  (`docs/superpowers/specs/2026-09-06-env-hook-hardening-design.md`).
-- **What:** The redaction wrapper only rewrites `Bash`/`PowerShell` shell
-  commands (via `updatedInput`) — it has no equivalent for Claude Code's
-  own structured `Grep`/`Glob` tools, which don't execute a shell command
-  at all. `check_env_access.py`'s path-field check still denies a `Grep`/
-  `Glob` call whose `path` argument names `.env` exactly, but if either
-  tool were pointed at a *directory* that merely contains `.env` (the
-  structured-tool equivalent of the `grep -rn` incident this whole design
-  fixes for the Bash case), a matched line from the real `.env` could
-  still surface unredacted in the tool result.
-- **Why parked:** Out of scope for this fix — the spec and its
-  implementation plan were both scoped to the shell-tool text-scanning
-  problem specifically (the incident that motivated the work was a real
-  `Bash` `grep -rn`, not the structured `Grep` tool), and this exact gap
-  already existed, unaddressed, in the hook before this work started — not
-  a regression introduced by it.
-- **Follow-up:** Would need either (a) a `PreToolUse` check for `Grep`/
-  `Glob` that determines whether the given `path`/glob would recursively
-  include `.env` and denies if so (no rewrite mechanism exists for these
-  tools' own output the way `updatedInput` exists for `Bash`'s `command`),
-  or (b) confirming whether `updatedInput` can rewrite these tools' output
-  post-hoc the way it rewrites `Bash`'s command pre-execution — needs its
-  own design pass, not a quick add-on to this one.
 
 _Everything closed as of 2026-09-05 or earlier (Stage 3b's five items,
 2026-08-21's four items, and "Repo-wide `ruff check .` is already red on
