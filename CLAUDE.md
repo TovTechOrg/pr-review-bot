@@ -312,11 +312,16 @@ generalize from):
   client setup) — needs the same scrutiny as any other code. Matching the
   brief exactly does not mean the brief was right; a bug embedded in a plan's
   own provided snippet will sail through every task-scoped review that only
-  checks "does this match what was asked." Flag this class of code for extra
-  suspicion specifically at final/whole-branch review, and don't assume
-  a whole-branch review that already had per-task reviews pass is redundant —
-  it is often the first review that would even think to distrust the plan's
-  own code.
+  checks "does this match what was asked." **When a task's diff includes this
+  class of code, run the `code-review` skill against that diff immediately,
+  as part of finishing the task — not deferred to final/whole-branch
+  review.** Final review is still a backstop (don't assume a whole-branch
+  review is redundant just because per-task reviews already passed — it is
+  often the first review that would even think to distrust the plan's own
+  code), but it's a backstop, not the primary catch: the Vertex OAuth
+  `scopes=` bug and the `list_vertex_models` SSRF both sailed through
+  multiple per-task reviews before a final review caught them, which is
+  exactly the delay this per-task trigger exists to close.
 - **Documentation describing the outcome of a live-verification step must be
   written after that step actually runs, not drafted in advance assuming
   success.** If a plan's task text describes what a doc should say about a
