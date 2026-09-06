@@ -2,9 +2,11 @@ import asyncio
 import contextlib
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 import github_app
 from config import settings
@@ -112,6 +114,14 @@ app.include_router(webhook_router)
 app.include_router(auth_router)
 app.include_router(dashboard_router, dependencies=[Depends(require_session)])
 app.include_router(environment_router, dependencies=[Depends(require_session)])
+
+# Public (no session required) -- the login page itself, not just the
+# authenticated dashboard, uses the self-hosted display font.
+app.mount(
+    "/static/fonts",
+    StaticFiles(directory=Path(__file__).parent / "dashboard" / "static" / "fonts"),
+    name="dashboard-fonts",
+)
 
 
 @app.get("/healthz")

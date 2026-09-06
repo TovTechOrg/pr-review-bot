@@ -56,12 +56,17 @@ tailing logs or opening the Render console.
 - Backend is FastAPI + a static HTML/CSS/JS page pair
   (`dashboard/static/dashboard.html`, `login.html`), served at import time
   from `dashboard/static/` — no JS framework/build step currently in use.
-  Open question for future visual work: whether to keep this plain-HTML
-  approach or introduce a framework/build step (undecided; not to be
-  assumed either way without asking).
 - Cost is a real constraint on the whole project (target ≈ $8–10/mo prod,
   $0 demo on free tiers — see `cost.md`); this shapes hosting/build choices
   but is not itself a dashboard UI concern.
+
+## Stack
+
+Plain HTML/CSS/JS, no framework or build step — confirmed 2026-09-06 during
+the dashboard redesign's shape interview, resolving the open question noted
+in an earlier revision of this file. Reason: matches the "small and
+dependency-light" product principle below; a solo-operator ops tool doesn't
+warrant a framework runtime or build pipeline to maintain.
 
 ## Brand Commitments
 
@@ -86,6 +91,10 @@ against.
 - Secrets are structurally different from other data on this surface — any
   redesign must preserve the masked-by-default/reveal-toggle pattern for
   the environment panel, not just visually restyle it.
+- Mobile is a first-class target, not an afterthought — confirmed
+  2026-09-06 during the dashboard redesign's shape interview. The operator
+  may check the dashboard from a phone; layout and interaction must hold up
+  there with real quality, not just avoid breaking.
 - Small and dependency-light: this is ops tooling for one process, not a
   product to scale a design system for — avoid over-engineering the surface
   beyond what a solo operator's workflow needs.

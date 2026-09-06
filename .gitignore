@@ -28,3 +28,9 @@ scripts/seed_bulk_demo_pr.py
 .worktrees/
 
 vertex-ai-private-key.json
+
+# Impeccable finish-review screenshot evidence -- transient, regenerated per
+# review pass; stale screenshots in git would be actively misleading rather
+# than useful history. Config/surface-brief/design-system state under
+# .impeccable/ is still tracked.
+.impeccable/review/

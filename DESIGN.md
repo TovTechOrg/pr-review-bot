@@ -1,73 +1,71 @@
 ---
 name: Autonomous Code Review Engine — Dashboard
-description: A flat, restrained instrument panel for a solo operator watching one bot's health.
+description: A one-bit windowed desktop for a solo operator to read pipeline health and edit config at a glance.
 colors:
-  bg: "#f5f6f8"
-  surface: "#ffffff"
-  surface-2: "#eef0f3"
-  text: "#1f2933"
-  text-muted: "#5c6773"
-  border: "#dde2e7"
-  accent: "#3a6ea5"
-  ok: "#2f7d4f"
-  fail: "#b3454b"
-  sev-critical: "#b3454b"
-  sev-high: "#c07a2e"
-  sev-medium: "#8a8330"
+  ink: "#16150f"
+  paper: "#f1efe6"
+  surface: "#faf9f2"
+  line: "#16150f"
+  muted: "#5c5a4d"
+  signal: "#a3550a"
 typography:
+  display:
+    fontFamily: "Press Start 2P, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif"
+    fontSize: "0.6rem"
+    fontWeight: 400
+    lineHeight: 1.6
+    letterSpacing: "0.03em"
   body:
-    fontFamily: "-apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
-    fontSize: "1rem"
+    fontFamily: "-apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif"
+    fontSize: "0.95rem"
     fontWeight: 400
     lineHeight: 1.4
-  title:
-    fontFamily: "-apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
-    fontSize: "1.3rem"
-    fontWeight: 400
-    lineHeight: 1.3
   label:
-    fontFamily: "-apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
-    fontSize: "0.8rem"
+    fontFamily: "-apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif"
+    fontSize: "0.85rem"
     fontWeight: 400
-    lineHeight: 1.3
 rounded:
-  sm: "0.3rem"
-  md: "0.4rem"
-  lg: "0.6rem"
-  xl: "0.75rem"
-  pill: "999px"
+  none: "0px"
 spacing:
   xs: "0.3rem"
   sm: "0.5rem"
-  md: "0.75rem"
-  lg: "1rem"
+  md: "0.85rem"
+  lg: "1.25rem"
   xl: "1.5rem"
 components:
+  window:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.none}"
+    padding: "0.85rem 1rem"
+  window-title:
+    backgroundColor: "{colors.ink}"
+    textColor: "{colors.paper}"
+    typography: "{typography.display}"
+    rounded: "{rounded.none}"
+    padding: "0.45rem 0.65rem"
   button-control:
     backgroundColor: "{colors.surface}"
-    textColor: "{colors.text}"
-    rounded: "{rounded.pill}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.none}"
     padding: "0.4rem 0.9rem"
   button-control-hover:
     backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.none}"
+  button-control-pressed:
+    backgroundColor: "{colors.ink}"
+    textColor: "{colors.paper}"
+    rounded: "{rounded.none}"
   button-submit:
-    backgroundColor: "{colors.accent}"
-    textColor: "#ffffff"
-    rounded: "{rounded.md}"
+    backgroundColor: "{colors.ink}"
+    textColor: "{colors.paper}"
+    rounded: "{rounded.none}"
     padding: "0.6rem"
-    width: "100%"
-  card-tile:
+  input:
     backgroundColor: "{colors.surface}"
-    rounded: "{rounded.lg}"
-    padding: "0.85rem 1rem"
-  card-popup:
-    backgroundColor: "{colors.surface}"
-    rounded: "{rounded.xl}"
-    padding: "1rem 1.25rem"
-  input-field:
-    backgroundColor: "{colors.surface}"
-    textColor: "{colors.text}"
-    rounded: "{rounded.md}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.none}"
     padding: "0.4rem 0.6rem"
 ---
 
@@ -75,238 +73,122 @@ components:
 
 ## Overview
 
-**Creative North Star: "The Instrument Panel"**
+**Creative North Star: "The One-Bit Windowed Console"**
 
-This is a gauge cluster, not a storefront. One person built and runs this
-bot; this surface exists so that person can glance at it, know whether it's
-healthy, and make one small adjustment, then look away. Every visual
-decision optimizes for that: flat surfaces that don't compete for
-attention, one signal color reserved for "this is active or actionable,"
-and enough restraint that a table full of environment variables or a
-findings feed doesn't turn into visual noise.
+This is a small desktop, not a scrolling report. Every persistent surface — Queue, each specialist, Activity.log, each Environment section — is an independent titled window with a solid inverted title bar, joined to the desktop's dithered ground rather than floating on a plain page. The palette is near-monochrome ink-on-paper with exactly one accent reserved for alert/active state; the type voice pairs a self-hosted one-bit pixel display face on titles only against a plain system sans everywhere else a solo operator actually has to read fast. Nothing here is decorative: the dither is a real background texture (not an unused token), the dashed "traceable thread" connector lights up only when a real pipeline relationship is active, and the single amber signal never appears except to mean "alert" or "running."
 
-The system is calm, precise, and unadorned. It explicitly rejects the
-SaaS-analytics-dashboard look — no gradients, no card shadows, no
-decorative iconography, no marketing-site polish. Depth, when it appears at
-all, marks something transient (a popup, a dialog) rather than dressing up
-permanent chrome. The palette is almost entirely neutral gray-on-white (or
-the dark-mode inverse); color is spent only where it means something:
-status, severity, or "you can act here."
+The system was built to replace a flat neutral-gray/blue-accent "Instrument Panel" world (the previous DESIGN.md) — that world is gone; nothing here should be read as a refinement of it. A hard offset drop-shadow was tried for `dialog` elevation during the build and explicitly rejected at finish review: it broke the one-bit material's own commitment to no soft/blurred or ambient depth, so `box-shadow: none` was restored everywhere, including on dialogs and popups.
 
 **Key Characteristics:**
-- Flat-at-rest, borders instead of shadows on every persistent surface
-- One accent color, spent sparingly and only on actionable/active elements
-- Full light / dark / system theming via CSS custom properties, no
-  light-only or dark-only assumptions baked into any component
-- RTL-ready throughout (logical properties: `inset-inline-end`,
-  `padding-inline-end`, not `left`/`right`)
-- Severity and status communicated through color + text, never color alone
+- Independent window chrome (inverted title bar + hairline border) replaces cards everywhere.
+- Exactly one accent color (amber/signal), used only for alert or active state, never decoratively.
+- Ordered dither stands in for a secondary/recessed surface, used as real background texture (desktop ground, chip/grid fills), not a swatch that goes unused.
+- A self-hosted pixel display face is reserved for titles/headings only; body and controls stay in the system sans for scanability.
+- Fully flat: no shadow anywhere, hairline borders carry all separation and depth.
+- Plain `key : value` rows replace stat-tile grids as the default way to present a fact.
 
 ## Colors
 
-The palette is almost entirely neutral; the one accent hue is the whole
-color vocabulary's point of emphasis.
+Near-monochrome ink-on-paper, inverted wholesale for dark mode (not just re-tinted), plus exactly one warm accent.
 
 ### Primary
-- **Steady Signal Blue** (`#3a6ea5` light / `#7ba7d9` dark): The system's
-  only "this is active, live, or actionable" signal. Used on the active nav
-  tab, links, focus-visible outlines, and the login page's one submit
-  button. Never used decoratively — every appearance of this color is load-
-  bearing information.
+- **Signal Amber** (`#a3550a`, dark-mode `#d98a34`): the system's only accent. Used exclusively for alert/active state — a `.win-live` dot gone live, the `.thread` connector while a review is running, a failed specialist's status text, the critical-severity finding, focus outlines. Never used for a default/idle/decorative purpose.
 
 ### Neutral
-- **Panel Gray** (`#f5f6f8` light / `#12161b` dark, token `bg`): Page
-  background.
-- **Card White** (`#ffffff` light / `#1a1f26` dark, token `surface`): Every
-  card, tile, input, popup, and dialog background.
-- **Recessed Gray** (`#eef0f3` light / `#22282f` dark, token `surface-2`):
-  A second, slightly-sunken surface for content nested inside a card (chip
-  backgrounds, the provider/model config sub-panel, hover state on icon
-  buttons).
-- **Ink** (`#1f2933` light / `#e6e9ec` dark, token `text`): Primary text.
-- **Quiet Ink** (`#5c6773` light / `#9aa5b1` dark, token `text-muted`):
-  Labels, hints, secondary metadata (timestamps, field labels).
-- **Hairline** (`#dde2e7` light / `#2b323a` dark, token `border`): The only
-  separator device in the system — every card, table, and input is defined
-  by a 1px hairline border, never a shadow.
+- **Ink** (`#16150f`, dark-mode `#ece9dd`): primary text color and the fill of every inverted title bar; also every hairline border (`--line`).
+- **Paper** (`#f1efe6`, dark-mode `#16150f`): the page background/desktop ground, and the text color sitting on an inverted (ink-filled) title bar.
+- **Surface** (`#faf9f2`, dark-mode `#201f18`): the body fill of every window, popup, dialog, input, and env-section — the "page" a window sits on top of.
+- **Muted** (`#5c5a4d`, dark-mode `#a6a293`): secondary/label text (`.kv-label`, field hints, table labels) and the idle-state dashed thread connector.
+- **Dither Dot** (`rgba(22,21,15,0.55)`, dark-mode `rgba(236,233,221,0.4)`) / **Dither Dot Soft** (`rgba(22,21,15,0.22)`, dark-mode `rgba(236,233,221,0.18)`): the two densities of the ordered-dither radial-gradient texture — full-strength behind the whole page (7px grid), soft behind recessed fills like `.tile-chip` and `.provider-model-grid` (6px grid).
 
 ### Named Rules
-**The One Signal Rule.** Steady Signal Blue appears only where it means
-"active" or "actionable" — the current nav tab, a link, a focus ring, the
-one primary submit action. It never decorates a heading, an icon at rest,
-or a background. If a screen needs a second accent to feel finished, that's
-a sign the layout needs restructuring, not a second color.
+**The One Warm Signal Rule.** The amber accent appears only in response to a real state change (something is running, something failed, something needs attention). It is never applied to a default, idle, or purely decorative element — an idle dot, an idle thread, and an OK status all render in ink or muted, never amber.
 
-**The Status-Is-Never-Color-Alone Rule.** `ok`/`fail`/severity colors always
-pair with text (a status word, a severity label) — never a bare colored dot
-or bar as the only signal, since color alone fails both colorblind users and
-theme edge cases.
+**The Full Inversion Rule.** Dark mode is not a re-tint; `--ink` and `--paper` swap roles wholesale (and every other token derives from that swap), so window title bars, which are always "ink-filled, paper-text," read correctly as inverted chrome in both themes without special-casing.
 
 ## Typography
 
-**Body Font:** -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
-sans-serif (system stack; no webfont load, matching the "small and
-dependency-light" product principle)
+**Display Font:** "Press Start 2P" (self-hosted, `/static/fonts/press-start-2p-v16-latin-regular.woff2`, served from this app's own static mount — never a Google Fonts CDN link, so a network hiccup can't silently revert the display voice on a page whose job is "tell at a glance whether the bot is healthy"), falling back to the system sans stack.
+**Body Font:** the system sans stack (`-apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`) — no webfont.
 
-**Character:** A plain system-font stack, used with almost no hierarchy —
-this system doesn't build a typographic voice so much as get out of the
-way of the numbers and labels it's displaying.
+**Character:** a one-bit pixel typeface announces every window and section as console chrome, while the system sans keeps every value, label, and control instantly legible — the pairing exists so the operator never has to parse pixel-font body copy under time pressure.
 
 ### Hierarchy
-- **Title** (400 weight, 1.3rem, 1.3 line-height): The one `<h1>` per panel
-  ("Dashboard"). Not bold — weight is not how this system signals
-  importance, position and color are.
-- **Body** (400 weight, 1rem, 1.4 line-height): Default text size — stat
-  values, table cells, form inputs.
-- **Stat Value** (600 weight, 1.4rem): The one place real emphasis-by-
-  weight appears — a stat tile's number, meant to be readable at a glance.
-- **Label** (400 weight, 0.8rem–0.85rem, `text-muted` color): Stat labels,
-  field hints, field labels, timestamps — small and muted rather than
-  small-caps or letter-spaced.
+- **Display** (400 weight, 0.6rem–1rem, 1.6–1.7 line-height, uppercase, 0.03em tracking, `--pixel-font`): the page `h1`, every `.win-title`, every `.env-section h2`, and `h1.login-title` — nothing else. Deliberately tiny in pixels-per-em terms; the pixel face reads as chrome/label, not display-scale prose.
+- **Body** (400 weight, ~0.85–0.95rem, system sans): stat values, table cells, form inputs, review rows.
+- **Label** (400 weight, ~0.8–0.85rem, muted color, system sans): `.kv-label`, field hints/labels, table headers, timestamps.
 
 ### Named Rules
-**The Weight-Is-Rare Rule.** Font-weight above 400 is reserved for exactly
-two things: a stat tile's value, and a provider name in the config grid.
-Everywhere else, hierarchy comes from size, color, and position — not bold
-text.
+**The Titles-Only Pixel Rule.** The self-hosted pixel display face is applied only to `h1`, `.win-title`, `.env-section h2`, and `h1.login-title` — never to body text, buttons, nav labels, or table content. This is a deliberate Operate-mode scanability choice, not an oversight: a page whose entire job is "read state fast" cannot afford pixel-font body copy.
+
+**The Graceful Hebrew Degradation Rule.** Press Start 2P has no Hebrew glyphs. Its font stack's fallback chain lets Hebrew text degrade per-character to the system sans automatically under `dir="rtl"` — this is intentional and correct, not a missing glyph to chase down or "fix" with a second display face.
 
 ## Layout
 
-Single-column main content, `max-width: 1100px` (login: `360px`), centered.
-No sidebar: the two-panel navigation (Status / Environment) is a horizontal
-row of pill tabs directly under the page's one `<h1>`, not a persistent side
-rail — this is a page with two views, not an app with many sections.
-
-A fixed top-right utility bar (`header.topbar`) holds only account-level
-controls (theme toggle, language toggle, logout) — separated from content
-navigation by a hairline border, never mixed into the same row as the
-panel tabs.
-
-Density is comfortable, not compact: stat tiles run 4-up on desktop,
-collapsing to 2-up at 900px and 1-up at 500px. Below 640px, the environment
-variables table and review rows abandon their tabular/row layout entirely
-and become stacked, self-labeled cards — a deliberate structural change
-below that width, not just a font/padding squeeze.
+Single-column `main` capped at `max-width: 1100px` (`900px` for the Environment panel's sections), centered, with windows given a small asymmetric outer margin (`0 0.25rem 1.5rem 0`) so borders don't visually collide edge-to-edge. The Status panel is a vertical stack of windows: Queue window → traceable thread connector → a `.specialists-row` of three equal-flex specialist windows (`flex: 1 1 220px`) → Activity.log window. Below `640px`, the specialist row and every table collapse to a single-column stacked-card layout (`#renderVarsTable` drops its fixed columns and repeats each row as a bordered, self-labeled block; `.review-row` stacks its fields vertically with inline labels). `#configForm` is a two-column `label`/`field` grid (`max-content 1fr`) above `640px`, collapsing to one column (label stacked above its field) below it, so a long label like "Usage cap reset (UTC)" can't squeeze every input into a sliver. Spacing is a loose rem-based rhythm (0.3rem / 0.5rem / 0.85rem / 1.25rem / 1.5rem) rather than a strict numeric token scale.
 
 ## Elevation & Depth
 
-Flat-by-default. Every persistent surface — stat tiles, review cards, the
-environment-variables table, the config form — is separated from its
-background by a 1px hairline border only, never a shadow. Depth is reserved
-as a semantic signal for **transience**: it appears only on the theme/lang
-popups and the two `<dialog>` elements, exactly the surfaces that will
-disappear on the next click. A shadow appearing anywhere else would be a
-mistake, not a stylistic variant.
-
-### Shadow Vocabulary
-- **Overlay** (`box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2–0.25)`): The one
-  shadow value in the system, used identically on popups and dialogs.
-- **Tooltip** (`box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2)`): A lighter
-  variant for the small info-icon tooltip — still transient, slightly less
-  prominent than a modal-level overlay.
+Flat by commitment: **no `box-shadow` anywhere in the built system** — not on windows, popups, dialogs, or tooltips. This was a build-time decision under active pressure: a hard offset shadow was tried for dialog elevation and explicitly rejected at finish review as an unearned, craft-floor-refused device that contradicted the one-bit material's own "no shadow" world (a hard-edged shadow is still a lighting metaphor this flat material doesn't use). Depth is conveyed entirely through hairline borders (`1px solid var(--line)`) and solid fill contrast (an inverted title bar reads as "in front of" its body without needing a shadow to say so).
 
 ### Named Rules
-**The Shadow-Means-Temporary Rule.** If it has a shadow, it's going to
-close. If it's meant to stay on screen, it gets a border instead.
+**The No-Shadow, No-Exceptions Rule.** Every elevated surface — window, popup, dialog, tooltip, modal backdrop — uses `box-shadow: none` and a hairline border instead. A shadow value written into this codebase (there are two commented-out mentions describing a shadow that was tried and reverted) is a record of a rejected direction, not a live token; don't reintroduce one for a new surface.
 
 ## Shapes
 
-Two form languages, split by permanence: pill shape (`border-radius: 999px`)
-for every clickable control that lives in the topbar or nav row (`.control`,
-`.nav-item`) — signaling "this is a button you press," and a soft
-rectangular radius scale for everything that holds content:
-`0.3rem`–`0.4rem` for small inline elements (chips, inputs, icon buttons),
-`0.5rem`–`0.6rem` for cards and tiles, `0.75rem` for popups and dialogs —
-the radius grows slightly with the surface's size. No sharp corners
-anywhere; no corner exceeds `0.75rem` (nothing reaches for a fully
-rounded "soft app" look either).
+Square everywhere: `border-radius: 0` is set explicitly on every bordered element (windows, inputs, buttons, popups, dialogs, table row-cards) — there is no rounded-corner token in this system at all. Borders are uniform 1px hairlines in `--line`, solid by default; `.kv-row` and `.finding` use a 1px **dashed** border-bottom instead, reserving the dash specifically for "a list of discrete facts" separators and for the traceable-thread connector (`2px dashed var(--muted)`, turning solid-colored amber when live) — dashing is never just decorative variation on a solid rule.
 
 ## Components
 
 ### Buttons
-- **Control** (pill, `border-radius: 999px`): The default button —
-  topbar icon buttons, panel-nav tabs, table row actions ("reveal",
-  "delete", "retry"). Flat, `surface` background, `border` outline; on
-  `:hover` only the border shifts to `accent` — no background change, no
-  lift, no shadow. The active nav tab is the one variant that also colors
-  its border and text with `accent`.
-- **Submit** (rounded `0.4rem`, full-width): The single filled-accent
-  button in the system, used only for the login form's submit action —
-  intentionally the one place this system uses a solid accent fill,
-  because it's the one screen where there's exactly one thing to do.
-- **Hover / Focus:** Every interactive control shares one focus treatment:
-  `outline: 2px solid var(--accent)` with `1px` offset — never a glow,
-  never a background-color focus state.
+- **Shape:** square, no radius (`border-radius: 0`), 1px hairline border.
+- **Control** (`.control`, `.nav-item`): surface-filled, ink text, hairline border; hover shifts the border to `--line` (not the accent) and, for `.control` specifically inside the dashboard shell, also swaps background to `--paper` — a "pressing inverts" idiom rather than a colored hover ring.
+- **Active/pressed nav item** (`.nav-item.active`): fully inverted — ink background, paper text, ink border — the same inversion idiom as a window's own title bar.
+- **Submit** (`.submit-btn`, login only): fully inverted at rest (ink background, paper text) since it's the one filled control on that page; hover shifts both background and border to `--muted`. It is deliberately never amber — there is nothing to alert on on the login page.
+- **Focus:** every control gets `outline: 2px solid var(--accent)` with `1px` offset — the one place amber appears on a non-alert, non-active element, since focus-visible is itself a real state needing the system's one signal color.
+- **Disabled:** `opacity: 0.5`, cursor `not-allowed`.
 
-### Chips (tile-chip)
-- **Style:** `surface-2` background, `0.3rem` radius, small (`0.8rem`) text,
-  no border — the one component that uses fill instead of outline, because
-  it lives nested inside an already-bordered stat tile and a second border
-  would be redundant.
+### Windows (signature component)
+The system's core primitive, replacing cards everywhere. `.win` is a surface-filled, hairline-bordered box with no radius and no shadow. `.win-title` is its always-present inverted title bar (ink fill, paper text, pixel display font, uppercase) holding a label and, where relevant, a `.win-live` state dot (paper-colored and dimmed at rest, `opacity: 0.5`; snaps to full-opacity signal-amber with a brief scale-pulse animation when the state it tracks goes live). `.env-section` is the same pattern applied to a plain content section: its `h2` bleeds edge-to-edge as an inverted title bar identical in typography to `.win-title`. `.spec-win` is a `.win` sized to sit in a flex row of three (`.specialists-row`), one per LLM specialist.
+
+### The Traceable Thread (signature component)
+`.thread` is a 2px dashed vertical connector (`border-inline-start`) that visually joins the Queue window directly to the specialists row beneath it, using negative margin to consume the exact gap between the two windows' borders rather than floating short of either. It renders in muted gray at rest and switches to solid signal-amber (`.thread.is-live`) only while `queue.by_status.running` is actually true — a real signal read off live data, not a decorative flourish. This is the build's one memorable, load-bearing motion moment: a 0.6s scale-pulse keyframe on the accompanying `.win-live` dot the instant it goes live.
+
+### Key:Value Rows
+`.kv-row` is a flexed, space-between row (muted `.kv-label` at the start, bold `.kv-value` at the end) with a dashed bottom border, the last row in a group losing its border. This is the system's plain-fact primitive and it explicitly replaced a hero-metric, big-number-on-a-card stat-tile grid earlier in this build (see Do's and Don'ts) — every stat, every specialist's status, every table-row's mobile-collapsed fallback reduces to `.kv-row`, never to a standalone number-in-a-box.
+
+### Chips
+`.tile-chip` / `.tile-chip-list`: a hairline-bordered, soft-dithered-fill inline tag for queue-status counts and provider-backoff entries — no radius, small padding, `white-space: nowrap`.
 
 ### Cards / Containers
-- **Corner Style:** `0.6rem` (stat tiles, review cards, the environment
-  section panel).
-- **Background:** `surface`.
-- **Shadow Strategy:** None — see Elevation & Depth. Separation is the
-  `border` hairline only.
-- **Border:** `1px solid var(--border)` on every card, always.
-- **Internal Padding:** `0.85rem 1rem` for tiles; `1rem 1.25rem 1.25rem`
-  for the larger environment section panel.
+- **Corner style:** none (0 radius) throughout.
+- **Background:** `--surface` for the window/section body; the dashboard's `.review-card` (an expandable review row + its findings) uses the same surface/hairline pattern as a window but without title-bar chrome, since it's a repeating list item rather than a persistent panel.
+- **Shadow strategy:** none — see Elevation & Depth.
+- **Border:** 1px hairline throughout; `.review-findings` adds a 1px top hairline to separate the summary row from its expanded detail.
 
 ### Inputs / Fields
-- **Style:** `surface` background, `1px solid var(--border)`, `0.4rem`
-  radius — visually identical to a button.control at rest, distinguished
-  only by cursor and content.
-- **Focus:** Same 2px accent outline as every other interactive element —
-  inputs never get a special focus treatment of their own.
-- **Error:** `fail`-colored helper text below the field (`.field-error`),
-  never a red border on the input itself.
-- **Readonly:** `opacity: 0.7` — the one place this system uses opacity
-  rather than a color/border change to communicate state.
+- **Style:** surface fill, ink text, 1px hairline border, 0 radius, monospace for raw env values.
+- **Focus:** 2px solid amber outline, 1px offset — the same focus treatment as buttons.
+- **Disabled/readonly:** `opacity: 0.7`–`0.5`.
+- **Password reveal:** an inline icon-button sitting inside the field (`.password-toggle`), positioned with logical properties (`inset-inline-end`) so it sits on the correct side automatically under Hebrew RTL without special-casing.
 
 ### Navigation
-- **Panel tabs** (`.nav-item`): Pill buttons in a horizontal row directly
-  under the page title, each with a small inline SVG icon
-  (`stroke="currentColor"`, ~1.05rem) plus a label. The active tab is the
-  only one carrying `accent` color/border; inactive tabs are visually
-  identical to any other `.control` button.
-- **Topbar:** Right-aligned row, separated from the page content by a
-  hairline border, holding only theme/language/logout — never content
-  navigation.
-
-### Popups & Dialogs (signature component)
-Two transient-content patterns, both using the system's one shadow value:
-a positioned `.popup` (theme/language pickers, opened from a topbar button,
-closed by a transparent full-screen backdrop) and a native `<dialog>`
-(used elsewhere for confirmations). Both share the same visual shape
-(`surface` background, `border`, `0.75rem` radius, overlay shadow) — the
-`.popup` exists because a native `<dialog>` can't be positioned relative to
-its trigger button the way these menus need to be.
+`.side-nav` is a row of `.control.nav-item` buttons (Status / Environment), each carrying an authored stroke-SVG icon (viewBox `0 0 24 24`, `stroke="currentColor"`, `stroke-width="2"`, round linecaps/joins) ahead of its label. The active panel's nav item is fully inverted (see Buttons above). The same icon convention drives the topbar's theme/language toggle buttons (sun/moon/monitor/globe) and the Environment tab's info-icon tooltips — one authored SVG vocabulary system-wide, no exceptions.
 
 ## Do's and Don'ts
 
 ### Do:
-- **Do** spend Steady Signal Blue only on the active/actionable element —
-  never on a background, a heading, or a resting icon (The One Signal Rule).
-- **Do** use a border, never a shadow, to separate any surface meant to
-  stay on screen (The Shadow-Means-Temporary Rule).
-- **Do** pair every status/severity color with a text label.
-- **Do** keep every new component themeable through the existing CSS custom
-  properties (`--bg`, `--surface`, `--text`, etc.) so light/dark/system
-  theming stays automatic — never hardcode a hex value in a new rule.
-- **Do** use logical properties (`inset-inline-end`, `padding-inline-start`)
-  for anything positional, so RTL (Hebrew) keeps working without special-
-  casing.
+- **Do** give every persistent panel real window chrome (`.win`/`.win-title` or `.env-section`/`h2`) — an inverted title bar and a hairline border — never a plain card.
+- **Do** reserve the amber signal color exclusively for alert/active state (a live dot, a running thread, a failed status, a critical finding, a focus ring). If a new element needs color and it isn't alerting or active, use ink or muted, never amber.
+- **Do** apply the self-hosted pixel display face only to `h1`/`.win-title`/`.env-section h2`/`h1.login-title`. Every other text — buttons, nav, body, table cells — stays in the system sans.
+- **Do** keep every corner square (`border-radius: 0`) and every shadow absent (`box-shadow: none`) on every new component; hairline borders are this system's only separation device.
+- **Do** author new icons as inline SVG matching the existing stroke convention (`viewBox 0 0 24 24`, `stroke="currentColor"`, `stroke-width="2"`, round caps/joins) — never an icon font or a raster image.
+- **Do** use `.kv-row` (plain label/value pairs) as the default way to present any fact or stat, including on new panels.
+- **Do** use logical CSS properties (`inset-inline-end`, `border-inline-start`, `padding-inline-end`) for anything positioned relative to text direction, so it flips correctly under Hebrew RTL without a separate RTL stylesheet.
 
 ### Don't:
-- **Don't** add a card shadow, gradient, or decorative icon anywhere — this
-  system's whole identity is what it leaves out.
-- **Don't** introduce a second accent color. If two things need to look
-  distinct and important at once, that's a layout problem, not a palette
-  gap.
-- **Don't** give inputs a special focus treatment different from buttons —
-  one focus ring style, applied uniformly, is a deliberate invariant.
-- **Don't** build a persistent sidebar. Two views live in a pill-tab row
-  under the title; adding more views means extending that row, not
-  introducing a new navigation paradigm.
+- **Don't** use a hero-metric/stat-tile-grid pattern (a big number alone in its own bordered box) for stats or summaries — this build replaced that exact pattern with `.kv-row` specifically because nested/stacked cards for individual numbers read as unearned decoration on this surface; treat the stat-tile grid as a retired anti-pattern, not an available alternative to `.kv-row`.
+- **Don't** add a box-shadow to any element, including a "just this once" dialog/popup elevation need — a hard offset shadow was tried for exactly that during this build's finish review and rejected as contradicting the one-bit material's own no-shadow commitment. This is a hard invariant of this world, not a case-by-case judgment call.
+- **Don't** use emoji as icons anywhere in this system — every icon is an authored inline SVG in the stroke convention described above.
+- **Don't** load the display font from a third-party CDN (e.g. Google Fonts) — it is self-hosted from this app's own `/static/fonts` mount specifically so an unreachable third-party request can't silently revert the display voice on a health-status page.
+- **Don't** invent a persistent sidebar navigation for today's two-panel scope. A sidebar is a confirmed acceptable future scaling path once more panels exist, but the current build's pill-tab `.side-nav` row is the deliberate choice for two panels — don't promote the future option into a present rule.

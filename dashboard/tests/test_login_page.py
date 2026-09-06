@@ -44,3 +44,32 @@ async def test_login_page_posts_json_to_api_login():
     body = (await client.get("/login")).text
     assert re.search(r'fetch\(\s*["\']/api/login["\']', body)
     assert re.search(r'method\s*:\s*["\']POST["\']', body)
+
+
+async def test_login_page_password_toggle_uses_the_hidden_attribute_not_the_idl_property():
+    """Real bug, caught while wiring the crossed-eye icon: setting the
+    `.hidden` IDL property on an <svg> doesn't reliably reflect to the
+    `hidden` *attribute* in every browser (unlike HTMLElement), which
+    silently no-ops the CSS `svg[hidden] { display: none }` rule -- both eye
+    icons stack on top of each other and the icon never visually swaps,
+    regardless of which state maps to which icon. toggleAttribute operates
+    on the actual attribute and must not regress back to `.hidden = ...`."""
+    client = await _client()
+    body = (await client.get("/login")).text
+    assert '.hidden =' not in body
+    assert 'getElementById("passwordEyeOpen").toggleAttribute("hidden", visible)' in body
+    assert 'getElementById("passwordEyeClosed").toggleAttribute("hidden", !visible)' in body
+
+
+async def test_login_page_self_hosts_its_display_font_and_has_no_emoji_icons():
+    """Same contract as the dashboard page: the pixel display face must be
+    self-hosted (never a Google Fonts CDN link an outage could silently
+    revert), and the theme/language toggle must use authored SVG icons, not
+    emoji."""
+    client = await _client()
+    body = (await client.get("/login")).text
+    assert "/static/fonts/press-start-2p" in body
+    assert "fonts.googleapis.com" not in body
+    assert "fonts.gstatic.com" not in body
+    for emoji in ("🖥️", "☀️", "🌙", "🇺🇸", "🇮🇱"):
+        assert emoji not in body

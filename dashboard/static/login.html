@@ -5,45 +5,66 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PR Review Engine — Login</title>
 <style>
+  /* Self-hosted one-bit/pixel display face -- see dashboard.html for the
+     full rationale (served from this app's own /static/fonts mount, not a
+     third-party CDN; Hebrew falls back per-character to the system sans
+     automatically). */
+  @font-face {
+    font-family: "Press Start 2P";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url(/static/fonts/press-start-2p-v16-latin-regular.woff2) format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122;
+  }
+  /* One-Bit Windowed Console -- same tokens as dashboard.html. See
+     .impeccable/surfaces/dashboard.md for the direction contract. */
   :root {
-    --bg: #f5f6f8;
-    --surface: #ffffff;
-    --surface-2: #eef0f3;
-    --text: #1f2933;
-    --text-muted: #5c6773;
-    --border: #dde2e7;
-    --accent: #3a6ea5;
-    --ok: #2f7d4f;
-    --fail: #b3454b;
+    --ink: #16150f;
+    --paper: #f1efe6;
+    --surface: #faf9f2;
+    --line: #16150f;
+    --muted: #5c5a4d;
+    --signal: #a3550a;
+    --dither-dot: rgba(22, 21, 15, 0.55);
+    --pixel-font: "Press Start 2P", -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #12161b;
-      --surface: #1a1f26;
-      --surface-2: #22282f;
-      --text: #e6e9ec;
-      --text-muted: #9aa5b1;
-      --border: #2b323a;
-      --accent: #7ba7d9;
-      --ok: #5fbf87;
-      --fail: #e08086;
+      --ink: #ece9dd;
+      --paper: #16150f;
+      --surface: #201f18;
+      --line: #ece9dd;
+      --muted: #a6a293;
+      --signal: #d98a34;
+      --dither-dot: rgba(236, 233, 221, 0.2);
     }
   }
   :root[data-theme="dark"] {
-    --bg: #12161b;
-    --surface: #1a1f26;
-    --surface-2: #22282f;
-    --text: #e6e9ec;
-    --text-muted: #9aa5b1;
-    --border: #2b323a;
-    --accent: #7ba7d9;
-    --ok: #5fbf87;
-    --fail: #e08086;
+    --ink: #ece9dd;
+    --paper: #16150f;
+    --surface: #201f18;
+    --line: #ece9dd;
+    --muted: #a6a293;
+    --signal: #d98a34;
+    --dither-dot: rgba(236, 233, 221, 0.2);
+  }
+  :root {
+    --bg: var(--paper);
+    --surface-2: var(--paper);
+    --text: var(--ink);
+    --text-muted: var(--muted);
+    --border: var(--line);
+    --accent: var(--signal);
+    --ok: var(--ink);
+    --fail: var(--signal);
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; }
   body {
     background: var(--bg);
+    background-image: radial-gradient(var(--dither-dot) 1px, transparent 1px);
+    background-size: 11px 11px;
     color: var(--text);
     font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
@@ -62,12 +83,13 @@
     background: var(--surface);
     color: var(--text);
     border: 1px solid var(--border);
-    border-radius: 999px;
+    border-radius: 0;
     padding: 0.4rem 0.9rem;
     font-size: 0.9rem;
     cursor: pointer;
   }
-  button.control:hover { border-color: var(--accent); }
+  button.control svg { width: 1.05rem; height: 1.05rem; display: block; flex: none; }
+  button.control:hover { border-color: var(--line); }
   .popup-backdrop {
     position: fixed;
     inset: 0;
@@ -80,11 +102,11 @@
     position: absolute;
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 0.75rem;
+    border-radius: 0;
     padding: 1rem 1.25rem;
     min-width: 220px;
     max-width: min(90vw, 320px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+    box-shadow: none;
   }
   .popup h2 { margin: 0 0 0.75rem; font-size: 1rem; }
   .radio-group { display: flex; flex-direction: column; gap: 0.5rem; }
@@ -100,11 +122,29 @@
   .login-card {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 0.75rem;
-    padding: 1.5rem;
+    border-radius: 0;
+    box-shadow: none;
   }
-  h1.login-title { font-size: 1.2rem; margin: 0 0 1.25rem; text-align: center; }
-  .field-group { margin-bottom: 1rem; }
+  /* The login card is a window: its title doubles as the title bar,
+     inverted ink-on-paper like every other window in this system. */
+  h1.login-title {
+    font-family: var(--pixel-font);
+    font-size: 0.6rem;
+    line-height: 1.6;
+    font-weight: 400;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    margin: 0 0 1.25rem;
+    padding: 0.55rem 1.5rem;
+    text-align: start;
+    background: var(--ink);
+    color: var(--paper);
+  }
+  .field-group { margin-bottom: 1rem; padding-inline: 1.5rem; }
+  .field-group:last-of-type { margin-bottom: 0; }
+  .remember-row { padding-inline: 1.5rem; }
+  form#loginForm { padding-bottom: 1.5rem; }
+  #loginError { padding-inline: 1.5rem; }
   label.field-label {
     display: block;
     font-size: 0.85rem;
@@ -115,7 +155,7 @@
     width: 100%;
     padding: 0.5rem 0.6rem;
     border: 1px solid var(--border);
-    border-radius: 0.4rem;
+    border-radius: 0;
     background: var(--surface);
     color: var(--text);
     font-size: 0.95rem;
@@ -139,7 +179,7 @@
     padding: 0;
     background: none;
     border: none;
-    border-radius: 4px;
+    border-radius: 0;
     color: var(--text-muted);
     cursor: pointer;
   }
@@ -153,18 +193,22 @@
     margin-bottom: 1rem;
     font-size: 0.9rem;
   }
+  /* Pressing inverts: the one filled control on this page is solid ink, not
+     the alert-reserved amber signal -- there is nothing to alert on here. */
   button.submit-btn {
-    width: 100%;
+    width: calc(100% - 3rem);
+    margin-inline: 1.5rem;
     padding: 0.6rem;
-    border: none;
-    border-radius: 0.4rem;
-    background: var(--accent);
-    color: #fff;
+    border: 1px solid var(--ink);
+    border-radius: 0;
+    background: var(--ink);
+    color: var(--paper);
     font-size: 0.95rem;
     cursor: pointer;
   }
-  #loginError { color: var(--fail); font-size: 0.85rem; margin-top: 0.75rem; text-align: center; }
-  #loginError:empty { display: none; }
+  button.submit-btn:hover { background: var(--muted); border-color: var(--muted); }
+  #loginError { color: var(--fail); font-size: 0.85rem; margin-top: 0.75rem; padding-bottom: 1.5rem; text-align: start; font-weight: 600; }
+  #loginError:empty { display: none; padding-bottom: 0; }
 </style>
 </head>
 <body>
@@ -188,8 +232,8 @@
     <div class="popup" role="dialog" aria-modal="true" aria-labelledby="langPopupTitle">
       <h2 id="langPopupTitle"></h2>
       <div class="radio-group">
-        <label><input type="radio" name="lang" value="en"> 🇺🇸 English</label>
-        <label><input type="radio" name="lang" value="he"> 🇮🇱 עברית</label>
+        <label><input type="radio" name="lang" value="en"> English</label>
+        <label><input type="radio" name="lang" value="he"> עברית</label>
       </div>
     </div>
   </div>
@@ -266,8 +310,13 @@
       },
     };
 
-    const THEME_ICON = { light: "☀️", dark: "🌙", system: "🖥️" };
-    const LANG_LABEL = { en: "🇺🇸 English", he: "🇮🇱 עברית" };
+    // Authored SVGs, not emoji -- see dashboard.html for the full rationale.
+    const ICON_SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="4.5" y1="4.5" x2="6.6" y2="6.6"/><line x1="17.4" y1="17.4" x2="19.5" y2="19.5"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/><line x1="4.5" y1="19.5" x2="6.6" y2="17.4"/><line x1="17.4" y1="6.6" x2="19.5" y2="4.5"/></svg>';
+    const ICON_MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>';
+    const ICON_MONITOR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="13"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>';
+    const ICON_GLOBE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>';
+    const THEME_ICON = { light: ICON_SUN, dark: ICON_MOON, system: ICON_MONITOR };
+    const LANG_LABEL = { en: "English", he: "עברית" };
 
     const KNOWN_LANGS = ["en", "he"];
     const KNOWN_THEMES = ["light", "dark", "system"];
@@ -293,8 +342,8 @@
       currentTheme = theme;
       localStorage.setItem("dashboard_theme", theme);
       document.documentElement.setAttribute("data-theme", theme === "system" ? "" : theme);
-      document.getElementById("themeToggleBtn").textContent =
-        `${THEME_ICON[theme]} ${t("theme_" + theme)}`;
+      document.getElementById("themeToggleBtn").innerHTML =
+        `${THEME_ICON[theme]}<span>${t("theme_" + theme)}</span>`;
       document.querySelector(`input[name="theme"][value="${theme}"]`).checked = true;
     }
 
@@ -303,7 +352,7 @@
       localStorage.setItem("dashboard_lang", lang);
       document.documentElement.setAttribute("lang", lang);
       document.documentElement.setAttribute("dir", lang === "he" ? "rtl" : "ltr");
-      document.getElementById("langToggleBtn").textContent = LANG_LABEL[lang];
+      document.getElementById("langToggleBtn").innerHTML = `${ICON_GLOBE}<span>${LANG_LABEL[lang]}</span>`;
       document.querySelectorAll("[data-i18n]").forEach((el) => {
         el.textContent = t(el.getAttribute("data-i18n"));
       });
@@ -326,9 +375,15 @@
       toggle.setAttribute("aria-label", label);
       toggle.setAttribute("title", label);
       toggle.setAttribute("aria-pressed", visible ? "true" : "false");
-      // Eye = "reveal it", crossed-out eye = "hide it again".
-      document.getElementById("passwordEyeOpen").hidden = visible;
-      document.getElementById("passwordEyeClosed").hidden = !visible;
+      // Icon describes the click action, not the current state: eye ("click
+      // to reveal") while hidden, crossed-out eye ("click to hide") once
+      // shown. Toggling the `hidden` *attribute* directly, not the `.hidden`
+      // IDL property -- some browsers don't reflect that property back onto
+      // SVGElement (unlike HTMLElement), which silently no-ops the CSS
+      // `svg[hidden] { display: none }` rule and leaves both icons stacked
+      // on top of each other with neither ever visually swapping.
+      document.getElementById("passwordEyeOpen").toggleAttribute("hidden", visible);
+      document.getElementById("passwordEyeClosed").toggleAttribute("hidden", !visible);
     }
 
     document.getElementById("passwordToggleBtn").addEventListener("click", () => {

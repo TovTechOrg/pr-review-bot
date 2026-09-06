@@ -171,3 +171,100 @@ async def test_dashboard_page_anchors_popups_to_their_button():
     assert "getBoundingClientRect" in body
     assert "openPopup(\"themePopupBackdrop\", event.currentTarget)" in body
     assert "openPopup(\"langPopupBackdrop\", event.currentTarget)" in body
+
+
+async def test_dashboard_page_has_one_window_per_specialist():
+    """Direction contract FIRST VIEWPORT (.impeccable/surfaces/dashboard.md):
+    Security/Performance/Code Quality each get their own titled window, not
+    fields inside one shared card -- a regression here silently collapses
+    the redesign's central composition back toward the retired stat-tile
+    grid without any test catching it."""
+    client = await _client()
+    resp = await client.get("/")
+    body = resp.text
+    assert "function renderSpecialists" in body
+    assert '["Security", "Performance", "Code Quality"]' in body
+    for name in ("Security", "Performance", "Code Quality"):
+        assert f'data-spec-body="{name}"' in body
+        assert f'data-spec-dot="{name}"' in body
+    # Called from the same refresh path as the other real-data renderers,
+    # not left dead/unreferenced.
+    assert "renderSpecialists(data.reviews)" in body
+
+
+async def test_dashboard_page_specialist_window_shows_empty_state_with_no_reviews():
+    """renderSpecialists must handle an empty reviews list without throwing
+    (reviews[0] is undefined) and render the same empty-state string the
+    Activity.log window already uses, rather than a blank or broken window
+    on a freshly-deployed instance with no recorded reviews yet."""
+    client = await _client()
+    resp = await client.get("/")
+    body = resp.text
+    assert "latest?.specialists?.find" in body
+    assert 't("empty_reviews")' in body
+
+
+async def test_dashboard_page_retired_the_stat_tile_hero_metric_grid():
+    """The old stats-grid/stat-tile pattern (craft-floor's banned
+    hero-metric template: big number, small label, nested in a card) was
+    deliberately replaced by plain kv-row/kv-label/kv-value facts -- pin
+    both the presence of the replacement and the absence of the retired
+    pattern, so neither regresses silently."""
+    client = await _client()
+    resp = await client.get("/")
+    body = resp.text
+    assert "kv-row" in body
+    assert "kv-label" in body
+    assert "kv-value" in body
+    assert "stats-grid" not in body
+    assert "stat-tile" not in body
+
+
+async def test_dashboard_page_live_signals_share_the_same_running_state():
+    """The Queue window's dot, the traceable-thread connector, and the
+    Activity.log window's dot must all reflect the same real
+    queue.by_status.running signal -- Activity.log's dot was hardcoded
+    permanently lit in an earlier pass (a real finish-review finding); pin
+    that all three are driven by one `running` value, not two wired and one
+    left static."""
+    client = await _client()
+    resp = await client.get("/")
+    body = resp.text
+    assert 'id="systemLiveDot"' in body
+    assert 'id="reviewThread"' in body
+    assert 'id="activityLiveDot"' in body
+    # None of the three may carry a static "is-live" class in the served
+    # markup -- all three must be toggled at runtime off real data.
+    assert 'id="systemLiveDot" class="win-live is-live"' not in body
+    assert 'id="reviewThread" class="thread is-live"' not in body
+    assert 'id="activityLiveDot" class="win-live is-live"' not in body
+    for dot_id in ("systemLiveDot", "reviewThread", "activityLiveDot"):
+        assert f'getElementById("{dot_id}").classList.toggle("is-live", running)' in body
+
+
+async def test_dashboard_page_self_hosts_its_display_font():
+    """The pixel display face must be served from this app's own /static
+    mount, never a third-party CDN -- an unreachable Google Fonts request
+    would otherwise silently revert the entire display voice with no
+    indication, on a page whose whole job is reading system health at a
+    glance. Also pins that no emoji icon crept back in (the theme/language
+    toggle was rebuilt on authored SVGs after a finish-review finding)."""
+    client = await _client()
+    resp = await client.get("/")
+    body = resp.text
+    assert "/static/fonts/press-start-2p" in body
+    assert "fonts.googleapis.com" not in body
+    assert "fonts.gstatic.com" not in body
+    for emoji in ("🖥️", "☀️", "🌙", "🇺🇸", "🇮🇱"):
+        assert emoji not in body
+
+
+async def test_static_fonts_are_served_publicly_without_a_session():
+    """The login page (pre-authentication) also uses the self-hosted pixel
+    font, so its mount must not sit behind require_session -- unlike every
+    other dashboard/environment route."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/static/fonts/press-start-2p-v16-latin-regular.woff2")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] in ("font/woff2", "application/font-woff2")

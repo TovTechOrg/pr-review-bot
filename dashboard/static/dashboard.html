@@ -5,54 +5,85 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PR Review Engine — Dashboard</title>
 <style>
+  /* Self-hosted one-bit/pixel display face for headings and window titles
+     only (Direction contract FORM) -- never for body/control text, where
+     Operate mode's scanability requirement wins. Served from this app's own
+     /static/fonts mount (main.py), not a third-party CDN: an unreachable
+     Google Fonts request would otherwise silently revert the entire display
+     voice with no indication, which is a real risk for a page whose job is
+     "tell at a glance whether the bot is healthy." Press Start 2P has no
+     Hebrew glyphs; the font-family fallback stack lets Hebrew text degrade
+     per-character to the system sans automatically rather than breaking. */
+  @font-face {
+    font-family: "Press Start 2P";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url(/static/fonts/press-start-2p-v16-latin-regular.woff2) format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122;
+  }
+  /* One-Bit Windowed Console -- see .impeccable/surfaces/dashboard.md for the
+     direction contract this implements (seed b8b1d930). Near-monochrome ink
+     on paper, ordered dither standing in for secondary surfaces, one amber
+     signal reserved for alerts/active state. No radius, no shadow: this
+     world's native chrome is a square window with a solid inverted title
+     bar, not a soft card. */
   :root {
-    --bg: #f5f6f8;
-    --surface: #ffffff;
-    --surface-2: #eef0f3;
-    --text: #1f2933;
-    --text-muted: #5c6773;
-    --border: #dde2e7;
-    --accent: #3a6ea5;
-    --ok: #2f7d4f;
-    --fail: #b3454b;
-    --sev-critical: #b3454b;
-    --sev-high: #c07a2e;
-    --sev-medium: #8a8330;
+    --ink: #16150f;
+    --paper: #f1efe6;
+    --surface: #faf9f2;
+    --line: #16150f;
+    --muted: #5c5a4d;
+    --signal: #a3550a;
+    --dither-dot: rgba(22, 21, 15, 0.55);
+    --dither-dot-soft: rgba(22, 21, 15, 0.22);
+    --pixel-font: "Press Start 2P", -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #12161b;
-      --surface: #1a1f26;
-      --surface-2: #22282f;
-      --text: #e6e9ec;
-      --text-muted: #9aa5b1;
-      --border: #2b323a;
-      --accent: #7ba7d9;
-      --ok: #5fbf87;
-      --fail: #e08086;
-      --sev-critical: #e08086;
-      --sev-high: #e3ac6a;
-      --sev-medium: #d9d07a;
+      --ink: #ece9dd;
+      --paper: #16150f;
+      --surface: #201f18;
+      --line: #ece9dd;
+      --muted: #a6a293;
+      --signal: #d98a34;
+      --dither-dot: rgba(236, 233, 221, 0.2);
+      --dither-dot-soft: rgba(236, 233, 221, 0.1);
     }
   }
   :root[data-theme="dark"] {
-    --bg: #12161b;
-    --surface: #1a1f26;
-    --surface-2: #22282f;
-    --text: #e6e9ec;
-    --text-muted: #9aa5b1;
-    --border: #2b323a;
-    --accent: #7ba7d9;
-    --ok: #5fbf87;
-    --fail: #e08086;
-    --sev-critical: #e08086;
-    --sev-high: #e3ac6a;
-    --sev-medium: #d9d07a;
+    --ink: #ece9dd;
+    --paper: #16150f;
+    --surface: #201f18;
+    --line: #ece9dd;
+    --muted: #a6a293;
+    --signal: #d98a34;
+    --dither-dot: rgba(236, 233, 221, 0.2);
+    --dither-dot-soft: rgba(236, 233, 221, 0.1);
+  }
+  /* Back-compat aliases: unchanged selectors below still read the old names. */
+  :root {
+    --bg: var(--paper);
+    --surface-2: var(--paper);
+    --text: var(--ink);
+    --text-muted: var(--muted);
+    --border: var(--line);
+    --accent: var(--signal);
+    --ok: var(--ink);
+    --fail: var(--signal);
+    --sev-critical: var(--signal);
+    --sev-high: var(--ink);
+    --sev-medium: var(--muted);
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; }
   body {
     background: var(--bg);
+    /* Ordered dither IS the desktop ground behind every floating window --
+       a real, visible stipple, not a token defined and never used. Window
+       bodies stay flat (below) so text content keeps full legibility. */
+    background-image: radial-gradient(var(--dither-dot) 1px, transparent 1px);
+    background-size: 11px 11px;
     color: var(--text);
     font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
@@ -65,7 +96,7 @@
     color: var(--text);
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 0.4rem;
+    border-radius: 0;
     padding: 0.4rem 0.6rem;
   }
   input[type="checkbox"], input[type="radio"] {
@@ -84,11 +115,16 @@
   dialog {
     color: var(--text);
     background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 0;
     padding: 1.25rem 1.5rem;
     max-width: min(90vw, 420px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    /* Hard-edged, unblurred offset shadow -- real elevation without the
+       soft blur a strict one-bit/dither material never uses (a blurred
+       shadow is a smooth gradient in disguise). Fixed light-source
+       direction, not mirrored under RTL: shadows read as physical, not
+       text-flow-relative. */
+    box-shadow: none;
   }
   dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
   dialog > * { margin-top: 0.6rem; }
@@ -105,22 +141,101 @@
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
-    border-radius: 999px;
+    border-radius: 0;
     padding: 0.4rem 0.9rem;
     font-size: 0.9rem;
   }
+  /* Pressing inverts -- the one-bit desktop's own state idiom, not a
+     borrowed accent border. */
+  button.control:hover { border-color: var(--line); background: var(--paper); }
   .side-nav { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
-  .side-nav .nav-item.active { border-color: var(--accent); color: var(--accent); }
+  .side-nav .nav-item.active {
+    background: var(--ink);
+    color: var(--paper);
+    border-color: var(--ink);
+  }
   .nav-item svg { width: 1.05rem; height: 1.05rem; display: block; flex: none; }
+  button.control svg { width: 1.05rem; height: 1.05rem; display: block; flex: none; }
+  /* Window chrome: every persistent panel is a titled window, not a card. */
+  .win {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    box-shadow: none;
+    margin: 0 0.25rem 1.5rem 0;
+  }
+  .win-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    background: var(--ink);
+    color: var(--paper);
+    font-family: var(--pixel-font);
+    font-size: 0.6rem;
+    line-height: 1.6;
+    font-weight: 400;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    padding: 0.45rem 0.65rem;
+  }
+  .win-title .win-live {
+    width: 0.4rem;
+    height: 0.4rem;
+    flex: none;
+    background: var(--paper);
+    opacity: 0.5;
+    transition: background-color 0.3s ease, opacity 0.3s ease;
+  }
+  .win-title .win-live.is-live {
+    background: var(--signal);
+    opacity: 1;
+    animation: signal-pulse 0.6s ease-out;
+  }
+  .win-body { padding: 0.85rem 1rem; }
+  /* Traceable thread: a dashed connector between two windows that stand in a
+     real pipeline relationship (here, Queue -> the specialists it feeds). */
+  /* Owns the ENTIRE visual gap between the Queue window and the
+     specialists row -- pulled up to cancel the Queue window's own
+     margin-bottom, with no trailing margin of its own, so the dash spans
+     the full space between the two borders rather than dangling short of
+     the row below it. */
+  .thread {
+    height: 1.5rem;
+    margin-block: -1.5rem 0;
+    margin-inline-start: 1.5rem;
+    border-inline-start: 2px dashed var(--muted);
+    width: 0;
+    transition: border-color 0.3s ease;
+  }
+  .thread.is-live { border-inline-start-color: var(--signal); }
+  @keyframes signal-pulse {
+    0% { transform: scale(1); }
+    30% { transform: scale(1.8); }
+    100% { transform: scale(1); }
+  }
   .env-section {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 0.6rem;
-    padding: 1rem 1.25rem 1.25rem;
-    margin-bottom: 1.5rem;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 0 1.25rem 1.25rem;
+    margin: 0 0.25rem 1.75rem 0;
     max-width: 900px;
   }
-  .env-section h2 { margin: 0 0 0.85rem; font-size: 1.05rem; }
+  /* The section heading doubles as its window title bar -- same inverted
+     chrome as .win-title, bled to the section's own outer edge. */
+  .env-section h2 {
+    margin: 0 -1.25rem 0.85rem;
+    padding: 0.55rem 1.25rem;
+    font-family: var(--pixel-font);
+    font-size: 0.6rem;
+    line-height: 1.6;
+    font-weight: 400;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    background: var(--ink);
+    color: var(--paper);
+  }
   #renderVarsTable { width: 100%; border-collapse: collapse; margin-bottom: 1rem; table-layout: fixed; }
   #renderVarsTable th, #renderVarsTable td { text-align: start; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
   #renderVarsTable th:first-child, #renderVarsTable td:first-child { width: 30%; word-break: break-word; }
@@ -147,7 +262,7 @@
     padding: 0;
     background: none;
     border: none;
-    border-radius: 999px;
+    border-radius: 0;
     color: var(--text-muted);
     cursor: help;
   }
@@ -160,14 +275,14 @@
     background: var(--surface);
     color: var(--text);
     border: 1px solid var(--border);
-    border-radius: 0.4rem;
+    border-radius: 0;
     padding: 0.4rem 0.6rem;
     font-size: 0.8rem;
     font-weight: normal;
     line-height: 1.3;
     width: max-content;
     max-width: min(80vw, 320px);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+    box-shadow: none;
     opacity: 0;
     visibility: hidden;
     transition: opacity 0.15s ease;
@@ -189,21 +304,23 @@
     max-width: 620px;
   }
   #configForm > * { min-width: 0; }
+  /* A ruled group, like the config form's own rows above it -- not a boxed,
+     dithered panel. Plain dashed hairlines between provider rows, matching
+     .kv-row's separator idiom, instead of a nested "hollowed out" fill. */
   .provider-model-grid {
     grid-column: 1 / -1;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    background: var(--surface-2);
-    border-radius: 0.5rem;
-    padding: 0.6rem 0.75rem;
   }
   .provider-model-row {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 0.5rem 0.6rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px dashed var(--border);
   }
+  .provider-model-row:last-child { border-bottom: none; }
   .provider-model-row .provider-name {
     font-weight: 600;
     text-transform: capitalize;
@@ -225,11 +342,11 @@
     position: absolute;
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 0.75rem;
+    border-radius: 0;
     padding: 1rem 1.25rem;
     min-width: 220px;
     max-width: min(90vw, 320px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+    box-shadow: none;
   }
   .popup h2 { margin: 0 0 0.75rem; font-size: 1rem; }
   .radio-group { display: flex; flex-direction: column; gap: 0.5rem; }
@@ -242,43 +359,57 @@
     font-size: 0.95rem;
   }
   main { max-width: 1100px; margin: 0 auto; padding: 1rem 1rem 2.5rem; }
-  h1 { font-size: 1.3rem; margin: 0.5rem 0 1rem; }
-  .stats-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 0.75rem;
-    margin-bottom: 1.5rem;
+  h1 { font-family: var(--pixel-font); font-size: 1rem; line-height: 1.7; margin: 0.75rem 0 1.5rem; }
+  /* Plain key:value rows -- retires the hero-metric big-number-on-a-card
+     pattern (craft floor: "nested cards are always wrong"). A window's
+     body is a list of facts, not a grid of stat tiles. */
+  .kv-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.5rem 0.75rem;
+    padding: 0.35rem 0;
+    border-bottom: 1px dashed var(--border);
   }
-  @media (max-width: 900px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
-  @media (max-width: 500px) { .stats-grid { grid-template-columns: 1fr; } }
-  .stat-tile {
+  .kv-row:last-child { border-bottom: none; }
+  .kv-label { color: var(--text-muted); font-size: 0.85rem; }
+  .kv-value { font-weight: 600; }
+  .kv-row-wrap { align-items: flex-start; }
+  .tile-chip-list { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .tile-chip {
     background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 0.6rem;
-    padding: 0.85rem 1rem;
-  }
-  .stat-tile .stat-label { color: var(--text-muted); font-size: 0.8rem; }
-  .stat-tile .stat-value { font-size: 1.4rem; font-weight: 600; margin-top: 0.15rem; }
-  .stat-tile .tile-chip-list { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.3rem; }
-  .stat-tile .tile-chip {
-    background: var(--surface-2);
-    border-radius: 0.3rem;
+    background-image: radial-gradient(var(--dither-dot-soft) 1px, transparent 1px);
+    background-size: 6px 6px;
+    border: 1px solid var(--line);
+    border-radius: 0;
     padding: 0.15rem 0.45rem;
     font-size: 0.8rem;
     white-space: nowrap;
   }
+  /* Three specialist windows in a row -- each an independent titled window
+     per the direction contract's FIRST VIEWPORT, not fields inside a card. */
+  .specialists-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+  }
+  .spec-win { flex: 1 1 220px; min-width: 0; margin: 0 0.25rem 0 0; }
+  .spec-win .win-body { min-height: 3.5rem; }
   #errorBanner {
-    background: var(--surface-2);
-    border: 1px solid var(--fail);
-    color: var(--fail);
-    border-radius: 0.5rem;
+    background: var(--surface);
+    border: 1px solid var(--signal);
+    color: var(--signal);
+    font-weight: 600;
+    border-radius: 0;
     padding: 0.6rem 0.9rem;
     margin-bottom: 1rem;
   }
   .review-card {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 0.6rem;
+    border-radius: 0;
     margin-bottom: 0.6rem;
     overflow: hidden;
   }
@@ -314,7 +445,7 @@
     }
     #renderVarsTable tr {
       border: 1px solid var(--border);
-      border-radius: 0.5rem;
+      border-radius: 0;
       padding: 0.5rem 0.65rem;
       margin-bottom: 0.6rem;
     }
@@ -342,12 +473,14 @@
   .finding-group h3 { font-size: 0.85rem; margin: 0.5rem 0 0.25rem; }
   .finding { font-size: 0.85rem; padding: 0.35rem 0; border-bottom: 1px dashed var(--border); }
   .finding:last-child { border-bottom: none; }
+  /* Severity ladder without a rainbow of hues: amber is reserved for the
+     alert state (critical); weight and muting carry the rest. */
   .sev-critical { color: var(--sev-critical); font-weight: 600; }
   .sev-high { color: var(--sev-high); font-weight: 600; }
-  .sev-medium { color: var(--sev-medium); font-weight: 600; }
-  .status-ok { color: var(--ok); }
-  .status-failed { color: var(--fail); }
-  a.comment-link { color: var(--accent); text-decoration: none; }
+  .sev-medium { color: var(--sev-medium); font-weight: 400; }
+  .status-ok { color: var(--ok); font-weight: 400; }
+  .status-failed { color: var(--fail); font-weight: 600; }
+  a.comment-link { color: var(--text); text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -372,8 +505,8 @@
     <div class="popup" role="dialog" aria-modal="true" aria-labelledby="langPopupTitle">
       <h2 id="langPopupTitle"></h2>
       <div class="radio-group">
-        <label><input type="radio" name="lang" value="en"> 🇺🇸 English</label>
-        <label><input type="radio" name="lang" value="he"> 🇮🇱 עברית</label>
+        <label><input type="radio" name="lang" value="en"> English</label>
+        <label><input type="radio" name="lang" value="he"> עברית</label>
       </div>
     </div>
   </div>
@@ -402,8 +535,54 @@
     </nav>
     <section id="statusPanel">
       <section id="errorBanner" hidden></section>
-      <section id="stats" class="stats-grid"></section>
-      <section id="reviews"></section>
+      <div class="win">
+        <div class="win-title">
+          <span data-i18n="win_queue"></span>
+          <span id="systemLiveDot" class="win-live" aria-hidden="true"></span>
+        </div>
+        <div class="win-body">
+          <section id="stats"></section>
+        </div>
+      </div>
+      <!-- Traceable thread: the Queue feeds the specialists below it. Lights
+           up amber only while a review is actually running -- a real signal
+           read off queue.by_status.running, not a decoration. Per-specialist
+           granularity (which specialist is running, not just "something
+           is") isn't data the API exposes, so the thread joins Queue to the
+           row as a whole -- see the surface brief's Unresolved decisions. -->
+      <div id="reviewThread" class="thread" aria-hidden="true"></div>
+      <div class="specialists-row">
+        <div class="win spec-win">
+          <div class="win-title">
+            <span data-i18n="sp_name_security"></span>
+            <span class="win-live" data-spec-dot="Security" aria-hidden="true"></span>
+          </div>
+          <div class="win-body" data-spec-body="Security"></div>
+        </div>
+        <div class="win spec-win">
+          <div class="win-title">
+            <span data-i18n="sp_name_performance"></span>
+            <span class="win-live" data-spec-dot="Performance" aria-hidden="true"></span>
+          </div>
+          <div class="win-body" data-spec-body="Performance"></div>
+        </div>
+        <div class="win spec-win">
+          <div class="win-title">
+            <span data-i18n="sp_name_quality"></span>
+            <span class="win-live" data-spec-dot="Code Quality" aria-hidden="true"></span>
+          </div>
+          <div class="win-body" data-spec-body="Code Quality"></div>
+        </div>
+      </div>
+      <div class="win">
+        <div class="win-title">
+          <span data-i18n="win_activity"></span>
+          <span id="activityLiveDot" class="win-live" aria-hidden="true"></span>
+        </div>
+        <div class="win-body">
+          <section id="reviews"></section>
+        </div>
+      </div>
     </section>
     <section id="environmentPanel" hidden>
       <section id="deployBanner" hidden></section>
@@ -509,11 +688,14 @@
         sp_ok: "OK", sp_failed: "Failed",
         sp_name_security: "Security", sp_name_performance: "Performance",
         sp_name_quality: "Code Quality",
+        sp_status_label: "Last status", sp_findings_label: "Findings",
         sev_critical: "Critical", sev_high: "High", sev_medium: "Medium",
         backoff_none: "none",
         logout_label: "Log out",
         nav_status: "Status",
         nav_environment: "Environment",
+        win_queue: "Queue",
+        win_activity: "Activity.log",
         env_render_title: "Render environment variables",
         env_col_key: "Key",
         env_col_value: "Value",
@@ -583,11 +765,14 @@
         sp_ok: "תקין", sp_failed: "נכשל",
         sp_name_security: "אבטחה", sp_name_performance: "ביצועים",
         sp_name_quality: "איכות קוד",
+        sp_status_label: "סטטוס אחרון", sp_findings_label: "ממצאים",
         sev_critical: "קריטי", sev_high: "גבוה", sev_medium: "בינוני",
         backoff_none: "אין",
         logout_label: "התנתק",
         nav_status: "סטטוס",
         nav_environment: "סביבה",
+        win_queue: "תור",
+        win_activity: "יומן פעילות",
         env_render_title: "משתני סביבה של Render",
         env_col_key: "מפתח",
         env_col_value: "ערך",
@@ -744,8 +929,16 @@
       "Code Quality": "sp_name_quality",
     };
 
-    const THEME_ICON = { light: "☀️", dark: "🌙", system: "🖥️" };
-    const LANG_LABEL = { en: "🇺🇸 English", he: "🇮🇱 עברית" };
+    // Authored SVGs, not emoji: same stroke convention as the nav-item and
+    // info-icon glyphs (viewBox 0 0 24 24, stroke currentColor, width 2,
+    // round caps) -- an emoji icon system reads as unauthored on every
+    // screen, since these two buttons are in the fixed topbar throughout.
+    const ICON_SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="4.5" y1="4.5" x2="6.6" y2="6.6"/><line x1="17.4" y1="17.4" x2="19.5" y2="19.5"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/><line x1="4.5" y1="19.5" x2="6.6" y2="17.4"/><line x1="17.4" y1="6.6" x2="19.5" y2="4.5"/></svg>';
+    const ICON_MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>';
+    const ICON_MONITOR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="13"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>';
+    const ICON_GLOBE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>';
+    const THEME_ICON = { light: ICON_SUN, dark: ICON_MOON, system: ICON_MONITOR };
+    const LANG_LABEL = { en: "English", he: "עברית" };
 
     const KNOWN_LANGS = ["en", "he"];
     const KNOWN_THEMES = ["light", "dark", "system"];
@@ -777,8 +970,8 @@
       currentTheme = theme;
       localStorage.setItem("dashboard_theme", theme);
       document.documentElement.setAttribute("data-theme", theme === "system" ? "" : theme);
-      document.getElementById("themeToggleBtn").textContent =
-        `${THEME_ICON[theme]} ${t("theme_" + theme)}`;
+      document.getElementById("themeToggleBtn").innerHTML =
+        `${THEME_ICON[theme]}<span>${t("theme_" + theme)}</span>`;
       document.querySelector(`input[name="theme"][value="${theme}"]`).checked = true;
     }
 
@@ -787,7 +980,7 @@
       localStorage.setItem("dashboard_lang", lang);
       document.documentElement.setAttribute("lang", lang);
       document.documentElement.setAttribute("dir", lang === "he" ? "rtl" : "ltr");
-      document.getElementById("langToggleBtn").textContent = LANG_LABEL[lang];
+      document.getElementById("langToggleBtn").innerHTML = `${ICON_GLOBE}<span>${LANG_LABEL[lang]}</span>`;
       document.querySelectorAll("[data-i18n]").forEach((el) => {
         el.textContent = t(el.getAttribute("data-i18n"));
       });
@@ -818,19 +1011,69 @@
             )
             .join("")
         : `<span class="tile-chip">${t("backoff_none")}</span>`;
-      const tiles = [
-        [t("stat_total_reviews"), `<div class="stat-value">${stats.total_reviews}</div>`],
-        [t("stat_total_cost"), `<div class="stat-value">$${stats.total_cost_usd.toFixed(4)}</div>`],
-        [t("stat_avg_time"), `<div class="stat-value">${(stats.avg_elapsed_ms / 1000).toFixed(1)}s</div>`],
-        [t("stat_queue"), `<div class="tile-chip-list">${queueChips}</div>`],
-        [t("stat_provider_backoff"), `<div class="tile-chip-list">${backoffChips}</div>`],
+      const rows = [
+        [t("stat_total_reviews"), esc(String(stats.total_reviews)), false],
+        [t("stat_total_cost"), `$${stats.total_cost_usd.toFixed(4)}`, false],
+        [t("stat_avg_time"), `${(stats.avg_elapsed_ms / 1000).toFixed(1)}s`, false],
+        [t("stat_queue"), `<span class="tile-chip-list">${queueChips}</span>`, true],
+        [t("stat_provider_backoff"), `<span class="tile-chip-list">${backoffChips}</span>`, true],
       ];
-      el.innerHTML = tiles.map(([label, valueHtml]) => `
-        <div class="stat-tile">
-          <div class="stat-label">${label}</div>
-          ${valueHtml}
+      el.innerHTML = rows.map(([label, valueHtml, wrap]) => `
+        <div class="kv-row${wrap ? " kv-row-wrap" : ""}">
+          <span class="kv-label">${label}</span>
+          <span class="kv-value">${valueHtml}</span>
         </div>
       `).join("");
+
+      const running = Number(queue.by_status?.running || 0) > 0;
+      document.getElementById("systemLiveDot").classList.toggle("is-live", running);
+      document.getElementById("reviewThread").classList.toggle("is-live", running);
+      // Activity.log is what a running review is actively populating --
+      // same real signal as Queue/the thread, not a permanently-lit dot.
+      document.getElementById("activityLiveDot").classList.toggle("is-live", running);
+    }
+
+    const SPECIALIST_NAMES = ["Security", "Performance", "Code Quality"];
+
+    // Real data only: each specialist window reflects the most recent
+    // review's own result for that specialist (already fetched for
+    // Activity.log) -- there is no separate per-specialist aggregate
+    // endpoint, so nothing here is invented beyond what's on screen anyway.
+    function renderSpecialists(reviews) {
+      const list = Array.isArray(reviews) ? reviews : [];
+      const latest = list[0];
+      SPECIALIST_NAMES.forEach((name) => {
+        const body = document.querySelector(`[data-spec-body="${CSS.escape(name)}"]`);
+        const dot = document.querySelector(`[data-spec-dot="${CSS.escape(name)}"]`);
+        const spec = latest?.specialists?.find((s) => s.name === name);
+        if (!spec) {
+          body.innerHTML = `<div class="kv-row"><span class="kv-label">${t("empty_reviews")}</span></div>`;
+          dot.classList.remove("is-live");
+          return;
+        }
+        const isOk = spec.status === "ok";
+        const statusClass = isOk ? "status-ok" : "status-failed";
+        const statusText = isOk ? t("sp_ok") : t("sp_failed");
+        const findingsCount = spec.findings ? spec.findings.length : 0;
+        body.innerHTML = `
+          <div class="kv-row">
+            <span class="kv-label">${t("col_when")}</span>
+            <span class="kv-value">${new Date(latest.created_at).toLocaleString()}</span>
+          </div>
+          <div class="kv-row">
+            <span class="kv-label">${t("sp_status_label")}</span>
+            <span class="kv-value ${statusClass}">${statusText}</span>
+          </div>
+          <div class="kv-row">
+            <span class="kv-label">${t("sp_findings_label")}</span>
+            <span class="kv-value">${findingsCount}</span>
+          </div>
+        `;
+        // A specialist's own alert signal: it failed on the most recent
+        // review. Not tied to "currently running" -- see the thread's own
+        // comment for why that finer-grained signal isn't available.
+        dot.classList.toggle("is-live", !isOk);
+      });
     }
 
     function findingRows(specialist) {
@@ -933,6 +1176,7 @@
         banner.hidden = !hasError;
         if (hasError) banner.textContent = t("error_banner");
         renderStats(data.stats, data.queue);
+        renderSpecialists(data.reviews);
         renderReviews(data.reviews);
       } catch (err) {
         banner.hidden = false;

@@ -1,134 +1,120 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-06T16:51:21Z",
+  "generatedAt": "2026-09-06T00:00:00Z",
   "title": "Design System: Autonomous Code Review Engine — Dashboard",
   "extensions": {
     "colorMeta": {
-      "bg": { "role": "neutral", "displayName": "Panel Gray", "canonical": "#f5f6f8", "tonalRamp": ["#20242d", "#3b4354", "#546078", "#6f7d9a", "#939eb3", "#b7becd", "#d5d9e2", "#f0f2f4"] },
-      "surface": { "role": "neutral", "displayName": "Card White", "canonical": "#ffffff", "tonalRamp": ["#262626", "#474747", "#666666", "#858585", "#a3a3a3", "#c2c2c2", "#dbdbdb", "#f2f2f2"] },
-      "surface-2": { "role": "neutral", "displayName": "Recessed Gray", "canonical": "#eef0f3", "tonalRamp": ["#20252d", "#3b4554", "#546278", "#6f809a", "#93a0b3", "#b7c0cc", "#d5dae1", "#f0f2f4"] },
-      "text": { "role": "neutral", "displayName": "Ink", "canonical": "#1f2933", "tonalRamp": ["#1d2630", "#364759", "#4d667f", "#6785a2", "#8da3ba", "#b3c2d1", "#d3dbe4", "#eff2f5"] },
-      "text-muted": { "role": "neutral", "displayName": "Quiet Ink", "canonical": "#5c6773", "tonalRamp": ["#22262a", "#3f474f", "#5b6671", "#778492", "#99a3ad", "#bbc2c9", "#d7dbdf", "#f1f2f4"] },
-      "border": { "role": "neutral", "displayName": "Hairline", "canonical": "#dde2e7", "tonalRamp": ["#20262d", "#3b4754", "#546678", "#6f859a", "#93a3b3", "#b7c2cc", "#d5dbe1", "#f0f2f4"] },
-      "accent": { "role": "primary", "displayName": "Steady Signal Blue", "canonical": "#3a6ea5", "tonalRamp": ["#142639", "#25466a", "#356597", "#4a83bf", "#77a2cf", "#a4c1df", "#cadbec", "#ecf2f8"] },
-      "ok": { "role": "status", "displayName": "Confirmed Green", "canonical": "#2f7d4f", "tonalRamp": ["#153823", "#276842", "#38945e", "#4dbc7b", "#7acd9c", "#a6debd", "#cbebd8", "#ecf8f1"] },
-      "fail": { "role": "status", "displayName": "Alert Red", "canonical": "#b3454b", "tonalRamp": ["#371517", "#67282b", "#93393e", "#bb4e54", "#cc7a7f", "#dda7aa", "#ebcbcd", "#f8eded"] },
-      "sev-critical": { "role": "status", "displayName": "Critical Red", "canonical": "#b3454b", "tonalRamp": ["#371517", "#67282b", "#93393e", "#bb4e54", "#cc7a7f", "#dda7aa", "#ebcbcd", "#f8eded"] },
-      "sev-high": { "role": "status", "displayName": "High-Severity Amber", "canonical": "#c07a2e", "tonalRamp": ["#3e270f", "#73491c", "#a56927", "#d0883a", "#dca66b", "#e7c39c", "#f1dcc5", "#faf3ea"] },
-      "sev-medium": { "role": "status", "displayName": "Medium-Severity Olive", "canonical": "#8a8330", "tonalRamp": ["#393614", "#6a6525", "#979035", "#c0b749", "#d0c977", "#dfdba4", "#edeaca", "#f8f7ec"] }
+      "ink": { "role": "neutral", "displayName": "Ink", "canonical": "#16150f", "tonalRamp": ["#16150f", "#26241c", "#3a382c", "#524f40", "#6c6857", "#89846f", "#a8a38b", "#c9c4a9"] },
+      "paper": { "role": "neutral", "displayName": "Paper", "canonical": "#f1efe6", "tonalRamp": ["#5c5a4d", "#79766650", "#918d7a", "#a9a591", "#c1beac", "#d8d6c8", "#e9e7dd", "#f1efe6"] },
+      "surface": { "role": "neutral", "displayName": "Window Surface", "canonical": "#faf9f2", "tonalRamp": ["#5c5b52", "#78766b", "#918f83", "#a9a89e", "#c1c0b7", "#d8d7d0", "#ecebe6", "#faf9f2"] },
+      "muted": { "role": "neutral", "displayName": "Muted Ink", "canonical": "#5c5a4d", "tonalRamp": ["#242318", "#3a3826", "#524f37", "#6c684a", "#89855e", "#a6a179", "#c4c0a1", "#e2e0cd"] },
+      "signal": { "role": "primary", "displayName": "Signal Amber", "canonical": "#a3550a", "tonalRamp": ["#2b1502", "#4d2705", "#733a09", "#a3550a", "#c97a2e", "#dd9c5e", "#ecbf93", "#f7e0cb"] }
     },
     "typographyMeta": {
-      "title": { "displayName": "Title", "purpose": "The one h1 per panel (\"Dashboard\"). Not bold — position and color carry hierarchy, not weight." },
-      "body": { "displayName": "Body", "purpose": "Default text: stat values, table cells, form inputs." },
-      "label": { "displayName": "Label", "purpose": "Stat labels, field hints, field labels, timestamps — small and muted." }
+      "display": { "displayName": "Display (Pixel)", "purpose": "Titles only: h1, .win-title, .env-section h2, h1.login-title. Never body/buttons/nav." },
+      "body": { "displayName": "Body", "purpose": "Default readable text: stat values, table cells, inputs, review rows." },
+      "label": { "displayName": "Label", "purpose": "Muted secondary text: kv-label, field hints/labels, table headers, timestamps." }
     },
-    "shadows": [
-      { "name": "overlay", "value": "0 8px 24px rgba(0, 0, 0, 0.2)", "purpose": "Popups and dialogs only — the system's one shadow, signaling transience." },
-      { "name": "tooltip", "value": "0 4px 14px rgba(0, 0, 0, 0.2)", "purpose": "The small info-icon tooltip — a lighter variant of the overlay shadow." }
-    ],
+    "shadows": [],
     "motion": [
-      { "name": "ease-standard", "value": "ease 0.15s", "purpose": "Chevron rotation, tooltip fade-in — the system's only transition timing." }
+      { "name": "signal-pulse", "value": "scale(1) -> scale(1.8) -> scale(1) over 0.6s ease-out", "purpose": "One-shot pulse on a .win-live dot the instant it goes live (queue running / specialist failed)." },
+      { "name": "ease-standard", "value": "0.15s-0.3s ease", "purpose": "Thread/dot color-and-opacity transitions, tooltip fade, chevron rotation." }
     ],
     "breakpoints": [
-      { "name": "sm", "value": "500px" },
-      { "name": "md", "value": "640px" },
-      { "name": "lg", "value": "900px" }
+      { "name": "sm", "value": "640px" }
     ]
   },
   "components": [
     {
+      "name": "Window",
+      "kind": "card",
+      "refersTo": "window",
+      "description": "The core primitive replacing cards system-wide: a titled, hairline-bordered, flat panel with an inverted title bar.",
+      "html": "<div class=\"ds-win\"><div class=\"ds-win-title\"><span>Queue</span><span class=\"ds-win-live\"></span></div><div class=\"ds-win-body\"><div class=\"ds-kv-row\"><span class=\"ds-kv-label\">Total reviews</span><span class=\"ds-kv-value\">42</span></div></div></div>",
+      "css": ".ds-win { background: #faf9f2; border: 1px solid #16150f; border-radius: 0; box-shadow: none; } .ds-win-title { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; background: #16150f; color: #f1efe6; font-family: \"Press Start 2P\", -apple-system, sans-serif; font-size: 0.6rem; line-height: 1.6; letter-spacing: 0.03em; text-transform: uppercase; padding: 0.45rem 0.65rem; } .ds-win-live { width: 0.4rem; height: 0.4rem; background: #f1efe6; opacity: 0.5; transition: background-color 0.3s ease, opacity 0.3s ease; } .ds-win-live.is-live { background: #a3550a; opacity: 1; } .ds-win-body { padding: 0.85rem 1rem; } .ds-kv-row { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; padding: 0.35rem 0; border-bottom: 1px dashed #dad6c4; } .ds-kv-label { color: #5c5a4d; font-size: 0.85rem; } .ds-kv-value { font-weight: 600; }"
+    },
+    {
+      "name": "Traceable Thread",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Dashed connector joining two windows in a real pipeline relationship; switches from muted to solid signal-amber only while the tracked state is actually live.",
+      "html": "<div class=\"ds-win\"><div class=\"ds-win-title\"><span>Queue</span></div><div class=\"ds-win-body\">running</div></div><div class=\"ds-thread is-live\"></div><div class=\"ds-win\" style=\"margin-top:1.5rem\"><div class=\"ds-win-title\"><span>Security</span></div></div>",
+      "css": ".ds-thread { height: 1.5rem; margin-block: -1.5rem 0; margin-inline-start: 1.5rem; border-inline-start: 2px dashed #5c5a4d; width: 0; transition: border-color 0.3s ease; } .ds-thread.is-live { border-inline-start-color: #a3550a; } .ds-win { background: #faf9f2; border: 1px solid #16150f; box-shadow: none; } .ds-win-title { background: #16150f; color: #f1efe6; font-family: \"Press Start 2P\", -apple-system, sans-serif; font-size: 0.6rem; letter-spacing: 0.03em; text-transform: uppercase; padding: 0.45rem 0.65rem; } .ds-win-body { padding: 0.85rem 1rem; }"
+    },
+    {
       "name": "Control Button",
       "kind": "button",
       "refersTo": "button-control",
-      "description": "The default pill button — topbar icon buttons, panel-nav tabs, table row actions.",
-      "html": "<button class=\"ds-btn-control\" type=\"button\">Retry</button>",
-      "css": ".ds-btn-control { display: inline-flex; align-items: center; gap: 0.4rem; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 999px; padding: 0.4rem 0.9rem; font-size: 0.9rem; cursor: pointer; } .ds-btn-control:hover { border-color: var(--accent); } .ds-btn-control:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; } .ds-btn-control:disabled { opacity: 0.5; cursor: not-allowed; }"
-    },
-    {
-      "name": "Nav Tab (active)",
-      "kind": "nav",
-      "refersTo": "button-control",
-      "description": "The active variant of the panel-nav pill tab — the only nav state carrying accent color.",
-      "html": "<button class=\"ds-btn-control ds-nav-item ds-nav-item-active\" type=\"button\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" width=\"1.05rem\" height=\"1.05rem\" aria-hidden=\"true\"><polyline points=\"22 12 18 12 15 21 9 3 6 12 2 12\"/></svg><span>Status</span></button>",
-      "css": ".ds-nav-item { gap: 0.4rem; } .ds-nav-item-active { border-color: var(--accent); color: var(--accent); } .ds-nav-item svg { width: 1.05rem; height: 1.05rem; display: block; flex: none; }"
+      "description": "The default toolbar/nav button: hairline border, pressing-inverts state idiom instead of a colored hover ring.",
+      "html": "<button class=\"ds-btn-control\">Status</button>",
+      "css": ".ds-btn-control { display: inline-flex; align-items: center; gap: 0.4rem; background: #faf9f2; color: #16150f; border: 1px solid #16150f; border-radius: 0; padding: 0.4rem 0.9rem; font-size: 0.9rem; cursor: pointer; } .ds-btn-control:hover { border-color: #16150f; background: #f1efe6; } .ds-btn-control:focus-visible { outline: 2px solid #a3550a; outline-offset: 1px; } .ds-btn-control.active { background: #16150f; color: #f1efe6; }"
     },
     {
       "name": "Submit Button",
       "kind": "button",
       "refersTo": "button-submit",
-      "description": "The one filled-accent button in the system — used only for the login form's single action.",
-      "html": "<button class=\"ds-btn-submit\" type=\"submit\">Log in</button>",
-      "css": ".ds-btn-submit { width: 100%; padding: 0.6rem; border: none; border-radius: 0.4rem; background: var(--accent); color: #fff; font-size: 0.95rem; cursor: pointer; } .ds-btn-submit:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }"
+      "description": "The one filled-at-rest control (login submit) — inverted ink fill, never amber since there's nothing to alert on there.",
+      "html": "<button class=\"ds-btn-submit\">Sign in</button>",
+      "css": ".ds-btn-submit { width: 100%; padding: 0.6rem; border: 1px solid #16150f; border-radius: 0; background: #16150f; color: #f1efe6; font-size: 0.95rem; cursor: pointer; } .ds-btn-submit:hover { background: #5c5a4d; border-color: #5c5a4d; } .ds-btn-submit:focus-visible { outline: 2px solid #a3550a; outline-offset: 1px; }"
     },
     {
-      "name": "Text Input",
+      "name": "Input Field",
       "kind": "input",
-      "refersTo": "input-field",
-      "description": "Default text/password field — visually identical to a Control Button at rest.",
-      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"Value\">",
-      "css": ".ds-input { font: inherit; width: 100%; padding: 0.5rem 0.6rem; border: 1px solid var(--border); border-radius: 0.4rem; background: var(--surface); color: var(--text); font-size: 0.95rem; } .ds-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; } .ds-input[readonly] { opacity: 0.7; }"
+      "refersTo": "input",
+      "description": "Text/password input: flat surface fill, hairline border, no radius, amber focus outline.",
+      "html": "<input type=\"text\" class=\"ds-input\" placeholder=\"KEY_NAME\">",
+      "css": ".ds-input { font: inherit; color: #16150f; background: #faf9f2; border: 1px solid #16150f; border-radius: 0; padding: 0.4rem 0.6rem; } .ds-input:focus-visible { outline: 2px solid #a3550a; outline-offset: 1px; } .ds-input[readonly] { opacity: 0.7; }"
     },
     {
-      "name": "Stat Tile",
-      "kind": "card",
-      "refersTo": "card-tile",
-      "description": "The primary at-a-glance metric card — flat, bordered, no shadow.",
-      "html": "<div class=\"ds-stat-tile\"><div class=\"ds-stat-label\">Queued</div><div class=\"ds-stat-value\">12</div></div>",
-      "css": ".ds-stat-tile { background: var(--surface); border: 1px solid var(--border); border-radius: 0.6rem; padding: 0.85rem 1rem; } .ds-stat-label { color: var(--text-muted); font-size: 0.8rem; } .ds-stat-value { font-size: 1.4rem; font-weight: 600; margin-top: 0.15rem; }"
-    },
-    {
-      "name": "Tile Chip",
+      "name": "Chip",
       "kind": "chip",
-      "refersTo": "card-tile",
-      "description": "Small nested-content chip inside a stat tile — the one component that uses fill instead of an outline.",
-      "html": "<span class=\"ds-chip\">gemini · 3</span>",
-      "css": ".ds-chip { display: inline-block; background: var(--surface-2); border-radius: 0.3rem; padding: 0.15rem 0.45rem; font-size: 0.8rem; white-space: nowrap; }"
+      "refersTo": null,
+      "description": "Inline tag for queue-status counts / provider-backoff entries: hairline border, soft-dither fill, no radius.",
+      "html": "<span class=\"ds-chip\">Running: 2</span>",
+      "css": ".ds-chip { display: inline-block; background: #faf9f2; background-image: radial-gradient(rgba(22,21,15,0.22) 1px, transparent 1px); background-size: 6px 6px; border: 1px solid #16150f; border-radius: 0; padding: 0.15rem 0.45rem; font-size: 0.8rem; white-space: nowrap; }"
     },
     {
-      "name": "Review Card",
-      "kind": "card",
-      "refersTo": "card-tile",
-      "description": "A collapsible row summarizing one PR review, expandable to show findings.",
-      "html": "<div class=\"ds-review-card\"><div class=\"ds-review-row\" aria-expanded=\"false\"><span class=\"ds-status ds-status-ok\">✓ posted</span><span>PR #142</span><span class=\"ds-chevron\">⌄</span></div></div>",
-      "css": ".ds-review-card { background: var(--surface); border: 1px solid var(--border); border-radius: 0.6rem; overflow: hidden; } .ds-review-row { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; padding: 0.7rem 1rem; padding-inline-end: 2.25rem; cursor: pointer; } .ds-status-ok { color: var(--ok); } .ds-chevron { position: absolute; top: 0.75rem; inset-inline-end: 1rem; transition: transform 0.15s ease; } .ds-review-row[aria-expanded=\"true\"] .ds-chevron { transform: rotate(180deg); }"
-    },
-    {
-      "name": "Popup / Dialog",
-      "kind": "custom",
-      "refersTo": "card-popup",
-      "description": "Positioned menu (theme/language pickers) and modal confirmation — the system's only shadowed surfaces, signaling transience.",
-      "html": "<div class=\"ds-popup\" role=\"dialog\"><h2>Theme</h2><div class=\"ds-radio-group\"><label><input type=\"radio\" name=\"theme\"> Light</label><label><input type=\"radio\" name=\"theme\"> Dark</label></div></div>",
-      "css": ".ds-popup { background: var(--surface); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1rem 1.25rem; min-width: 220px; max-width: min(90vw, 320px); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2); } .ds-popup h2 { margin: 0 0 0.75rem; font-size: 1rem; } .ds-radio-group { display: flex; flex-direction: column; gap: 0.5rem; } .ds-radio-group label { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.25rem; cursor: pointer; font-size: 0.95rem; }"
+      "name": "Navigation Item",
+      "kind": "nav",
+      "refersTo": null,
+      "description": "Pill-tab nav button with an authored stroke-SVG icon; active state fully inverts.",
+      "html": "<button class=\"ds-btn-control ds-nav-item active\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"22 12 18 12 15 21 9 3 6 12 2 12\"/></svg><span>Status</span></button>",
+      "css": ".ds-nav-item svg { width: 1.05rem; height: 1.05rem; display: block; flex: none; } .ds-nav-item.active { background: #16150f; color: #f1efe6; border-color: #16150f; }"
     }
   ],
   "narrative": {
-    "northStar": "The Instrument Panel",
-    "overview": "This is a gauge cluster, not a storefront. One person built and runs this bot; this surface exists so that person can glance at it, know whether it's healthy, and make one small adjustment, then look away. Every visual decision optimizes for that: flat surfaces that don't compete for attention, one signal color reserved for \"this is active or actionable,\" and enough restraint that a table full of environment variables or a findings feed doesn't turn into visual noise.\n\nThe system is calm, precise, and unadorned. It explicitly rejects the SaaS-analytics-dashboard look — no gradients, no card shadows, no decorative iconography, no marketing-site polish. Depth, when it appears at all, marks something transient (a popup, a dialog) rather than dressing up permanent chrome. The palette is almost entirely neutral gray-on-white (or the dark-mode inverse); color is spent only where it means something: status, severity, or \"you can act here.\"",
+    "northStar": "The One-Bit Windowed Console",
+    "overview": "This is a small desktop, not a scrolling report. Every persistent surface — Queue, each specialist, Activity.log, each Environment section — is an independent titled window with a solid inverted title bar, joined to the desktop's dithered ground rather than floating on a plain page. The palette is near-monochrome ink-on-paper with exactly one accent reserved for alert/active state; the type voice pairs a self-hosted one-bit pixel display face on titles only against a plain system sans everywhere else a solo operator actually has to read fast. Nothing here is decorative: the dither is a real background texture (not an unused token), the dashed \"traceable thread\" connector lights up only when a real pipeline relationship is active, and the single amber signal never appears except to mean \"alert\" or \"running.\"\n\nThe system was built to replace a flat neutral-gray/blue-accent \"Instrument Panel\" world (the previous DESIGN.md) — that world is gone; nothing here should be read as a refinement of it. A hard offset drop-shadow was tried for dialog elevation during the build and explicitly rejected at finish review: it broke the one-bit material's own commitment to no soft/blurred or ambient depth, so box-shadow: none was restored everywhere, including on dialogs and popups.",
     "keyCharacteristics": [
-      "Flat-at-rest, borders instead of shadows on every persistent surface",
-      "One accent color, spent sparingly and only on actionable/active elements",
-      "Full light / dark / system theming via CSS custom properties, no light-only or dark-only assumptions baked into any component",
-      "RTL-ready throughout (logical properties: inset-inline-end, padding-inline-end, not left/right)",
-      "Severity and status communicated through color + text, never color alone"
+      "Independent window chrome (inverted title bar + hairline border) replaces cards everywhere.",
+      "Exactly one accent color (amber/signal), used only for alert or active state, never decoratively.",
+      "Ordered dither stands in for a secondary/recessed surface, used as real background texture (desktop ground, chip/grid fills), not a swatch that goes unused.",
+      "A self-hosted pixel display face is reserved for titles/headings only; body and controls stay in the system sans for scanability.",
+      "Fully flat: no shadow anywhere, hairline borders carry all separation and depth.",
+      "Plain key : value rows replace stat-tile grids as the default way to present a fact."
     ],
     "rules": [
-      { "name": "The One Signal Rule", "body": "Steady Signal Blue appears only where it means \"active\" or \"actionable\" — the current nav tab, a link, a focus ring, the one primary submit action. It never decorates a heading, an icon at rest, or a background. If a screen needs a second accent to feel finished, that's a sign the layout needs restructuring, not a second color.", "section": "colors" },
-      { "name": "The Status-Is-Never-Color-Alone Rule", "body": "ok/fail/severity colors always pair with text (a status word, a severity label) — never a bare colored dot or bar as the only signal, since color alone fails both colorblind users and theme edge cases.", "section": "colors" },
-      { "name": "The Weight-Is-Rare Rule", "body": "Font-weight above 400 is reserved for exactly two things: a stat tile's value, and a provider name in the config grid. Everywhere else, hierarchy comes from size, color, and position — not bold text.", "section": "typography" },
-      { "name": "The Shadow-Means-Temporary Rule", "body": "If it has a shadow, it's going to close. If it's meant to stay on screen, it gets a border instead.", "section": "elevation" }
+      { "name": "The One Warm Signal Rule", "body": "The amber accent appears only in response to a real state change (something is running, something failed, something needs attention). It is never applied to a default, idle, or purely decorative element — an idle dot, an idle thread, and an OK status all render in ink or muted, never amber.", "section": "colors" },
+      { "name": "The Full Inversion Rule", "body": "Dark mode is not a re-tint; --ink and --paper swap roles wholesale (and every other token derives from that swap), so window title bars, which are always \"ink-filled, paper-text,\" read correctly as inverted chrome in both themes without special-casing.", "section": "colors" },
+      { "name": "The Titles-Only Pixel Rule", "body": "The self-hosted pixel display face is applied only to h1, .win-title, .env-section h2, and h1.login-title — never to body text, buttons, nav labels, or table content. This is a deliberate Operate-mode scanability choice, not an oversight.", "section": "typography" },
+      { "name": "The Graceful Hebrew Degradation Rule", "body": "Press Start 2P has no Hebrew glyphs. Its font stack's fallback chain lets Hebrew text degrade per-character to the system sans automatically under dir=\"rtl\" — this is intentional and correct, not a missing glyph to chase down.", "section": "typography" },
+      { "name": "The No-Shadow, No-Exceptions Rule", "body": "Every elevated surface — window, popup, dialog, tooltip, modal backdrop — uses box-shadow: none and a hairline border instead. A hard offset shadow was tried and rejected at finish review; don't reintroduce one for a new surface.", "section": "elevation" }
     ],
     "dos": [
-      "Do spend Steady Signal Blue only on the active/actionable element — never on a background, a heading, or a resting icon (The One Signal Rule).",
-      "Do use a border, never a shadow, to separate any surface meant to stay on screen (The Shadow-Means-Temporary Rule).",
-      "Do pair every status/severity color with a text label.",
-      "Do keep every new component themeable through the existing CSS custom properties (--bg, --surface, --text, etc.) so light/dark/system theming stays automatic — never hardcode a hex value in a new rule.",
-      "Do use logical properties (inset-inline-end, padding-inline-start) for anything positional, so RTL (Hebrew) keeps working without special-casing."
+      "Do give every persistent panel real window chrome (.win/.win-title or .env-section/h2) — an inverted title bar and a hairline border — never a plain card.",
+      "Do reserve the amber signal color exclusively for alert/active state (a live dot, a running thread, a failed status, a critical finding, a focus ring). If a new element needs color and it isn't alerting or active, use ink or muted, never amber.",
+      "Do apply the self-hosted pixel display face only to h1/.win-title/.env-section h2/h1.login-title. Every other text — buttons, nav, body, table cells — stays in the system sans.",
+      "Do keep every corner square (border-radius: 0) and every shadow absent (box-shadow: none) on every new component; hairline borders are this system's only separation device.",
+      "Do author new icons as inline SVG matching the existing stroke convention (viewBox 0 0 24 24, stroke=\"currentColor\", stroke-width=\"2\", round caps/joins) — never an icon font or a raster image.",
+      "Do use .kv-row (plain label/value pairs) as the default way to present any fact or stat, including on new panels.",
+      "Do use logical CSS properties (inset-inline-end, border-inline-start, padding-inline-end) for anything positioned relative to text direction, so it flips correctly under Hebrew RTL without a separate RTL stylesheet."
     ],
     "donts": [
-      "Don't add a card shadow, gradient, or decorative icon anywhere — this system's whole identity is what it leaves out.",
-      "Don't introduce a second accent color. If two things need to look distinct and important at once, that's a layout problem, not a palette gap.",
-      "Don't give inputs a special focus treatment different from buttons — one focus ring style, applied uniformly, is a deliberate invariant.",
-      "Don't build a persistent sidebar. Two views live in a pill-tab row under the title; adding more views means extending that row, not introducing a new navigation paradigm."
+      "Don't use a hero-metric/stat-tile-grid pattern (a big number alone in its own bordered box) for stats or summaries — this build replaced that exact pattern with .kv-row specifically because nested/stacked cards for individual numbers read as unearned decoration on this surface; treat the stat-tile grid as a retired anti-pattern, not an available alternative to .kv-row.",
+      "Don't add a box-shadow to any element, including a \"just this once\" dialog/popup elevation need — a hard offset shadow was tried for exactly that during this build's finish review and rejected as contradicting the one-bit material's own no-shadow commitment. This is a hard invariant of this world, not a case-by-case judgment call.",
+      "Don't use emoji as icons anywhere in this system — every icon is an authored inline SVG in the stroke convention described above.",
+      "Don't load the display font from a third-party CDN (e.g. Google Fonts) — it is self-hosted from this app's own /static/fonts mount specifically so an unreachable third-party request can't silently revert the display voice on a health-status page.",
+      "Don't invent a persistent sidebar navigation for today's two-panel scope. A sidebar is a confirmed acceptable future scaling path once more panels exist, but the current build's pill-tab .side-nav row is the deliberate choice for two panels — don't promote the future option into a present rule."
     ]
   }
 }

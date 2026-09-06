@@ -1,0 +1,15 @@
+{
+  "buildPath": "comp",
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-font",
+        "value": "press start 2p",
+        "createdAt": "2026-09-06T18:05:10.477Z",
+        "reason": "finish-reviewer mandated fix #2 (rebuild verdict): self-hosted pixel/bitmap display face for headings and window titles, direction contract FORM. DESIGN.md will be regenerated from the built world via impeccable document at finish, which will record this as a real token."
+      }
+    ]
+  }
+}
