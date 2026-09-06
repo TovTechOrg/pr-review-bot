@@ -53,8 +53,9 @@ _STEPS: tuple[Step, ...] = (
     Step(3, "Install the App on your repo(s)", "app_installed",
          "open https://github.com/settings/apps -> your app -> Install App"),
     Step(4, "Configure an LLM provider", "llm_ready",
-         "set LLM_PROVIDER in .env.config and its API key via "
-         "`uv run python -m scripts.init_env` (run this yourself)"),
+         "set LLM_PROVIDER in .env.config and its API key in .env yourself, or, if "
+         "you're driving setup through Claude Code, hand off "
+         "`uv run python -m scripts.init_env` instead"),
     Step(5, "Create the Supabase project", "database",
          "create it at https://supabase.com, then set DATABASE_URL to the "
          "Session-mode pooler string (port 5432, NOT 6543)"),
