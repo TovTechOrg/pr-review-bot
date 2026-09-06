@@ -208,16 +208,10 @@ by a free external pinger — see `cost.md` for the alternatives that were weigh
   ruff (`uv run ruff check .`), and fix whatever either finds.** Never push
   with a red suite or an unresolved lint error, and never skip either check
   because a change "looks" too small to affect them.
-- **After merging to `main` locally, always build the deploy image**
-  (`docker build -f Dockerfile .` from the repo root) and confirm it
-  builds and boots (`docker run --rm <image> python -c "import main"`
-  or equivalent) before pushing/deploying. `pytest`/`ruff` run against the
-  full workspace venv, not the `--package pr-review-bot`-only sync the image
-  actually uses, so a workspace-boundary dependency gap (e.g. a dep declared
-  in `dashboard/pyproject.toml` but needed at root import time, only synced
-  under `--package pr-review-bot`) passes both checks and still crashes on deploy —
-  this is exactly how the 2026-09-03 `python-multipart` deploy crash slipped
-  through. A green test suite does not substitute for this.
+- **After merging to `main` locally, always invoke the `deploy-verify`
+  skill before pushing/deploying** — a green `pytest`/`ruff` run does not
+  substitute for this (see the skill for why, and the incident it
+  generalizes from).
 - **When designing or changing a web page's UI (`dashboard/static/`), invoke
   the `ui-visual-review` skill before calling the work done** — reading
   HTML/CSS and reasoning about layout is not a substitute for actually
