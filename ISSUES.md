@@ -101,6 +101,21 @@ whose "Suggested CLAUDE.md change" explicitly says it wasn't made yet; and
 - **What happened:** Ran `grep -rn '\bscripts/' bot tests conftest.py` — a directory-recursive grep whose arguments never named `.env` anywhere, but which necessarily walks every file under `bot/`, including `bot/.env`. It matched 3 lines there and printed them into the transcript. No secret was exposed: all 3 matches were plain comment lines (`# scripts/set_provider.py writes...`, `# swappable at runtime...`, `# Read only by scripts/deploy.py...`), no `KEY=value` line and no credential byte. Caught immediately (before compounding it with a second command) and flagged to the user in the same turn.
 - **Cost:** None — no secret value reached the transcript. But it's still a real instance of the exact prohibited action ("never run any tool against `.env`, full stop, regardless of how safe the pattern looks") — this time via a *directory* argument rather than naming `.env` directly, which is a new variant of the mistake the two prior `.env`-pattern incidents (see "Controller ran the 'safe' `.env` presence-check pattern against `.env` itself — twice" above) didn't cover.
 - **Suggested CLAUDE.md/hook change:** Not yet made — flagged to the user as a gap in `.claude/settings.json`'s `PreToolUse` hook, which blocks tool calls whose *arguments* reference `.env` by name. A recursive `grep`/`Read`-style call over a directory that merely *contains* `.env` (without ever typing `.env` in the command) has no argument for that hook to match, so it currently sails through. User's response: log here now, revisit hardening the hook once the current fix/cleanup wave is done. Until then, this session's own mitigation is to scope every subsequent grep in this cleanup to explicit file lists or `--exclude=.env*`/`--include=` rather than bare directories.
+- **Update (2026-09-06):** closed. `.claude/hooks/check_env_access.py` no
+  longer scans shell-command text for `.env` at all — every `Bash`/
+  `PowerShell` command is now unconditionally rewritten (via `PreToolUse`'s
+  `updatedInput`) to pipe its real output through a new
+  `.claude/hooks/redact_output.py` filter, which replaces any real `.env`
+  secret value with `[REDACTED-SECRET]` before the result reaches Claude —
+  content-based, so a recursive `grep`/`find`/anything that never types
+  `.env` in its arguments is covered the same as one that does. See
+  `docs/superpowers/specs/2026-09-06-env-hook-hardening-design.md` for the
+  full design and `tests/test_env_hook_redaction_integration.py`'s
+  `test_grep_recursive_walk_into_env_comes_back_redacted` for a regression
+  test reproducing this exact incident shape against a synthetic fixture.
+  Mutation prevention (`rm`/`chmod`/etc. targeting `.env`) is handled
+  separately, at the filesystem level (`chmod 400` + `chattr +i` on
+  `.env`), applied manually by the user — not part of this fix.
 
 ## Working-tree CRLF drift (2026-07-31, closed)
 - **When:** 2026-07-31, while staging a task commit during the escalating-cooldown implementation.
@@ -122,6 +137,32 @@ Recorded here so they aren't silently lost. Format:
 - **Why parked:** why it didn't get fixed in-session
 - **Follow-up:** what closing it would take
 ```
+
+### Claude Code's structured Grep/Glob tools aren't covered by the .env output-redaction wrapper
+- **Found during:** implementing the .env-protection hook hardening
+  (`docs/superpowers/specs/2026-09-06-env-hook-hardening-design.md`).
+- **What:** The redaction wrapper only rewrites `Bash`/`PowerShell` shell
+  commands (via `updatedInput`) — it has no equivalent for Claude Code's
+  own structured `Grep`/`Glob` tools, which don't execute a shell command
+  at all. `check_env_access.py`'s path-field check still denies a `Grep`/
+  `Glob` call whose `path` argument names `.env` exactly, but if either
+  tool were pointed at a *directory* that merely contains `.env` (the
+  structured-tool equivalent of the `grep -rn` incident this whole design
+  fixes for the Bash case), a matched line from the real `.env` could
+  still surface unredacted in the tool result.
+- **Why parked:** Out of scope for this fix — the spec and its
+  implementation plan were both scoped to the shell-tool text-scanning
+  problem specifically (the incident that motivated the work was a real
+  `Bash` `grep -rn`, not the structured `Grep` tool), and this exact gap
+  already existed, unaddressed, in the hook before this work started — not
+  a regression introduced by it.
+- **Follow-up:** Would need either (a) a `PreToolUse` check for `Grep`/
+  `Glob` that determines whether the given `path`/glob would recursively
+  include `.env` and denies if so (no rewrite mechanism exists for these
+  tools' own output the way `updatedInput` exists for `Bash`'s `command`),
+  or (b) confirming whether `updatedInput` can rewrite these tools' output
+  post-hoc the way it rewrites `Bash`'s command pre-execution — needs its
+  own design pass, not a quick add-on to this one.
 
 _Everything closed as of 2026-09-05 or earlier (Stage 3b's five items,
 2026-08-21's four items, and "Repo-wide `ruff check .` is already red on
