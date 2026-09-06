@@ -11,38 +11,46 @@ a separate field), `RENDER_API_KEY`, `UPTIMEROBOT_API_KEY`,
 anything else that authenticates as a person, service, or account. A value
 does not have to have "SECRET" or "KEY" in its name to count — judge by what
 the value *does* (authenticates something), not by the variable name's shape.
-Three separate real incidents during this project's life produced actual
-secret exposure into a conversation transcript this way — see `ISSUES.md` —
-which is why this section exists and is kept first in the file.
+Real incidents during this project's life produced actual secret exposure
+into a conversation transcript — see `ISSUES.md` — which is why this section
+exists and is kept first in the file.
+
+**`.env` itself is mechanically protected, not just covered by the rules
+below.** `.claude/hooks/check_env_access.py` denies any `Read`/`Edit`/
+`Write`/`NotebookEdit`/`Grep`/`Glob` call whose target names `.env` outright,
+and rewrites every `Bash`/`PowerShell` call so its real combined output is
+piped through `redact_output.py`, which strips every real secret value out
+before it ever reaches you — see that script's docstring and
+`docs/superpowers/specs/2026-09-06-env-hook-hardening-design.md` for the
+full design. This means a `grep`/`cat`/`tail`/`echo` touching `.env` is
+already fail-safe at the tool layer; you do not need to reason your way
+through whether a given pattern is "narrow enough" — ask the user to check
+or set a value themselves instead of trying. **Never modify
+`check_env_access.py` or `redact_output.py` in any way — not a logic
+change, not a comment, not a debug print, not a refactor — unless the user
+directly instructs it.** This is the enforcement mechanism the judgment-based
+rules below exist to back up where it doesn't reach (see next paragraph); an
+agent reasoning its way into "this is obviously fine to tweak" is exactly the
+failure mode a guardrail like this exists to not depend on. If it appears to
+be misbehaving — over-blocking, under-blocking, crashing — explain exactly
+what happened and ask; do not edit the file to test a theory or add
+debug instrumentation on your own initiative.
+
+**The hook covers only `.env`.** Every other secret-bearing location — the
+GCP service-account JSON/PEM, an in-process `Settings` object, a real
+environment variable set directly on Render (not read from a file at all),
+a value passed through a validation error — has no mechanical backstop, so
+the following still rests on judgment:
 
 - **Never display any byte of a secret value**, in a command's output, a
   file read, or your own reply — not even "just the last few characters" to
   spot-check it. Verify a secret was written/transmitted correctly
   *structurally* instead: length (`wc -c`), presence (`grep -c`, or a
   key-names-only listing), or a hash comparison. Never a value comparison
-  that requires printing the value to eyeball it.
-- **Never run a broad or unbounded command against a file known or likely to
-  hold secret material** — `cat`/`tail`/`head`/`echo`, and just as much a
-  `grep`/`Read` that isn't scoped to guarantee it can only ever match
-  non-secret content. `grep` returns whole *lines*, not matched tokens, so
-  even a pattern aimed at confirming a variable's name or searching for an
-  unrelated keyword can print a full secret value if it happens to occur on
-  the same line — this has actually happened twice in this project (a
-  `tail -c 20` on a `.env` line, and later a `grep` for an unrelated string
-  that shared a line with `GCP_SERVICE_ACCOUNT_KEY`). A pattern that
-  structurally cannot capture a value at all, e.g. `grep -oE '^[A-Z_0-9]+='`
-  (key names only, values discarded), is the *general shape* a safe
-  presence-check takes. **This is not a standing exception for `.env`
-  itself, even in that narrow form** — `.env` is covered by the absolute
-  "never open, any tool, full stop" rule below, which wins over this bullet
-  for that one file specifically: do not run even this narrow pattern
-  against `.env`; ask the user whether a var is set instead. (This bullet
-  has already been misread twice as licensing exactly that — see
-  `ISSUES.md` — so if a command's target is `.env`, the answer is always
-  "ask the user," full stop, regardless of how safe the pattern looks.) Do
-  not use the `Read` tool on a secret-bearing file for the same reason — it
-  returns the full file content into your context, which is exactly the
-  "display a byte of the value" failure mode in another guise.
+  that requires printing the value to eyeball it. The same "no broad/
+  unbounded command against a file known to hold secret material" caution
+  applies to any non-`.env` secret-bearing file (the PEM, the GCP JSON) —
+  those aren't hook-protected.
 - **Never dump broad environment/config state.** `env`, `printenv`, bare
   `set`, Python's `os.environ`, or serializing a settings/config object
   wholesale (`print(settings)`, `settings.dict()`/`.model_dump()`,
@@ -79,30 +87,19 @@ which is why this section exists and is kept first in the file.
   secret should be redirected rather than carried out (see below).
 - **A file-content diff surfaced automatically by the harness (e.g. a
   "file changed externally" system-reminder) can dump full secret values
-  into your context without you running any command at all.** This has
-  happened in this project. This appears to happen for files the harness
-  is already tracking because you opened them (via `Read`/`Edit`) earlier
-  in the session — so the primary defense is upstream of the notification
-  itself: **never open a file that mixes secrets with other content (e.g.
-  `.env`) at all, for any reason, full stop** — not even a single-line
-  `Read`, not even an `Edit` whose `old_string`/`new_string` you believe are
-  both non-secret lines. If a value that happens to live in such a file
-  needs to change, ask the user to make that edit themselves rather than
-  touching the file yourself — treat this the same as asking them to check
-  a value you're not allowed to display. This is deliberately absolute
-  rather than "only touch the safe lines": it isn't fully verified that
-  narrow access prevents the harness from tracking (and later re-surfacing)
-  the whole file, so don't rely on scoped access as a mitigation for this
-  specific vector. (Operational config no longer requires this: non-secret
-  settings live in `.env.config`, which is safe to open and edit, and
-  provider/model/cap/cooldown changes also have redeploy-free CLI paths —
-  see README's "Changing operational config".)
-  **If, despite this rule, such a file is ever opened anyway (e.g. an
-  older path, a mistake, a subagent that didn't inherit this rule) and a
-  later "changed externally" notification fires for it, treat that as a
-  known, standing, recurring risk for the rest of the session — not a
-  one-off surprise — and apply the same never-compound-it response every
-  single time it happens, not just the first.**
+  into your context without you running any command at all** — this has
+  happened in this project, for files the harness was already tracking
+  because you opened them earlier in the session. The hook doesn't intercept
+  this vector (it isn't a tool call), so the defense is upstream: **never
+  open a file that mixes secrets with other content (e.g. `.env`) at all,
+  for any reason, full stop** — not even a single-line `Read`, not even an
+  `Edit` you believe touches only non-secret lines. If a value in such a
+  file needs to change, ask the user to make that edit themselves. If this
+  rule is ever violated anyway and a "changed externally" notification
+  fires for that file, treat it as a standing, recurring risk for the rest
+  of the session, not a one-off surprise. (Operational config doesn't need
+  this care: non-secret settings live in `.env.config`, safe to open and
+  edit directly — see README's "Changing operational config".)
 - **To change state, reach for this project's CLI — never for a file that
   holds secrets.** Operational state (which provider and model are active,
   which API-key slot) is changed through the `scripts/` entry points --
@@ -124,23 +121,6 @@ which is why this section exists and is kept first in the file.
   the user, not something to route around by opening the file yourself and
   not something to fix by teaching a script to dump what you are not allowed
   to see.
-- **Never modify `.claude/hooks/check_env_access.py` in any way — not a
-  logic change, not a comment, not a debug print, not a refactor — unless
-  the user directly instructs it.** This script is the enforcement
-  mechanism for this whole section: a technical backstop built specifically
-  because the written rules above had already failed to hold on their own
-  across multiple sessions. That makes it a different kind of file from the
-  rest of the codebase — an agent reasoning its way into "this is obviously
-  a bug fix" or "this is clearly what they'd want" is exactly the failure
-  mode a guardrail like this exists to not depend on. Every real change this
-  hook has gone through (fixing its false positives, the git/gh message
-  exemption and its later grammar-based rewrite, decoupling it from the
-  project's synced venv, adding PowerShell coverage) happened because the
-  user explicitly asked for that specific change, not because an agent
-  inferred it was needed. If the hook appears to be misbehaving — over-
-  blocking, under-blocking, crashing — explain exactly what happened and
-  ask; do not edit the file to test a theory, work around a false positive,
-  or add temporary debug instrumentation on your own initiative.
 - **If you ever need to know or verify a secret's actual value — not just
   whether it's set or matches — ask the user to check it themselves.** Do
   not do it on their behalf, structurally or otherwise, regardless of how
@@ -238,16 +218,11 @@ by a free external pinger — see `cost.md` for the alternatives that were weigh
   under `--package pr-review-bot`) passes both checks and still crashes on deploy —
   this is exactly how the 2026-09-03 `python-multipart` deploy crash slipped
   through. A green test suite does not substitute for this.
-- **When designing or changing a web page's UI (`dashboard/static/`), use
-  the Playwright tool to actually look at it**
-  before calling the work done — screenshot both themes (light/dark) and at
-  a mobile viewport width, not just light-theme desktop. Reading the HTML/CSS
-  and reasoning about the layout is not a substitute: the 2026-09-03
-  Environment-tab CSS-grid blowout (a `1fr` column forced to ~1700px by one
-  unwrapped child, silently stretching every other input sharing that
-  column) and a mobile-only bug where the vars table squeezed a value input
-  to invisible near-zero width were both invisible from source alone and
-  only surfaced by rendering the page and measuring/screenshotting it.
+- **When designing or changing a web page's UI (`dashboard/static/`), invoke
+  the `ui-visual-review` skill before calling the work done** — reading
+  HTML/CSS and reasoning about layout is not a substitute for actually
+  rendering the page (see the skill for why, and the incident it
+  generalizes from).
 
 ## Substitutions from the brief (and why)
 

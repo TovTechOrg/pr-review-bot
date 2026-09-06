@@ -1,0 +1,8 @@
+repos:
+  - repo: local
+    hooks:
+      - id: gitleaks
+        name: gitleaks (secret scan of staged changes)
+        entry: gitleaks protect --staged --redact -v
+        language: system
+        pass_filenames: false
