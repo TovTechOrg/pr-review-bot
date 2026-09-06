@@ -218,6 +218,46 @@ by a free external pinger — see `cost.md` for the alternatives that were weigh
   rendering the page (see the skill for why, and the incident it
   generalizes from).
 
+## Impeccable comp-first image generation (manual bridge)
+
+For dashboard redesign work via the Impeccable skill, comp-first image
+generation is wired to Hugging Face's Inference Providers (fal-ai backend,
+`black-forest-labs/FLUX.1-schnell`) rather than Impeccable's own
+`generate-image` CLI command — that command only checks for
+`OPENAI_API_KEY` and has no pluggable backend, so it will report image
+generation as unavailable even though this bridge exists.
+
+- **Script:** `~/.config/impeccable-hf/generate_image.py` — deliberately
+  outside this repo (machine-local tooling, not a project dependency; no
+  entry in `pyproject.toml`, nothing for other contributors to install).
+  Usage: `python3 ~/.config/impeccable-hf/generate_image.py "<prompt>"
+  <output.png> [--width W] [--height H]`.
+- **Token:** `~/.config/impeccable-hf/token` — a Hugging Face access token
+  with "Make calls to Inference Providers" permission, one line, mode 600.
+  Not committed anywhere, not part of this project's own credential set
+  (`GEMINI_API_KEY`/`GCP_SERVICE_ACCOUNT_KEY`/etc.) — same handling
+  discipline as any other credential applies: never print it, never pass it
+  as a literal argument, never let it reach a git commit/PR/Artifact.
+- **Why the router path is hand-rolled and provider-specific:** HF's
+  Inference Providers router (`router.huggingface.co`) proxies to each
+  backend provider's own API rather than exposing one uniform REST shape.
+  The script mirrors `huggingface_hub`'s `inference/_providers/fal_ai.py`
+  (route `/fal-ai/<provider_model_id>`, payload `{"prompt", "image_size"}`,
+  response is a JSON body with an image URL to download, not raw image
+  bytes) because `huggingface_hub` itself isn't installed in this
+  environment (no working `pip`) — this is why it isn't just
+  `provider="auto"` via the official client.
+- **If fal-ai stops serving this model:** check
+  `https://huggingface.co/api/models/black-forest-labs/FLUX.1-schnell?expand=inferenceProviderMapping`
+  for another provider with `"status": "live"`, then update the script's
+  route/payload to that provider's own shape (they differ per provider —
+  don't assume fal-ai's shape generalizes).
+- Confirmed live end-to-end 2026-09-06: produced a real dashboard-shaped
+  comp (nav/sidebar/stat-cards/data-table composition) at 512×512 in one
+  deliberate call — same "one deliberate live call, no burst-testing"
+  discipline as the LLM API testing hygiene rule below applies to this too,
+  since it's still a third-party provider's free tier.
+
 ## Substitutions from the brief (and why)
 
 - **`google-genai`** instead of the legacy `vertexai.generative_models` SDK —
