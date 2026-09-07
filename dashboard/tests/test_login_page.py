@@ -73,3 +73,28 @@ async def test_login_page_self_hosts_its_display_font_and_has_no_emoji_icons():
     assert "fonts.gstatic.com" not in body
     for emoji in ("🖥️", "☀️", "🌙", "🇺🇸", "🇮🇱"):
         assert emoji not in body
+
+
+async def test_login_page_language_options_carry_authored_flag_icons():
+    """The language radio list was missing any per-language icon at all
+    (unlike the onboarding wizard's own language menu, which uses flag
+    emoji) -- synced here with an authored SVG flag icon per option,
+    following this system's stroke convention (viewBox 0 0 24 24,
+    stroke="currentColor", stroke-width="2", round caps/joins), not emoji."""
+    client = await _client()
+    body = (await client.get("/login")).text
+    lang_section = body[
+        body.index('id="langPopupBackdrop"') : body.index('id="langPopupBackdrop"') + 1200
+    ]
+    en_label = lang_section[
+        lang_section.index('value="en"') : lang_section.index('value="he"')
+    ]
+    he_label = lang_section[lang_section.index('value="he"') :]
+    for label in (en_label, he_label):
+        assert '<svg viewBox="0 0 24 24"' in label
+        assert 'stroke="currentColor"' in label
+        assert 'stroke-width="2"' in label
+    # The two icons must actually differ from each other (stripes vs. a
+    # Star-of-David emblem) -- not the same glyph copy-pasted twice, which
+    # would defeat the point of a per-language icon.
+    assert en_label != he_label

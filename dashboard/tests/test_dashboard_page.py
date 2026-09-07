@@ -259,6 +259,25 @@ async def test_dashboard_page_self_hosts_its_display_font():
         assert emoji not in body
 
 
+async def test_dashboard_page_language_options_carry_authored_flag_icons():
+    """Same sync as the login page's language menu -- see its own test for
+    the full rationale."""
+    client = await _client()
+    body = (await client.get("/")).text
+    lang_section = body[
+        body.index('id="langPopupBackdrop"') : body.index('id="langPopupBackdrop"') + 1200
+    ]
+    en_label = lang_section[
+        lang_section.index('value="en"') : lang_section.index('value="he"')
+    ]
+    he_label = lang_section[lang_section.index('value="he"') :]
+    for label in (en_label, he_label):
+        assert '<svg viewBox="0 0 24 24"' in label
+        assert 'stroke="currentColor"' in label
+        assert 'stroke-width="2"' in label
+    assert en_label != he_label
+
+
 async def test_static_fonts_are_served_publicly_without_a_session():
     """The login page (pre-authentication) also uses the self-hosted pixel
     font, so its mount must not sit behind require_session -- unlike every
