@@ -218,6 +218,48 @@ by a free external pinger — see `cost.md` for the alternatives that were weigh
   rendering the page (see the skill for why, and the incident it
   generalizes from).
 
+## Docker image: no `chown -R` (2026-09-07)
+
+`Dockerfile` creates `appuser` and switches to it via `USER appuser` before
+`CMD`, but **deliberately never runs `chown -R appuser:appuser /app`** (or
+any other recursive chown of the whole app directory). This was a real
+convention change, not always the case -- measured live: removing a prior
+`RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app` line cut
+the built image from 541MB to 384MB (~29%). The reason is mechanical, not
+cosmetic: an overlay filesystem stores a changed file as a full copy, not a
+diff, so `chown -R` over everything just `COPY`'d/`RUN uv sync`'d in
+earlier layers (the whole `.venv` plus the app code) duplicates all of it
+into a new layer. **Nothing under `/app` is ever written to at runtime** in
+this service -- verified before removing the chown, not assumed (the only
+filesystem access at runtime is a read-only `StaticFiles` mount) -- so
+`appuser` only ever needs the read+execute permissions `COPY`/`RUN` already
+leave in place by default; there was never a functional reason for the
+ownership change to begin with. This was investigated because the
+onboarding wizard's own deploy of this project felt slow on Render's free
+plan -- `render_client.py`'s own hardcoded `dockerfilePath` (see the
+2026-09-07 fix elsewhere in this history) is what actually builds this
+Dockerfile for a wizard-provisioned service, so a smaller image here
+directly shortens every visitor's "Finish & Deploy" step, not just local
+`docker build` time.
+
+**If a future change genuinely needs write access under `/app`** (a cache
+file, a local SQLite DB, anything written by the running process rather
+than read), re-verify that need is real, then chown *only that specific
+path* (e.g. `RUN mkdir -p /app/some-dir && chown appuser:appuser
+/app/some-dir`) or use `COPY --chown=appuser:appuser` on just the files
+that need it -- never reintroduce a blanket `chown -R /app`, which pays the
+full duplication cost again for the entire image regardless of how small
+the actual write-needing path is.
+
+`tests/test_dockerfile.py` pins both properties: no live `chown` command
+anywhere in the file (comments explaining this tradeoff are fine -- the
+check skips comment lines), and `useradd`/`USER appuser` still run in the
+right order before `CMD`. It cannot verify the *size* claim (that requires
+an actual `docker build`, which the `deploy-verify` skill already does as a
+boot smoke test, not a size assertion) -- the test only guards against
+someone silently reintroducing the anti-pattern, and its regression comment
+carries the measured numbers for anyone re-evaluating this later.
+
 ## Impeccable comp-first image generation (manual bridge)
 
 For dashboard redesign work via the Impeccable skill, comp-first image

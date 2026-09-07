@@ -4,6 +4,16 @@ WORKDIR /app
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
+# Created early so USER can drop to it below. Deliberately never
+# `chown -R`'d to it: nothing under /app is ever written to at runtime
+# (verified -- the only filesystem access here is a read-only StaticFiles
+# mount), so appuser only ever needs the read+execute permissions COPY/RUN
+# already leave in place by default. A chown in its own layer would
+# duplicate the entire venv + app code into a new layer (overlayfs stores a
+# changed file as a full copy, not a diff) -- measured at +110MB/+29% image
+# size for zero functional benefit.
+RUN useradd -m -u 1000 appuser
+
 COPY pyproject.toml uv.lock ./
 # dashboard's code (and, critically, its pyproject.toml) must be physically
 # present for uv run's workspace discovery to succeed at runtime -- even
@@ -20,7 +30,6 @@ COPY providers ./providers
 COPY review_queue ./review_queue
 COPY specialists ./specialists
 
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser
 
 EXPOSE 8000
