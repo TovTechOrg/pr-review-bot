@@ -315,7 +315,7 @@ Stack: `pytest`, `pytest-asyncio`, `httpx.AsyncClient` + `ASGITransport`, `respx
   script (one-time, no manual edits on restart).
 - **Secrets/env**: `DATABASE_URL` (Supabase pooler connection string),
   `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` (base64-encoded PEM, verbatim only),
-  `GITHUB_TARGET_REPO` (optional, comma-separated allowlist — unset tracks every
+  `GITHUB_TARGET_REPO` (required, comma-separated allowlist — `*` tracks every
   repo the App installation covers), `LLM_PROVIDER`, plus provider creds
   (`GROQ_API_KEY`, etc.).
 - **Cost**: see `cost.md`. Documented production total ≈ $8–10/mo at brief scale;

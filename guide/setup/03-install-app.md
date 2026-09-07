@@ -73,18 +73,19 @@ already set in Step 2.
 
 Choosing "All repositories" above decides which repos the *installation*
 covers — which repos the App can see at all. `GITHUB_TARGET_REPO` is a
-separate, optional setting on top of that: an allowlist that further narrows
-which of the *installed* repos the bot actually acts on. It doesn't change
-what the App can see, only what it responds to.
+separate, **required** setting on top of that: an allowlist that further
+narrows which of the *installed* repos the bot actually acts on. It doesn't
+change what the App can see, only what it responds to.
 
-Leaving it unset means the bot acts on **every** repo the installation
-covers. That's only a safe default because the App is private (step 2) —
+Setting it to `*` means the bot acts on **every** repo the installation
+covers. That's only a safe choice because the App is private (step 2) —
 only accounts you chose could install it in the first place. If the App
-were public, an unset `GITHUB_TARGET_REPO` would mean accepting events from
-any repo any third party chose to install it on.
+were public, `GITHUB_TARGET_REPO=*` would mean accepting events from any
+repo any third party chose to install it on. The service refuses to boot at
+all if this is left unset, precisely so it's never accidentally left in
+either state.
 
-Optional for the deployed service's own behavior or not, set it now anyway,
-in `.env.config`, to the repo you just installed on:
+Set it now, in `.env.config`, to the repo you just installed on:
 
 ```
 GITHUB_TARGET_REPO=<you>/pr-review-bot-demo
@@ -95,7 +96,7 @@ go on", and `doctor`'s `target-repo` row and `scripts/seed_demo_pr` both read
 this exact same setting — so setting it here, once, means Step 8 needs no
 further setup, and re-running `doctor` from this point on actually exercises
 the `gh-auth`/`target-repo` checks instead of leaving them `SKIPPED`. You can
-always blank it out again later to switch the deployed bot back to
+always switch it to `GITHUB_TARGET_REPO=*` later to move the deployed bot to
 track-all mode.
 
 ## Next

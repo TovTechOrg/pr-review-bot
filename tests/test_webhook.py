@@ -398,8 +398,8 @@ async def test_webhook_matches_allowlist_entry_case_insensitively(monkeypatch, d
     assert db_query("SELECT count(*) FROM tickets") == [(1,)]
 
 
-async def test_webhook_accepts_any_repo_when_target_repo_unset(monkeypatch, db_query):
-    monkeypatch.setattr(settings, "github_target_repo", "")
+async def test_webhook_accepts_any_repo_when_target_repo_is_star(monkeypatch, db_query):
+    monkeypatch.setattr(settings, "github_target_repo", "*")
     payload = {"action": "opened",
                "repository": {"full_name": "someone/any-repo"},
                "pull_request": {"number": 3, "head": {"sha": "xyz"}}}

@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     github_app_installation_id: int = 0
     github_app_private_key: str = ""
     github_webhook_secret: str = ""
+    # Required (see main.py's lifespan and scripts/deploy.py's check_config):
+    # "*" to act on every repo the App's installation covers, or a
+    # comma-separated allowlist of specific "owner/repo" entries. See
+    # target_repos()/default_target_repo() below for how this is parsed.
     github_target_repo: str = ""
     public_base_url: str = ""  # set from RENDER_EXTERNAL_URL on Render; PUBLIC_BASE_URL override
 
@@ -188,24 +192,56 @@ class Settings(BaseSettings):
         """Configured repo allowlist, or empty (= no restriction -- act on
         every repo this App's installation is registered with).
 
-        ',' is a safe delimiter: GitHub repo names may only contain ASCII
-        letters, digits, '.', '-', and '_', and account/org names only
-        alphanumeric characters and '-' -- a comma can never occur inside a
-        genuine "owner/repo" value, so splitting on it can't misinterpret a
-        real repo's name.
+        `GITHUB_TARGET_REPO=*` is the explicit, operator-set spelling of "no
+        restriction" -- a real, non-empty value that can be pushed to Render
+        and tuned there like every other operational key, unlike the old
+        bare-empty-string sentinel (which needed a special exemption from
+        --sync-env's "refuse to push empty values" guard; see
+        scripts/deploy.py's _OPTIONAL_EMPTY_ENV_KEYS history). A left-over
+        empty string still parses to the same "no restriction" frozenset
+        here (so nothing crashes), but it's no longer a valid *configured*
+        state -- main.py's lifespan and scripts/deploy.py's check_config()
+        both refuse to start/deploy on an empty value, forcing an operator to
+        pick "*" or a real allowlist rather than leaving it unset by
+        accident.
+
+        ',' is a safe delimiter for the allowlist form: GitHub repo names may
+        only contain ASCII letters, digits, '.', '-', and '_', and
+        account/org names only alphanumeric characters and '-' -- a comma
+        can never occur inside a genuine "owner/repo" value, so splitting on
+        it can't misinterpret a real repo's name.
         """
-        return frozenset(r.strip() for r in self.github_target_repo.split(",") if r.strip())
+        value = self.github_target_repo.strip()
+        if value == "*":
+            return frozenset()
+        return frozenset(r.strip() for r in value.split(",") if r.strip())
+
+    def is_target_repo_configured(self) -> bool:
+        """Whether GITHUB_TARGET_REPO has been explicitly set at all ("*" or
+        a real allowlist) -- distinct from target_repos() being empty, which
+        is also true for the unconfigured state (see target_repos()'s
+        docstring). Setup-time tooling (scripts/doctor.py) needs this
+        distinction to tell "not configured yet" apart from a deliberate
+        "*"; main.py's lifespan and scripts/deploy.py's check_config() use
+        the plain falsy check directly since they only care about the
+        unconfigured case."""
+        return bool(self.github_target_repo.strip())
 
     def default_target_repo(self) -> str:
         """The first entry of GITHUB_TARGET_REPO's comma-separated list (or
-        "" if unset) -- for a manual/demo script that operates against
+        "" if unset or "*") -- for a manual/demo script that operates against
         exactly one repo (seed_demo_pr.py, demo_provider_swap.py), never
         target_repos() itself: that returns an unordered frozenset, correct
         for webhook.py's membership check but wrong here, where a single
         deterministic repo is needed. Reading github_target_repo directly
         would break under multi-repo config -- the raw field is the whole
-        comma-joined string, not a single repo."""
-        first, _, _ = self.github_target_repo.partition(",")
+        comma-joined string, not a single repo. "*" has no single repo to
+        return either -- those scripts need a real testbed repo configured,
+        not "act on everything"."""
+        value = self.github_target_repo.strip()
+        if value == "*":
+            return ""
+        first, _, _ = value.partition(",")
         return first.strip()
 
 

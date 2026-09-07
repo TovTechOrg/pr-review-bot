@@ -68,9 +68,9 @@ doesn't go unnoticed. Run it once you've collected the credentials below.
 !!! warning "Keep the App private"
     "Only on this account" above is not a default to leave alone — publishing
     the App to the GitHub Marketplace ("Any account") is a real, clickable
-    option on the same form. Leaving `GITHUB_TARGET_REPO` unset (step 3) makes
+    option on the same form. Setting `GITHUB_TARGET_REPO=*` (step 3) makes
     the bot act on *every* repo the installation covers, and that's only a
-    safe default because only accounts *you* choose can install a private
+    safe choice because only accounts *you* choose can install a private
     App in the first place. A public App would let any third party
     self-install and have their events accepted in that same track-all mode.
 

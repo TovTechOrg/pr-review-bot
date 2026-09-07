@@ -262,10 +262,15 @@ def check_target_repo_covered() -> deploy.CheckResult:
     the other side: whether the LOCAL `gh` CLI's authenticated account can
     actually reach the same repo.
     """
+    if not settings.is_target_repo_configured():
+        return deploy.CheckResult(
+            "target-repo", "SKIPPED", "GITHUB_TARGET_REPO not set yet"
+        )
     repos = settings.target_repos()
     if not repos:
         return deploy.CheckResult(
-            "target-repo", "SKIPPED", "GITHUB_TARGET_REPO unset (track-all mode)"
+            "target-repo", "SKIPPED",
+            "GITHUB_TARGET_REPO=* (track-all mode) -- no specific repo to verify",
         )
     if not all(name in _probes.present_secrets() for name in _APP_CREDENTIALS):
         return deploy.CheckResult(
@@ -332,11 +337,17 @@ def check_gh_auth() -> deploy.CheckResult:
     login = _run_gh("api", "user", "--jq", ".login")
     who = login.stdout.strip() if login.returncode == 0 and login.stdout.strip() else "(unknown)"
 
+    if not settings.is_target_repo_configured():
+        return deploy.CheckResult(
+            "gh-auth", "PASS",
+            f"authenticated as {who}; set GITHUB_TARGET_REPO later to verify repo access",
+        )
     repos = settings.target_repos()
     if not repos:
         return deploy.CheckResult(
             "gh-auth", "PASS",
-            f"authenticated as {who}; set GITHUB_TARGET_REPO later to verify repo access",
+            f"authenticated as {who}; GITHUB_TARGET_REPO=* (track-all mode) -- "
+            "no specific repo to verify",
         )
 
     cant_push = []

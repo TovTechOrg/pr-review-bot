@@ -44,7 +44,7 @@ This uses the repo you picked, installed the App on, and set as
 `GITHUB_TARGET_REPO` back in [Step 3](03-install-app.md) — that setting
 only needs to exist on your own machine for this demo, since `seed_demo_pr`
 runs entirely locally; it doesn't need to be pushed to Render (the deployed
-service's own copy of `GITHUB_TARGET_REPO` is a separate, still-optional
+service's own copy of `GITHUB_TARGET_REPO` is a separate, still-required
 narrowing of which installed repos the bot itself acts on). If you skipped
 setting it locally, do it now — `uv run python -m scripts.doctor`'s
 `gh-auth` and `target-repo` rows will FAIL with the specific account/repo

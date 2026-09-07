@@ -31,6 +31,11 @@ def _env(db, monkeypatch):
     # start with an empty/unsupported provider too, so every test that isn't
     # specifically exercising that check needs a valid stand-in.
     monkeypatch.setattr(settings, "llm_provider", "gemini")
+    # Same reasoning again for GITHUB_TARGET_REPO, which lost its implicit
+    # "act on every repo" meaning for an empty value -- "*" is now the
+    # explicit spelling of that, and lifespan refuses to start with a plain
+    # empty value (2026-09-07).
+    monkeypatch.setattr(settings, "github_target_repo", "*")
     dispatcher.reset_blocked_until()
     yield
     dispatcher.reset_blocked_until()
@@ -158,6 +163,24 @@ async def test_lifespan_fails_loudly_when_installation_id_does_not_match_discove
     message = str(exc.value)
     assert "111" in message
     assert "222" in message
+
+
+async def test_lifespan_refuses_to_start_without_target_repo(monkeypatch):
+    """An empty GITHUB_TARGET_REPO used to silently mean "act on every
+    repo"; that's now the explicit, non-empty "*" -- a plain empty value is
+    unconfigured, not a deliberate track-all choice, and must be a hard
+    startup failure like every other required key."""
+    monkeypatch.setattr(settings, "github_target_repo", "")
+    monkeypatch.setattr(settings, "github_app_installation_id", 12345)
+
+    def _boom() -> int:
+        raise AssertionError("must not attempt installation discovery before this check")
+
+    monkeypatch.setattr(main.github_app, "discover_and_verify_installation_id", _boom)
+
+    with pytest.raises(RuntimeError, match="GITHUB_TARGET_REPO"):
+        async with main.lifespan(main.app):
+            pass
 
 
 async def test_lifespan_refuses_to_start_without_llm_provider(monkeypatch):

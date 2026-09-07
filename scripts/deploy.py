@@ -71,13 +71,15 @@ _ALWAYS_SYNCED = (
     # silently missing it, with no check catching the gap.
     "RENDER_API_KEY",
 )
-# GITHUB_TARGET_REPO empty is a valid, deliberate "track all repos" config
-# (docs/superpowers/specs/2026-08-17-multi-repo-support-design.md), not a
-# missing required value -- exempt from sync_env()'s "refuse to push empty
-# values" guard below. GCP_PROJECT is the same shape: unset means "use the
-# project_id embedded in the service-account key" (see config.py), not a
-# missing one.
-_OPTIONAL_EMPTY_ENV_KEYS = frozenset({"GITHUB_TARGET_REPO", "GCP_PROJECT"})
+# GCP_PROJECT unset means "use the project_id embedded in the service-account
+# key" (see config.py), not a missing value -- exempt from sync_env()'s
+# "refuse to push empty values" guard below. GITHUB_TARGET_REPO used to be
+# exempt too (empty meant "track all repos"), but that sentinel is now the
+# explicit, non-empty "*" (docs/superpowers/specs/2026-08-17-multi-repo-
+# support-design.md's track-all mode, updated 2026-09-07): a genuinely empty
+# GITHUB_TARGET_REPO is unconfigured, not deliberate, so it goes through the
+# ordinary empty-value refusal like every other required key.
+_OPTIONAL_EMPTY_ENV_KEYS = frozenset({"GCP_PROJECT"})
 
 # OPERATIONAL_KEYS (config.py) names, mapped to the Settings attribute
 # holding their local value, for every one that has NO other sync path here:
@@ -241,6 +243,8 @@ def check_config() -> CheckResult:
         missing.append("GITHUB_APP_INSTALLATION_ID")
     if not settings.github_webhook_secret:
         missing.append("GITHUB_WEBHOOK_SECRET")
+    if not settings.github_target_repo:
+        missing.append("GITHUB_TARGET_REPO")
     if not settings.dashboard_username:
         missing.append("DASHBOARD_USERNAME")
     if not settings.dashboard_password:

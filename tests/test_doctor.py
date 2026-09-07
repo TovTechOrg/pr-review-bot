@@ -249,6 +249,16 @@ def test_target_repo_covered_skips_when_target_repo_is_unset(bare):
     assert doctor.check_target_repo_covered().status == "SKIPPED"
 
 
+def test_target_repo_covered_skips_when_target_repo_is_star(bare, monkeypatch):
+    """"*" is a deliberate track-all choice, not an unconfigured one -- it
+    still SKIPs (no specific repo to verify coverage for) but with a
+    distinct message from the plain-unset case above."""
+    monkeypatch.setattr(settings, "github_target_repo", "*")
+    result = doctor.check_target_repo_covered()
+    assert result.status == "SKIPPED"
+    assert "track-all" in result.detail
+
+
 def test_target_repo_covered_skips_without_app_credentials(bare, monkeypatch):
     monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
     result = doctor.check_target_repo_covered()
@@ -338,6 +348,29 @@ def test_gh_auth_passes_with_no_target_repo_once_authenticated(bare, monkeypatch
 
     assert result.status == "PASS"
     assert "octocat" in result.detail
+
+
+def test_gh_auth_passes_with_target_repo_star_once_authenticated(bare, monkeypatch):
+    """"*" is a deliberate track-all choice, not an unconfigured one -- it
+    still PASSes (no specific repo to check push access for) but with a
+    distinct message from the plain-unset case above."""
+    monkeypatch.setattr(settings, "github_target_repo", "*")
+    monkeypatch.setattr(doctor._prereqs, "is_available", lambda _tool: True)
+
+    def _run_gh(*args):
+        if args == ("auth", "status"):
+            return subprocess.CompletedProcess(args, 0, "", "")
+        if args[:2] == ("api", "user"):
+            return subprocess.CompletedProcess(args, 0, "octocat\n", "")
+        raise AssertionError(f"unexpected gh invocation: {args}")
+
+    monkeypatch.setattr(doctor, "_run_gh", _run_gh)
+
+    result = doctor.check_gh_auth()
+
+    assert result.status == "PASS"
+    assert "octocat" in result.detail
+    assert "track-all" in result.detail
 
 
 def test_gh_auth_flags_a_repo_it_cannot_push_to(bare, monkeypatch):

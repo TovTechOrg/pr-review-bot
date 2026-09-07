@@ -59,6 +59,18 @@ async def lifespan(app: FastAPI):
             "github-app check (or check the GitHub UI) to find the App's current "
             "installation id."
         )
+    if not settings.github_target_repo:
+        # An empty value used to silently mean "act on every repo" -- now
+        # that must be chosen explicitly (GITHUB_TARGET_REPO=*), so a plain
+        # unset value is treated as unconfigured rather than a deliberate
+        # track-all choice. This also lets the var round-trip through
+        # --sync-env like every other operational key, instead of needing a
+        # special exemption from its "refuse to push empty values" guard.
+        raise RuntimeError(
+            "GITHUB_TARGET_REPO is unset -- refusing to start. Set it to \"*\" to act "
+            "on every repo this App's installation covers, or a comma-separated "
+            "allowlist of specific \"owner/repo\" entries."
+        )
     if (
         not settings.dashboard_username
         or not settings.dashboard_password

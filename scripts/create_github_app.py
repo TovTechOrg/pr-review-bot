@@ -107,8 +107,8 @@ class AppCredentials(NamedTuple):
 def build_manifest(app_name: str, base_url: str, redirect_url: str) -> dict:
     """The manifest GitHub is asked to create an App from.
 
-    public=False is a security boundary, not a preference: leaving
-    GITHUB_TARGET_REPO unset makes the bot act on every repo its installation
+    public=False is a security boundary, not a preference: setting
+    GITHUB_TARGET_REPO=* makes the bot act on every repo its installation
     covers, which is only safe because a private App can only be installed by
     accounts the owner chooses. A public App would let any third party
     self-install and have their events accepted (guide/setup/02-github-app.md).

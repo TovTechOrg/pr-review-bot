@@ -242,10 +242,20 @@ def test_check_config_requires_the_installation_id(complete_config, monkeypatch)
     assert "GITHUB_APP_INSTALLATION_ID" in result.detail
 
 
-def test_check_config_passes_with_an_empty_target_repo(complete_config, monkeypatch):
-    """GITHUB_TARGET_REPO is optional (multi-repo support design doc §3e) --
-    an empty value (track-all mode) must not be reported as missing."""
+def test_check_config_requires_a_target_repo(complete_config, monkeypatch):
+    """An empty GITHUB_TARGET_REPO used to be a valid "track all repos"
+    value; it's now unconfigured -- "*" is the explicit spelling of
+    track-all (2026-09-07), so an empty value is reported as missing."""
     monkeypatch.setattr(settings, "github_target_repo", "")
+    result = deploy.check_config()
+    assert result.status == "FAIL"
+    assert "GITHUB_TARGET_REPO" in result.detail
+
+
+def test_check_config_passes_with_target_repo_star(complete_config, monkeypatch):
+    """"*" is the explicit, non-empty "track all repos" value -- it must
+    satisfy check_config() the same as a real allowlist entry."""
+    monkeypatch.setattr(settings, "github_target_repo", "*")
     assert deploy.check_config().status == "PASS"
 
 
@@ -1384,10 +1394,12 @@ def test_main_with_sync_env_returns_early_without_the_checklist_on_failure(
     assert "all checks passed" not in capsys.readouterr().out
 
 
-def test_main_proceeds_without_a_target_repo_track_all_mode(monkeypatch, capsys):
-    """GITHUB_TARGET_REPO is optional (track-all mode) -- its absence alone
-    must not block main() the way a missing base URL does."""
-    monkeypatch.setattr(settings, "github_target_repo", "")
+def test_main_proceeds_with_a_target_repo_of_star_track_all_mode(monkeypatch, capsys):
+    """GITHUB_TARGET_REPO=* (track-all mode) is a real, non-empty value like
+    any other -- it must not block main() the way a missing base URL does.
+    (An empty value would instead surface as a check_config FAIL, not an
+    early exit -- checks are stubbed here so that's not what's under test.)"""
+    monkeypatch.setattr(settings, "github_target_repo", "*")
     monkeypatch.setattr(settings, "public_base_url", BASE)
     _stub_all_checks(monkeypatch, ["PASS"] * 8 + ["SKIPPED"] * 4)
     assert deploy.main([]) == 0
@@ -1443,7 +1455,7 @@ def test_main_json_emits_the_full_checklist_as_one_object(runnable, monkeypatch,
 
 def test_main_health_only_works_without_a_target_repo(monkeypatch):
     """The whole point of --health-only: no GITHUB_TARGET_REPO needed."""
-    monkeypatch.setattr(settings, "github_target_repo", "")
+    monkeypatch.setattr(settings, "github_target_repo", "*")
     monkeypatch.setattr(settings, "public_base_url", BASE)
     with respx.mock:
         respx.get(HEALTH).mock(return_value=httpx.Response(200))
@@ -1545,7 +1557,7 @@ def test_wanted_env_includes_installation_id_as_empty_when_unset(
     -- an unset (0) value must still appear in _wanted_env()'s output (as an
     empty string) so sync_env()'s generic "refuse to push empty values"
     guard catches it, rather than being silently omitted the way a
-    genuinely optional setting (e.g. GITHUB_TARGET_REPO) is."""
+    genuinely optional setting (e.g. GCP_PROJECT) is."""
     monkeypatch.setattr(settings, "github_app_installation_id", 0)
     assert deploy._wanted_env()["GITHUB_APP_INSTALLATION_ID"] == ""
 
@@ -1772,13 +1784,25 @@ def test_sync_env_refuses_to_push_without_an_installation_id(sync_ready, monkeyp
     assert "GITHUB_APP_INSTALLATION_ID" in capsys.readouterr().err
 
 
-def test_sync_env_pushes_an_empty_target_repo_without_tripping_the_empty_guard(
+def test_sync_env_refuses_an_empty_target_repo(sync_ready, monkeypatch, capsys):
+    """An empty GITHUB_TARGET_REPO used to be a valid, deliberate "track all
+    repos" config exempt from the empty-value guard; it's now unconfigured
+    -- "*" is the explicit spelling of track-all (2026-09-07), so it must
+    trip the guard like any other required key."""
+    monkeypatch.setattr(settings, "github_target_repo", "")
+    monkeypatch.setattr(deploy._render, "find_service_id", lambda: None)
+    code = deploy.sync_env()
+    err = capsys.readouterr().err
+    assert "GITHUB_TARGET_REPO" in err
+    assert code == 2
+
+
+def test_sync_env_pushes_a_target_repo_of_star_without_tripping_the_empty_guard(
     sync_ready, monkeypatch, capsys
 ):
-    """Track-all mode (design doc §3e): an empty GITHUB_TARGET_REPO is a
-    deliberate, valid config value, not a missing one -- sync_env must not
-    refuse to push it the way it refuses a genuinely missing required value."""
-    monkeypatch.setattr(settings, "github_target_repo", "")
+    """"*" is a real, non-empty value -- it goes through the ordinary PUT
+    path like any other required key, no DELETE special-casing needed."""
+    monkeypatch.setattr(settings, "github_target_repo", "*")
     monkeypatch.setattr(deploy._render, "find_service_id", lambda: None)
     code = deploy.sync_env()
     err = capsys.readouterr().err
@@ -1786,24 +1810,24 @@ def test_sync_env_pushes_an_empty_target_repo_without_tripping_the_empty_guard(
     assert code == 1          # got past the empty-value guard, failed on the missing service
 
 
-def test_sync_env_deletes_rather_than_puts_an_empty_target_repo(sync_ready, monkeypatch):
+def test_sync_env_deletes_rather_than_puts_an_empty_optional_key(sync_ready, monkeypatch):
     """Render's PUT env-vars endpoint rejects an empty string outright (400:
     "must provide a value or generateValue must be set to true"), confirmed
-    live -- an _OPTIONAL_EMPTY_ENV_KEYS entry with an empty wanted value must
-    be unset via DELETE, never PUT with value=""."""
-    monkeypatch.setattr(settings, "github_target_repo", "")
+    live -- an _OPTIONAL_EMPTY_ENV_KEYS entry (GCP_PROJECT) with an empty
+    wanted value must be unset via DELETE, never PUT with value=""."""
+    monkeypatch.setattr(settings, "gcp_project", "")
     with respx.mock:
         respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
         wanted = deploy._wanted_env()
         current = dict(wanted)
-        current["GITHUB_TARGET_REPO"] = "owner/stale-repo"  # stale non-empty value on Render
+        current["GCP_PROJECT"] = "stale-project"  # stale non-empty value on Render
         respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
             return_value=httpx.Response(200, json=_env_var_list(current))
         )
         delete_route = respx.delete(
-            f"{RENDER_SERVICES}/srv-1/env-vars/GITHUB_TARGET_REPO"
+            f"{RENDER_SERVICES}/srv-1/env-vars/GCP_PROJECT"
         ).mock(return_value=httpx.Response(204))
-        put_route = respx.put(f"{RENDER_SERVICES}/srv-1/env-vars/GITHUB_TARGET_REPO").mock(
+        put_route = respx.put(f"{RENDER_SERVICES}/srv-1/env-vars/GCP_PROJECT").mock(
             return_value=httpx.Response(200, json={})
         )
         respx.get(f"{RENDER_SERVICES}/srv-1/deploys").mock(
@@ -1824,16 +1848,16 @@ def test_sync_env_deletes_rather_than_puts_an_empty_target_repo(sync_ready, monk
 def test_sync_env_treats_a_404_on_delete_as_already_unset(sync_ready, monkeypatch):
     """A 404 deleting an already-absent var is success, not a failure -- the
     var ends up unset either way, which is the actual goal."""
-    monkeypatch.setattr(settings, "github_target_repo", "")
+    monkeypatch.setattr(settings, "gcp_project", "")
     with respx.mock:
         respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
         wanted = deploy._wanted_env()
         current = dict(wanted)
-        current["GITHUB_TARGET_REPO"] = "owner/stale-repo"
+        current["GCP_PROJECT"] = "stale-project"
         respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
             return_value=httpx.Response(200, json=_env_var_list(current))
         )
-        respx.delete(f"{RENDER_SERVICES}/srv-1/env-vars/GITHUB_TARGET_REPO").mock(
+        respx.delete(f"{RENDER_SERVICES}/srv-1/env-vars/GCP_PROJECT").mock(
             return_value=httpx.Response(404, json={"message": "not found"})
         )
         respx.get(f"{RENDER_SERVICES}/srv-1/deploys").mock(
@@ -1849,21 +1873,21 @@ def test_sync_env_treats_a_404_on_delete_as_already_unset(sync_ready, monkeypatc
     assert code == 0
 
 
-def test_sync_env_treats_an_already_absent_target_repo_as_in_sync(sync_ready, monkeypatch, capsys):
-    """An empty local GITHUB_TARGET_REPO and no such key on Render at all
-    (never in `current`, not merely empty -- Render can't store an empty
-    string) must read as already-in-sync, not as a change needing a DELETE
-    and a redeploy on every single --sync-env run."""
-    monkeypatch.setattr(settings, "github_target_repo", "")
+def test_sync_env_treats_an_already_absent_optional_key_as_in_sync(sync_ready, monkeypatch, capsys):
+    """An empty local GCP_PROJECT and no such key on Render at all (never in
+    `current`, not merely empty -- Render can't store an empty string) must
+    read as already-in-sync, not as a change needing a DELETE and a
+    redeploy on every single --sync-env run."""
+    monkeypatch.setattr(settings, "gcp_project", "")
     with respx.mock:
         respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
         wanted = deploy._wanted_env()
-        current = {k: v for k, v in wanted.items() if k != "GITHUB_TARGET_REPO"}
+        current = {k: v for k, v in wanted.items() if k != "GCP_PROJECT"}
         respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
             return_value=httpx.Response(200, json=_env_var_list(current))
         )
         delete_route = respx.delete(
-            f"{RENDER_SERVICES}/srv-1/env-vars/GITHUB_TARGET_REPO"
+            f"{RENDER_SERVICES}/srv-1/env-vars/GCP_PROJECT"
         ).mock(return_value=httpx.Response(204))
         code = deploy.sync_env()
     assert not delete_route.called
@@ -1924,10 +1948,10 @@ def test_sync_env_pushes_only_changed_keys_via_the_single_key_endpoint(sync_read
         respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
         wanted = deploy._wanted_env()
         current = dict.fromkeys(wanted, "stale")
-        # Already correct -- these two default to empty (GITHUB_TARGET_REPO:
-        # track-all; GCP_PROJECT: derived from the service-account key), and
-        # an empty wanted value takes the DELETE branch, not this test's PUT
-        # endpoint (see test_sync_env_deletes_rather_than_puts_an_empty_target_repo).
+        # Already correct -- GCP_PROJECT defaults to empty (derived from the
+        # service-account key), and an empty wanted value takes the DELETE
+        # branch, not this test's PUT endpoint (see
+        # test_sync_env_deletes_rather_than_puts_an_empty_optional_key).
         for optional_empty_key in deploy._OPTIONAL_EMPTY_ENV_KEYS:
             current[optional_empty_key] = wanted[optional_empty_key]
         respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(

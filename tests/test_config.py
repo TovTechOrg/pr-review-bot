@@ -292,9 +292,27 @@ def test_target_repos_strips_whitespace_around_entries():
     assert settings.target_repos() == frozenset({"org/repo-a", "org/repo-b"})
 
 
-def test_target_repos_empty_string_means_no_restriction():
+def test_target_repos_star_means_no_restriction():
+    settings = Settings(github_target_repo="*", _env_file=None)
+    assert settings.target_repos() == frozenset()
+
+
+def test_target_repos_empty_string_also_means_no_restriction():
+    """A left-over empty value still parses without crashing, but it's no
+    longer a valid *configured* state -- main.py's lifespan and
+    scripts/deploy.py's check_config() both refuse to start/deploy on it,
+    forcing an operator to pick "*" or a real allowlist explicitly."""
     settings = Settings(github_target_repo="", _env_file=None)
     assert settings.target_repos() == frozenset()
+
+
+def test_is_target_repo_configured():
+    assert Settings(github_target_repo="", _env_file=None).is_target_repo_configured() is False
+    assert Settings(github_target_repo="*", _env_file=None).is_target_repo_configured() is True
+    assert (
+        Settings(github_target_repo="org/repo", _env_file=None).is_target_repo_configured()
+        is True
+    )
 
 
 def test_target_repos_single_value_has_no_comma():
@@ -323,6 +341,13 @@ def test_default_target_repo_strips_whitespace():
 
 def test_default_target_repo_empty_when_unset():
     settings = Settings(github_target_repo="", _env_file=None)
+    assert settings.default_target_repo() == ""
+
+
+def test_default_target_repo_empty_for_star():
+    """"*" has no single repo to hand back -- a demo script needs a real
+    testbed repo configured, not "act on everything"."""
+    settings = Settings(github_target_repo="*", _env_file=None)
     assert settings.default_target_repo() == ""
 
 
