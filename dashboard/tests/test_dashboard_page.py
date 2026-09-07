@@ -278,6 +278,22 @@ async def test_dashboard_page_language_options_carry_authored_flag_icons():
     assert en_label != he_label
 
 
+async def test_env_info_icon_has_no_native_title_tooltip():
+    """The button used to carry both a native `title` attribute (the
+    browser's own delayed hover tooltip) and the authored `.info-tooltip`
+    span (shown via CSS on hover/focus/click) -- hovering an info icon
+    showed both at once, overlapping. `aria-label` alone is enough for the
+    accessible name; the authored tooltip is the only visible one now."""
+    client = await _client()
+    body = (await client.get("/")).text
+    fn_start = body.index("function keyCellHtml")
+    fn_body = body[fn_start : body.index("function maskedValue")]
+    assert 'class="info-icon"' in fn_body
+    assert "title=" not in fn_body
+    assert 'aria-label="${esc(t("env_info_label"))}"' in fn_body
+    assert 'class="info-tooltip"' in fn_body
+
+
 async def test_static_fonts_are_served_publicly_without_a_session():
     """The login page (pre-authentication) also uses the self-hosted pixel
     font, so its mount must not sit behind require_session -- unlike every
