@@ -1,10 +1,11 @@
-"""The model actually in force per provider: a DB override when set, else the
-env value from registry.PROVIDERS. Mirrors tests/test_key_index_override.py."""
+"""The model actually in force per (provider, credential slot): a DB
+override when set for that exact slot, else None -- no env fallback (see
+docs/superpowers/specs/2026-09-08-slotted-config-and-db-delegation-design.md
+sections 4b/10.5). Mirrors tests/test_key_index_override.py."""
 from __future__ import annotations
 
 import pytest
 
-from config import settings
 from providers import active_model
 
 
@@ -15,42 +16,26 @@ def _clean_cache():
     active_model.reset_override_cache()
 
 
-def test_falls_back_to_the_env_model_when_no_override(monkeypatch):
-    monkeypatch.setattr(settings, "vertex_model", "env-vertex")
-    assert active_model.active_model("vertex") == "env-vertex"
+def test_active_model_is_keyed_by_provider_and_slot():
+    active_model.set_override_cache(
+        {("groq", 0): "llama-3.3-70b-versatile", ("groq", 1): "gemma2-9b-it"}
+    )
+    assert active_model.active_model("groq", 0) == "llama-3.3-70b-versatile"
+    assert active_model.active_model("groq", 1) == "gemma2-9b-it"
 
 
-def test_override_wins_over_env(monkeypatch):
-    monkeypatch.setattr(settings, "vertex_model", "env-vertex")
-    active_model.set_override_cache({"vertex": "override-vertex"})
-    assert active_model.active_model("vertex") == "override-vertex"
+def test_active_model_returns_none_for_unconfigured_slot():
+    assert active_model.active_model("gemini", 0) is None
 
 
-def test_each_provider_tracks_its_own_model(monkeypatch):
-    """A provider flip must not drag another provider's model with it."""
-    monkeypatch.setattr(settings, "groq_model", "env-groq")
-    active_model.set_override_cache({"vertex": "override-vertex"})
-    assert active_model.active_model("groq") == "env-groq"
+def test_each_slot_tracks_its_own_model():
+    """A slot flip must not drag another slot's model with it."""
+    active_model.set_override_cache({("vertex", 0): "override-vertex"})
+    assert active_model.active_model("groq", 0) is None
 
 
-def test_empty_override_degrades_to_env(monkeypatch):
-    """Fail-safe: a blank hand-edited row must not blank out the model."""
-    monkeypatch.setattr(settings, "groq_model", "env-groq")
-    active_model.set_override_cache({"groq": ""})
-    assert active_model.active_model("groq") == "env-groq"
-
-
-def test_unknown_provider_degrades_to_the_gemini_model(monkeypatch):
-    monkeypatch.setattr(settings, "gemini_model", "env-gemini")
-    assert active_model.active_model("nonesuch") == "env-gemini"
-
-
-def test_empty_env_model_degrades_to_the_gemini_model(monkeypatch):
-    """Unreachable today since every registry model var maps to a real,
-    non-empty-by-default Settings field -- but if one were ever hand-set to
-    empty (e.g. VERTEX_MODEL="" in .env.config), this value goes straight to
-    a live provider SDK, not just a display string, so it must never come
-    back as "" the way an unset/empty DB override is allowed to degrade."""
-    monkeypatch.setattr(settings, "vertex_model", "")
-    monkeypatch.setattr(settings, "gemini_model", "env-gemini")
-    assert active_model.active_model("vertex") == "env-gemini"
+def test_empty_override_is_treated_as_unconfigured():
+    """Fail-safe: a blank hand-edited row must not read back as a real
+    model name."""
+    active_model.set_override_cache({("groq", 0): ""})
+    assert active_model.active_model("groq", 0) is None

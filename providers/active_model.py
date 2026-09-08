@@ -1,51 +1,27 @@
-"""The model name actually in force per provider: a DB override when set, else
-the env-configured value named by registry.PROVIDERS.
-
-Every read of the active model goes through active_model(). Mirrors
-providers/key_index.py exactly, including the reason for the split: the DB
-read lives in the dispatcher (where the asyncio.to_thread convention applies)
-and is pushed in via set_override_cache, keeping this module import-light and
-non-blocking.
-
-Fail-safe by construction: the cache starts empty, so before the first refresh
--- and whenever a refresh fails -- every provider degrades to its env model
-rather than to a crash or an empty string. An empty cached value (hand-edited
-row, or a future bug) is treated as "no override" for the same reason: an empty
-model name is not a model, and sending one to a provider SDK is a guaranteed
-failure where the env value is a working default. The env-model lookup itself
-is guarded the same way: it can never return an empty string either, even
-though every registry model var maps to a real, non-empty-by-default Settings
-field today, so nothing currently exercises that fallback -- this value is
-handed straight to a live LLM provider SDK, not just formatted into a PR
-comment, so a defensive empty-string guard belongs here regardless.
+# providers/active_model.py
+"""The model name actually in force per (provider, credential slot): a DB
+override when set for that exact slot, else None. No env fallback -- see
+docs/superpowers/specs/2026-09-08-slotted-config-and-db-delegation-design.md
+sections 4b/10.5. A slot with no configured model is a real missing-config
+state; the caller (providers/factory.py::_build) is responsible for turning
+that into a visible failure. This module stays as dependency-free as
+providers/key_index.py, on purpose -- it does no I/O and raises nothing
+itself.
 """
 
 from __future__ import annotations
 
-from config import settings
-from providers import registry
-
-_overrides: dict[str, str] = {}
+_overrides: dict[tuple[str, int], str] = {}
 
 
-def active_model(provider: str) -> str:
-    """The model for `provider` -- its DB override when set and non-empty,
-    else the env value named by registry.PROVIDERS.
-
-    An unknown provider falls back to the gemini model rather than raising:
-    callers include the PR-comment reporting path, which must never be able to
-    abort a review.
-    """
-    override = _overrides.get(provider)
-    if override:
-        return override
-    entry = registry.PROVIDERS.get(provider)
-    if entry is None:
-        return settings.gemini_model
-    return getattr(settings, entry[1].lower(), "") or settings.gemini_model
+def active_model(provider: str, index: int) -> str | None:
+    """The model configured for this exact (provider, slot), or None if
+    that slot has never been configured."""
+    value = _overrides.get((provider, index))
+    return value if value else None
 
 
-def set_override_cache(overrides: dict[str, str]) -> None:
+def set_override_cache(overrides: dict[tuple[str, int], str]) -> None:
     global _overrides
     _overrides = overrides
 
