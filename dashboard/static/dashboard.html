@@ -480,6 +480,8 @@
   .sev-medium { color: var(--sev-medium); font-weight: 400; }
   .status-ok { color: var(--ok); font-weight: 400; }
   .status-failed { color: var(--fail); font-weight: 600; }
+  #renderSaveResult ul, #configSaveResult ul { margin: 0.2rem 0 0.5rem 1.2rem; padding: 0; }
+  #renderSaveResult li, #configSaveResult li { font-weight: 400; }
   a.comment-link { color: var(--text); text-decoration: underline; }
 </style>
 </head>
@@ -600,12 +602,12 @@
         </table>
         <form id="addVarForm">
           <input id="newVarKey" type="text" placeholder="KEY_NAME" required>
-          <input id="newVarValue" type="text" placeholder="value" required>
+          <input id="newVarValue" type="text" placeholder="value" data-i18n-placeholder="env_add_value_placeholder" required>
           <button type="submit" data-i18n="env_add"></button>
         </form>
         <div class="env-controls-row">
           <select id="guidedSetupSelect">
-            <option value="" data-i18n="env_guided_setup"></option>
+            <option value="" data-i18n="env_guided_setup" disabled hidden selected></option>
             <option value="gemini" data-i18n="env_guided_gemini"></option>
             <option value="groq" data-i18n="env_guided_groq"></option>
             <option value="vertex" data-i18n="env_guided_vertex"></option>
@@ -639,7 +641,20 @@
       <section class="env-section">
         <h2 data-i18n="env_config_title"></h2>
         <form id="configForm">
-          <label data-i18n="env_config_provider"></label>
+          <label>
+            <span data-i18n="env_config_provider"></span>
+            <span class="info-wrap">
+              <button type="button" class="info-icon" data-action="info" aria-label="More info" data-i18n-aria="env_info_label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9"/>
+                  <line x1="12" y1="11" x2="12" y2="16"/>
+                  <circle cx="12" cy="7.5" r="0.75" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_provider"></span>
+            </span>
+          </label>
           <select id="cfgProvider">
             <option value="">—</option>
             <option value="gemini">gemini</option>
@@ -647,20 +662,101 @@
             <option value="vertex">vertex</option>
           </select>
           <div id="providerModelRows" class="provider-model-grid"></div>
-          <label data-i18n="env_config_cooldown_base"></label>
+          <!-- Alphabetized by field key (cooldown_base_seconds, cooldown_factor,
+               cooldown_max_seconds, review_draft_prs, usage_cap_reset,
+               usage_cap_tokens) -- provider stays pinned above, since it
+               drives #providerModelRows directly beneath it. -->
+          <label>
+            <span data-i18n="env_config_cooldown_base"></span>
+            <span class="info-wrap">
+              <button type="button" class="info-icon" data-action="info" aria-label="More info" data-i18n-aria="env_info_label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9"/>
+                  <line x1="12" y1="11" x2="12" y2="16"/>
+                  <circle cx="12" cy="7.5" r="0.75" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_cooldown_base"></span>
+            </span>
+          </label>
           <input id="cfgCooldownBase" type="number" step="any">
-          <label data-i18n="env_config_cooldown_max"></label>
-          <input id="cfgCooldownMax" type="number" step="any">
-          <label data-i18n="env_config_cooldown_factor"></label>
+          <label>
+            <span data-i18n="env_config_cooldown_factor"></span>
+            <span class="info-wrap">
+              <button type="button" class="info-icon" data-action="info" aria-label="More info" data-i18n-aria="env_info_label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9"/>
+                  <line x1="12" y1="11" x2="12" y2="16"/>
+                  <circle cx="12" cy="7.5" r="0.75" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_cooldown_factor"></span>
+            </span>
+          </label>
           <input id="cfgCooldownFactor" type="number" step="any">
-          <label data-i18n="env_config_usage_cap_tokens"></label>
-          <input id="cfgUsageCapTokens" type="number">
-          <label data-i18n="env_config_usage_cap_reset"></label>
-          <input id="cfgUsageCapReset" type="text" placeholder="HH:MM">
+          <label>
+            <span data-i18n="env_config_cooldown_max"></span>
+            <span class="info-wrap">
+              <button type="button" class="info-icon" data-action="info" aria-label="More info" data-i18n-aria="env_info_label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9"/>
+                  <line x1="12" y1="11" x2="12" y2="16"/>
+                  <circle cx="12" cy="7.5" r="0.75" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_cooldown_max"></span>
+            </span>
+          </label>
+          <input id="cfgCooldownMax" type="number" step="any">
           <label>
             <input id="cfgReviewDraftPrs" type="checkbox">
             <span data-i18n="env_config_review_draft_prs"></span>
+            <span class="info-wrap">
+              <button type="button" class="info-icon" data-action="info" aria-label="More info" data-i18n-aria="env_info_label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9"/>
+                  <line x1="12" y1="11" x2="12" y2="16"/>
+                  <circle cx="12" cy="7.5" r="0.75" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_review_draft_prs"></span>
+            </span>
           </label>
+          <span></span>
+          <label>
+            <span data-i18n="env_config_usage_cap_reset"></span>
+            <span class="info-wrap">
+              <button type="button" class="info-icon" data-action="info" aria-label="More info" data-i18n-aria="env_info_label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9"/>
+                  <line x1="12" y1="11" x2="12" y2="16"/>
+                  <circle cx="12" cy="7.5" r="0.75" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_usage_cap_reset"></span>
+            </span>
+          </label>
+          <input id="cfgUsageCapReset" type="text" placeholder="HH:MM">
+          <label>
+            <span data-i18n="env_config_usage_cap_tokens"></span>
+            <span class="info-wrap">
+              <button type="button" class="info-icon" data-action="info" aria-label="More info" data-i18n-aria="env_info_label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9"/>
+                  <line x1="12" y1="11" x2="12" y2="16"/>
+                  <circle cx="12" cy="7.5" r="0.75" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_usage_cap_tokens"></span>
+            </span>
+          </label>
+          <input id="cfgUsageCapTokens" type="number">
         </form>
         <button id="saveConfigBtn" type="button" class="control" data-i18n="env_save_config"></button>
         <div id="configSaveResult"></div>
@@ -707,6 +803,7 @@
         env_col_key: "Key",
         env_col_value: "Value",
         env_add: "Add",
+        env_add_value_placeholder: "value",
         env_save: "Save changes",
         env_config_title: "Runtime configuration",
         env_config_provider: "Active provider override",
@@ -727,6 +824,16 @@
         env_valid: "✓ valid",
         env_invalid: "✗ invalid",
         env_fix_before_save: "Fix invalid fields before saving.",
+        env_saved: "Saved",
+        env_save_failed: "Failed",
+        env_no_changes: "No changes to save.",
+        cfg_desc_provider: "Which LLM provider (gemini, groq, or vertex) the bot currently reviews with.",
+        cfg_desc_cooldown_base: "Minimum time between re-reviews of the same PR after new commits.",
+        cfg_desc_cooldown_max: "Upper bound the re-review cooldown can escalate to.",
+        cfg_desc_cooldown_factor: "Multiplier applied to the re-review cooldown each time it escalates.",
+        cfg_desc_usage_cap_tokens: "Daily per-key token usage cap. Unset disables the cap entirely.",
+        cfg_desc_usage_cap_reset: "Wall-clock UTC time the daily per-key usage cap resets at.",
+        cfg_desc_review_draft_prs: "Whether draft PRs get reviewed on push (marking a PR ready for review always triggers one either way).",
         env_model_load_failed: "Could not load models",
         env_retry: "Retry",
         env_info_label: "More info",
@@ -746,6 +853,8 @@
         env_guided_installation_label: "Installation ID (auto-discovered)",
         env_guided_no_models: "This credential is valid but reports no usable models — nothing to apply.",
         env_guided_missing_input: "Fill in every field before validating.",
+        env_guided_api_key_placeholder: "API key",
+        env_guided_app_id_placeholder: "App ID",
         env_delete_confirm_title: "This will also clear:",
         env_delete_confirm_ok: "Delete anyway",
       },
@@ -786,6 +895,7 @@
         env_col_key: "מפתח",
         env_col_value: "ערך",
         env_add: "הוספה",
+        env_add_value_placeholder: "ערך",
         env_save: "שמור שינויים",
         env_config_title: "הגדרות תצורה בזמן ריצה",
         env_config_provider: "דריסת ספק פעיל",
@@ -806,6 +916,16 @@
         env_valid: "✓ תקין",
         env_invalid: "✗ לא תקין",
         env_fix_before_save: "תקן שדות לא תקינים לפני השמירה.",
+        env_saved: "נשמר",
+        env_save_failed: "נכשל",
+        env_no_changes: "אין שינויים לשמירה.",
+        cfg_desc_provider: "איזה ספק LLM (gemini, groq או vertex) הבוט משתמש בו כרגע לבדיקת קוד.",
+        cfg_desc_cooldown_base: "הזמן המינימלי בין בדיקות חוזרות לאותו PR לאחר קומיטים חדשים.",
+        cfg_desc_cooldown_max: "הגבול העליון שאליו צינון הבדיקה החוזרת יכול לטפס.",
+        cfg_desc_cooldown_factor: "המקדם המוחל על צינון הבדיקה החוזרת בכל פעם שהוא מטפס.",
+        cfg_desc_usage_cap_tokens: "תקרת שימוש יומית בטוקנים לכל מפתח. השארה ללא הגדרה מבטלת את התקרה כליל.",
+        cfg_desc_usage_cap_reset: "שעת UTC שבה תקרת השימוש היומית לכל מפתח מתאפסת.",
+        cfg_desc_review_draft_prs: "האם PR-ים בטיוטה נבדקים בעת push (סימון PR כמוכן לבדיקה מפעיל בדיקה בכל מקרה).",
         env_model_load_failed: "לא ניתן היה לטעון מודלים",
         env_retry: "ניסיון חוזר",
         env_info_label: "מידע נוסף",
@@ -825,6 +945,8 @@
         env_guided_installation_label: "מזהה התקנה (זוהה אוטומטית)",
         env_guided_no_models: "האישור תקין אך לא מדווח על מודלים שמישים — אין מה להחיל.",
         env_guided_missing_input: "מלא את כל השדות לפני האימות.",
+        env_guided_api_key_placeholder: "מפתח API",
+        env_guided_app_id_placeholder: "מזהה אפליקציה",
         env_delete_confirm_title: "פעולה זו תנקה גם:",
         env_delete_confirm_ok: "מחק בכל זאת",
       },
@@ -995,11 +1117,28 @@
       document.querySelectorAll("[data-i18n]").forEach((el) => {
         el.textContent = t(el.getAttribute("data-i18n"));
       });
+      // aria-label (not textContent) needs its own attribute -- e.g. the
+      // config-panel's static info-icon buttons.
+      document.querySelectorAll("[data-i18n-aria]").forEach((el) => {
+        el.setAttribute("aria-label", t(el.getAttribute("data-i18n-aria")));
+      });
+      document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+        el.setAttribute("placeholder", t(el.getAttribute("data-i18n-placeholder")));
+      });
       document.getElementById("themePopupTitle").textContent = t("theme_popup_title");
       document.getElementById("langPopupTitle").textContent = t("lang_popup_title");
       document.querySelector(`input[name="lang"][value="${lang}"]`).checked = true;
       applyTheme(currentTheme); // refresh theme button label in the new language
       refreshDashboard();
+      // The Environment tab's own tables build their button/option text via
+      // t() at render time (Reveal/Hide/Delete, model dropdowns, etc.) rather
+      // than a [data-i18n] element the loop above would catch -- so a table
+      // already rendered in one language stayed in that language after a
+      // switch until something else (an edit, a tab re-entry) happened to
+      // trigger a fresh render. Re-render from the in-memory state here too
+      // (safe pre-first-fetch: renderVars/currentConfig default to empty).
+      renderRenderVarsTable();
+      renderProviderModelRows();
     }
 
     const POLL_INTERVAL_MS = 4000;
@@ -1255,9 +1394,22 @@
       });
     });
 
-    const LIST_SEPARATOR = ", ";   // named, not inlined -- avoids re-triggering
-                                    // test_dashboard_page_renders_queue_and_backoff_as_chips_not_one_string's
-                                    // literal join-call regression scan, which is unrelated to this use
+    // Renders a PATCH result ({applied, failed}) as a nested-list status
+    // block: an applied section and a failed section, each only present when
+    // non-empty, one <li> per key so a long list wraps legibly instead of
+    // running on as one comma-joined line.
+    function formatSaveResult(result) {
+      const applied = result.applied || [];
+      const failed = (result.failed || []).map((f) => `${f.key} (${f.error})`);
+      if (applied.length === 0 && failed.length === 0) {
+        return `<span class="field-hint">${t("env_no_changes")}</span>`;
+      }
+      const section = (cls, label, items) => items.length
+        ? `<div class="${cls}">${cls === "status-ok" ? "✓" : "✗"} ${t(label)}:<ul>${items.map((item) => `<li>${esc(item)}</li>`).join("")}</ul></div>`
+        : "";
+      return section("status-ok", "env_saved", applied) + section("status-failed", "env_save_failed", failed);
+    }
+
     let renderVars = [];   // [{key, value, protected}], as last fetched
     const stagedEdits = new Map();   // key -> new value
     const stagedDeletes = new Set();
@@ -1309,9 +1461,10 @@
     function modelOptionsHtml(provider, currentValue) {
       const cat = modelCatalog[provider];
       if (cat.status === "ok") {
-        const list = !currentValue || cat.models.includes(currentValue)
-          ? cat.models
-          : [currentValue, ...cat.models];
+        const sorted = [...cat.models].sort((a, b) => a.localeCompare(b));
+        const list = !currentValue || sorted.includes(currentValue)
+          ? sorted
+          : [currentValue, ...sorted];
         return list.map((m) => `<option value="${esc(m)}" ${m === currentValue ? "selected" : ""}>${esc(m)}</option>`).join("");
       }
       return currentValue
@@ -1337,6 +1490,18 @@
         </div>`;
       }
       return "";
+    }
+
+    // Shared by every info-icon, whether inside a re-rendered table row or a
+    // static form field wired once at page init.
+    function wireInfoIcon(btn) {
+      btn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const tooltip = btn.nextElementSibling;
+        const wasShown = tooltip.classList.contains("show");
+        document.querySelectorAll(".info-tooltip.show").forEach((el) => el.classList.remove("show"));
+        if (!wasShown) tooltip.classList.add("show");
+      });
     }
 
     // Var name plus an optional info-icon tooltip -- a var with no entry in
@@ -1370,6 +1535,8 @@
       const tbody = document.querySelector("#renderVarsTable tbody");
       const rows = renderVars
         .filter((v) => !stagedDeletes.has(v.key))
+        .slice()
+        .sort((a, b) => a.key.localeCompare(b.key))
         .map((v) => {
           const displayValue = stagedEdits.has(v.key) ? stagedEdits.get(v.key) : v.value;
           const deleteBtn = v.protected
@@ -1439,15 +1606,7 @@
           await fetchEnvironmentConfig();
         });
       });
-      tbody.querySelectorAll('[data-action="info"]').forEach((btn) => {
-        btn.addEventListener("click", (event) => {
-          event.stopPropagation();
-          const tooltip = btn.nextElementSibling;
-          const wasShown = tooltip.classList.contains("show");
-          document.querySelectorAll(".info-tooltip.show").forEach((el) => el.classList.remove("show"));
-          if (!wasShown) tooltip.classList.add("show");
-        });
-      });
+      tbody.querySelectorAll('[data-action="info"]').forEach(wireInfoIcon);
       tbody.querySelectorAll(".model-retry").forEach((btn) => {
         btn.addEventListener("click", () => loadModelCatalog(btn.getAttribute("data-provider")));
       });
@@ -1527,8 +1686,7 @@
       });
       const result = await resp.json();
       const resultEl = document.getElementById("renderSaveResult");
-      resultEl.textContent =
-        `applied: ${result.applied.join(LIST_SEPARATOR) || "-"}; failed: ${result.failed.map((f) => `${f.key} (${f.error})`).join(LIST_SEPARATOR) || "-"}`;
+      resultEl.innerHTML = formatSaveResult(result);
       if (result.deploy_id) {
         document.getElementById("deployBanner").hidden = false;
         document.getElementById("deployBanner").textContent = t("env_redeploying");
@@ -1567,13 +1725,13 @@
 
     function guidedModalBodyFor(family) {
       if (family === "gemini" || family === "groq") {
-        return `<input type="password" id="guidedApiKey" placeholder="API key">${guidedSlotSelectFor(family)}`;
+        return `<input type="password" id="guidedApiKey" placeholder="${esc(t("env_guided_api_key_placeholder"))}">${guidedSlotSelectFor(family)}`;
       }
       if (family === "vertex") {
         return `<input type="file" id="guidedCredentialFile" accept=".json">${guidedSlotSelectFor(family)}`;
       }
       return `
-        <input type="text" id="guidedAppId" placeholder="App ID">
+        <input type="text" id="guidedAppId" placeholder="${esc(t("env_guided_app_id_placeholder"))}">
         <input type="file" id="guidedCredentialFile" accept=".pem">
       `;
     }
@@ -1661,7 +1819,8 @@
         guidedValidatedPayload = { family, result, raw: formData };
         let extra = "";
         if (family !== "github_app") {
-          const options = (result.models || []).map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join("");
+          const options = (result.models || []).slice().sort((a, b) => a.localeCompare(b))
+            .map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join("");
           extra += `<label>${t("env_config_model")}</label><select id="guidedModelSelect">${options}</select>`;
         }
         if (result.conflicts && result.conflicts.length > 0) {
@@ -1734,8 +1893,7 @@
         // was written and a partial apply ("failed: VERTEX_MODEL") was never
         // visible at all -- leaving the refreshed var table, which shows one
         // added row, as the operator's only feedback.
-        document.getElementById("renderSaveResult").textContent =
-          `applied: ${(result2.applied || []).join(LIST_SEPARATOR) || "-"}; failed: ${(result2.failed || []).map((f) => `${f.key} (${f.error})`).join(LIST_SEPARATOR) || "-"}`;
+        document.getElementById("renderSaveResult").innerHTML = formatSaveResult(result2);
         document.getElementById("guidedModal").close();
         await fetchEnvironmentRender();
         await fetchEnvironmentConfig();
@@ -1895,11 +2053,15 @@
         body: JSON.stringify(body),
       });
       const result = await resp.json();
-      document.getElementById("configSaveResult").textContent =
-        `applied: ${result.applied.join(LIST_SEPARATOR) || "-"}; failed: ${result.failed.map((f) => `${f.key} (${f.error})`).join(LIST_SEPARATOR) || "-"}`;
+      document.getElementById("configSaveResult").innerHTML = formatSaveResult(result);
     }
 
     document.getElementById("saveConfigBtn").addEventListener("click", saveConfig);
+
+    // #configForm's fields are static (never re-rendered), so their info
+    // icons are wired once here rather than per-render like the render-vars
+    // table's.
+    document.querySelectorAll('#configForm [data-action="info"]').forEach(wireInfoIcon);
 
     // Closing any open info-tooltip on an outside click/tap -- the tooltips
     // themselves are toggled open by their own info-icon click handler

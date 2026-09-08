@@ -343,7 +343,7 @@ async def test_guided_apply_reports_its_outcome_outside_the_dialog():
     body = (await client.get("/")).text
     apply_start = body.index('document.getElementById("guidedApplyBtn").addEventListener')
     handler = body[apply_start : body.index('document.getElementById("guidedCancelBtn")')]
-    assert 'document.getElementById("renderSaveResult").textContent' in handler
+    assert 'document.getElementById("renderSaveResult").innerHTML' in handler
     assert 'document.getElementById("guidedModalResult").textContent' not in handler
 
 
