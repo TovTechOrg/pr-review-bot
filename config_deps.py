@@ -19,16 +19,16 @@ MAX_CREDENTIAL_SLOTS = 5
 # "credential": the var(s) that ARE the identity. "model": the one var this
 # family's live model picker writes (LLM providers only). "soft_deps": an
 # independent var whose value can become STALE (not absent) when the
-# credential changes -- Vertex's GCP_PROJECT/GCP_LOCATION, checked via
+# credential changes -- Vertex's VERTEX_GCP_PROJECT/VERTEX_GCP_LOCATION, checked via
 # conflicts_for. "derived": a var that is NEVER operator-authored, always
 # recomputed from the credential -- GitHub App's installation id.
 CREDENTIAL_FAMILIES: dict[str, dict] = {
-    "gemini": {"credential": ["GEMINI_API_KEY"], "model": "LLM_MODEL"},
+    "gemini": {"credential": ["GEMINI_API_KEY"], "model": "GEMINI_MODEL"},
     "groq": {"credential": ["GROQ_API_KEY"], "model": "GROQ_MODEL"},
     "vertex": {
-        "credential": ["GCP_SERVICE_ACCOUNT_KEY"],
+        "credential": ["VERTEX_GCP_SERVICE_ACCOUNT_KEY"],
         "model": "VERTEX_MODEL",
-        "soft_deps": ["GCP_PROJECT", "GCP_LOCATION"],
+        "soft_deps": ["VERTEX_GCP_PROJECT", "VERTEX_GCP_LOCATION"],
     },
     "github_app": {
         "credential": ["GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY"],
@@ -119,20 +119,20 @@ def dependents_of(
 
 
 def conflicts_for(
-    family: str, new_project_id: str | None, current_gcp_project: str | None
+    family: str, new_project_id: str | None, current_vertex_gcp_project: str | None
 ) -> list[dict[str, str]]:
     """Soft-dep mismatches a credential replacement should surface.
 
     Only vertex has a soft_dep whose correct value is derivable from the
-    credential itself (GCP_PROJECT, embedded as `project_id` in the
-    service-account JSON) -- GCP_LOCATION has no such embedded counterpart to
+    credential itself (VERTEX_GCP_PROJECT, embedded as `project_id` in the
+    service-account JSON) -- VERTEX_GCP_LOCATION has no such embedded counterpart to
     compare against, so it's never flagged here, matching the design's
     "left untouched with a non-blocking note" decision.
     """
     if family != "vertex":
         return []
-    if not current_gcp_project or not new_project_id:
+    if not current_vertex_gcp_project or not new_project_id:
         return []
-    if current_gcp_project == new_project_id:
+    if current_vertex_gcp_project == new_project_id:
         return []
-    return [{"var": "GCP_PROJECT", "current": current_gcp_project, "new": new_project_id}]
+    return [{"var": "VERTEX_GCP_PROJECT", "current": current_vertex_gcp_project, "new": new_project_id}]

@@ -28,7 +28,7 @@ def test_slot_index_for_var_finds_numbered_slot():
 
 
 def test_slot_index_for_var_finds_base_slot_as_zero():
-    assert slot_index_for_var("vertex", "GCP_SERVICE_ACCOUNT_KEY") == 0
+    assert slot_index_for_var("vertex", "VERTEX_GCP_SERVICE_ACCOUNT_KEY") == 0
 
 
 def test_slot_index_for_var_returns_none_for_unrelated_var():
@@ -68,7 +68,7 @@ def test_dependents_of_returns_none_when_nothing_points_at_it():
 
 
 def test_dependents_of_returns_none_for_non_credential_var():
-    assert dependents_of("GCP_PROJECT", key_index_overrides={}, provider_override=None) is None
+    assert dependents_of("VERTEX_GCP_PROJECT", key_index_overrides={}, provider_override=None) is None
 
 
 def test_dependents_of_does_not_flag_provider_for_an_inactive_spare_slot():
@@ -93,7 +93,7 @@ def test_dependents_of_flags_provider_when_deleting_the_actually_active_slot():
 
 def test_conflicts_for_flags_project_mismatch():
     conflicts = conflicts_for("vertex", "new-project", "old-project")
-    assert conflicts == [{"var": "GCP_PROJECT", "current": "old-project", "new": "new-project"}]
+    assert conflicts == [{"var": "VERTEX_GCP_PROJECT", "current": "old-project", "new": "new-project"}]
 
 
 def test_conflicts_for_no_conflict_when_projects_match():

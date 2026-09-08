@@ -60,18 +60,18 @@ def test_cooldown_factor_defaults_to_two():
 
 
 def test_vertex_settings_default_to_derive_everything_from_the_key(monkeypatch):
-    """GCP_PROJECT is an OPTIONAL override: unset means "use the project_id
+    """VERTEX_GCP_PROJECT is an OPTIONAL override: unset means "use the project_id
     embedded in the service-account key itself" (design doc §2).
 
     _env_file=None plus delenv because these defaults must be asserted against
     the code, not against whatever this working copy's .env or the developer's
     exported shell happens to say."""
-    for name in ("GCP_PROJECT", "GCP_LOCATION", "GCP_SERVICE_ACCOUNT_KEY"):
+    for name in ("VERTEX_GCP_PROJECT", "VERTEX_GCP_LOCATION", "VERTEX_GCP_SERVICE_ACCOUNT_KEY"):
         monkeypatch.delenv(name, raising=False)
     settings = Settings(_env_file=None)
-    assert settings.gcp_project == ""
-    assert settings.gcp_location == "us-central1"
-    assert settings.gcp_service_account_key == ""
+    assert settings.vertex_gcp_project == ""
+    assert settings.vertex_gcp_location == "us-central1"
+    assert settings.vertex_gcp_service_account_key == ""
 
 
 def test_dashboard_credential_fields_default_to_empty_and_are_not_operational(monkeypatch):
@@ -268,7 +268,7 @@ def test_no_legacy_credential_var_lives_in_the_secrets_file():
     assert not legacy, (
         f"retired credential var(s) still in .env, no longer read: {sorted(legacy)} -- "
         "rename GITHUB_APP_PRIVATE_KEY_B64 to GITHUB_APP_PRIVATE_KEY, "
-        "GCP_SERVICE_ACCOUNT_KEY_B64[_n] to GCP_SERVICE_ACCOUNT_KEY[_n] (base64-encode any "
+        "GCP_SERVICE_ACCOUNT_KEY_B64[_n] to VERTEX_GCP_SERVICE_ACCOUNT_KEY[_n] (base64-encode any "
         "local key file first with scripts/encode_credential.py), and remove the _PATH "
         "variants entirely"
     )

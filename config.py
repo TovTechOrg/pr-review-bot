@@ -18,16 +18,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 OPERATIONAL_KEYS = frozenset(
     {
         "LLM_PROVIDER",
-        "LLM_MODEL",
+        "GEMINI_MODEL",
         "GROQ_MODEL",
         "VERTEX_MODEL",
         "KEY_USAGE_TOKEN_CAP",
         "KEY_USAGE_RESET_TIME_UTC",
-        "GCP_PROJECT",
-        "GCP_LOCATION",
+        "VERTEX_GCP_PROJECT",
+        "VERTEX_GCP_LOCATION",
         "LLM_REQUEST_TIMEOUT_SECONDS",
         "DISPATCHER_IDLE_SLEEP_SECONDS",
-        "DEFAULT_RETRY_AFTER_SECONDS",
+        "DISPATCHER_DEFAULT_RETRY_AFTER_SECONDS",
         "DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS",
         "DISPATCHER_FAILURE_MAX_BACKOFF_SECONDS",
         "DISPATCHER_MAX_FAILURE_ATTEMPTS",
@@ -102,12 +102,12 @@ class Settings(BaseSettings):
     # scripts/doctor.py before either could report the problem (design spec
     # 2026-08-18 section 6e).
     llm_provider: str = ""
-    # ``llm_model`` is consumed by the gemini provider only. Groq is a
+    # ``gemini_model`` is consumed by the gemini provider only. Groq is a
     # different model family (Llama, via a different vendor), so it
-    # gets its own var — a single shared LLM_MODEL became ambiguous the moment
+    # gets its own var — a single shared GEMINI_MODEL became ambiguous the moment
     # a second provider family entered the picture (see CLAUDE.md task 8 / PR
     # report for the reasoning).
-    llm_model: str = "gemini-flash-latest"
+    gemini_model: str = "gemini-flash-latest"
 
     gemini_api_key: str = ""
     groq_api_key: str = ""
@@ -120,16 +120,16 @@ class Settings(BaseSettings):
 
     # --- Vertex AI (LLM_PROVIDER=vertex). Unlike gemini/groq, the credential
     # is a GCP service-account identity rather than an API-key string:
-    # GCP_SERVICE_ACCOUNT_KEY (hosted, always base64) -> implicit ADC. See
+    # VERTEX_GCP_SERVICE_ACCOUNT_KEY (hosted, always base64) -> implicit ADC. See
     # providers/vertex_credentials.py for the resolution order.
     # An OPTIONAL override: unset means "use the project_id embedded in the
     # resolved service-account key", so an operator handed nothing but a JSON
     # key needs no separate project lookup.
-    gcp_project: str = ""
+    vertex_gcp_project: str = ""
     # Which Vertex regional endpoint to call -- not an account property, so the
     # default needs no lookup either.
-    gcp_location: str = "us-central1"
-    gcp_service_account_key: str = ""
+    vertex_gcp_location: str = "us-central1"
+    vertex_gcp_service_account_key: str = ""
     # Ceiling on a single LLM request, in seconds. The dispatcher is a single
     # serial consumer of the whole queue (review_queue/dispatcher.py) -- a hung
     # call with no timeout would stall every pending PR's review, not just
@@ -140,7 +140,7 @@ class Settings(BaseSettings):
 
     database_url: str = ""
     dispatcher_idle_sleep_seconds: float = 1.0
-    default_retry_after_seconds: float = 60.0
+    dispatcher_default_retry_after_seconds: float = 60.0
     dispatcher_failure_base_backoff_seconds: float = 2.0
     dispatcher_failure_max_backoff_seconds: float = 300.0
     dispatcher_max_failure_attempts: int = 5
