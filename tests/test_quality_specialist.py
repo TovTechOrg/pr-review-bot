@@ -48,13 +48,17 @@ async def test_run_quality_specialist_success(monkeypatch):
     )
 
     class FakeProvider:
-        async def complete(self, system, user, schema):
+        async def complete(self, system, user, schema, **kwargs):
             assert schema is QualityFindings
             return LLMResponse(raw_text="{}", tokens_in=15, tokens_out=8, parsed=parsed)
 
     monkeypatch.setattr("specialists.base.get_provider", lambda: FakeProvider())
 
-    result = await run_quality_specialist("annotated diff text")
+    result = await run_quality_specialist(
+        "annotated diff text",
+        timeout_seconds=45.0,
+        default_retry_after_seconds=60.0,
+    )
 
     assert result.name == "Code Quality"
     assert result.status == "ok"

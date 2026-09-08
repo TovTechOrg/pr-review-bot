@@ -15,7 +15,13 @@ import pytest
 
 from config import settings
 from providers import active
-from review_queue import cooldown_config, dispatcher, store, usage_cap_config
+from review_queue import (
+    cooldown_config,
+    dispatcher,
+    dispatcher_tuning_config,
+    store,
+    usage_cap_config,
+)
 import orchestrator as orchestrator
 
 NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -39,9 +45,38 @@ def _env(db, monkeypatch):
     )
     dispatcher.reset_blocked_until()
     active.reset_override_cache()
+    # The 9 tuning knobs are DB-only, no env fallback (Task 5/6) --
+    # process_next_due's own refresh calls store.get_dispatcher_tuning_config,
+    # which would return all-None values against the `db` fixture's truncated
+    # runtime_config otherwise. Stubbed here to Settings' own defaults so
+    # every test in this file gets the same real values the pre-refactor
+    # settings.dispatcher_* reads used to provide, without needing to seed
+    # a real runtime_config row per test.
+    monkeypatch.setattr(
+        dispatcher.store,
+        "get_dispatcher_tuning_config",
+        lambda: {
+            "llm_request_timeout_seconds": settings.llm_request_timeout_seconds,
+            "dispatcher_default_retry_after_seconds": (
+                settings.dispatcher_default_retry_after_seconds
+            ),
+            "dispatcher_failure_base_backoff_seconds": (
+                settings.dispatcher_failure_base_backoff_seconds
+            ),
+            "dispatcher_failure_max_backoff_seconds": (
+                settings.dispatcher_failure_max_backoff_seconds
+            ),
+            "dispatcher_max_failure_attempts": settings.dispatcher_max_failure_attempts,
+            "dispatcher_max_notice_post_attempts": settings.dispatcher_max_notice_post_attempts,
+            "dispatcher_min_retry_after_seconds": settings.dispatcher_min_retry_after_seconds,
+            "dispatcher_backoff_jitter_seconds": settings.dispatcher_backoff_jitter_seconds,
+            "dispatcher_notice_sweep_batch_size": settings.dispatcher_notice_sweep_batch_size,
+        },
+    )
     yield
     dispatcher.reset_blocked_until()
     active.reset_override_cache()
+    dispatcher_tuning_config.reset_override_cache()
 
 
 @pytest.fixture(autouse=True)

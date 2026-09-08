@@ -38,7 +38,13 @@ from formatting import (
 from orchestrator import ReviewRateLimited, ReviewSkipped, attempt_review
 from providers import active, active_model, key_index
 from providers.active import active_provider
-from review_queue import cooldown_config, review_draft_config, store, usage_cap_config
+from review_queue import (
+    cooldown_config,
+    dispatcher_tuning_config,
+    review_draft_config,
+    store,
+    usage_cap_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +56,7 @@ def _jitter() -> float:
     whole system stays deterministic; a future multi-instance deployment sets
     the config > 0 to spread retries without a code change.
     """
-    jitter_max = settings.dispatcher_backoff_jitter_seconds
+    jitter_max = dispatcher_tuning_config.effective_config()["dispatcher_backoff_jitter_seconds"]
     if jitter_max <= 0:
         return 0.0
     return random.uniform(0.0, jitter_max)
@@ -61,8 +67,9 @@ def compute_backoff(attempts: int, jitter: float = 0.0) -> float:
 
     ``attempts`` is the 1-based per-ticket hard-failure count (first failure -> base).
     """
-    base = settings.dispatcher_failure_base_backoff_seconds
-    cap = settings.dispatcher_failure_max_backoff_seconds
+    config = dispatcher_tuning_config.effective_config()
+    base = config["dispatcher_failure_base_backoff_seconds"]
+    cap = config["dispatcher_failure_max_backoff_seconds"]
     return min(base * 2 ** (attempts - 1), cap) + jitter
 
 
@@ -244,6 +251,21 @@ async def _refresh_review_draft_override() -> None:
         review_draft_config.reset_override_cache()
 
 
+async def _refresh_dispatcher_tuning_config() -> None:
+    """Refresh the 8 shared tuning knobs once per claimed ticket, same
+    cadence and fail-safe shape as the refreshes above -- a DB-read failure
+    must never abort a review, but (unlike the old cooldown/usage-cap
+    pattern) there is no env default to degrade to: reset_override_cache()
+    empties the cache, and effective_config() reading {} is a real
+    missing-config state a caller must surface, not silently patch over."""
+    try:
+        config = await asyncio.to_thread(store.get_dispatcher_tuning_config)
+        dispatcher_tuning_config.set_override_cache(config)
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to refresh dispatcher tuning config")
+        dispatcher_tuning_config.reset_override_cache()
+
+
 async def process_next_due(now: datetime) -> StepResult:
     """Claim and process one due ticket. Returns what happened.
 
@@ -302,6 +324,8 @@ async def process_next_due(now: datetime) -> StepResult:
     await _refresh_usage_cap_overrides()
 
     await _refresh_review_draft_override()
+
+    await _refresh_dispatcher_tuning_config()
 
     if ticket.notice_not_before is not None:
         try:
@@ -411,7 +435,10 @@ async def process_next_due(now: datetime) -> StepResult:
         logger.exception("review attempt failed for ticket %s", ticket.id)
         await asyncio.to_thread(_check_installation_still_valid_or_die)
         next_attempt = ticket.attempts + 1
-        if next_attempt >= settings.dispatcher_max_failure_attempts:
+        max_failure_attempts = dispatcher_tuning_config.effective_config()[
+            "dispatcher_max_failure_attempts"
+        ]
+        if next_attempt >= max_failure_attempts:
             comment_lost = False
             try:
                 if _has_visible_review(ticket):
@@ -454,9 +481,10 @@ async def process_next_due(now: datetime) -> StepResult:
                 # dispatcher_max_notice_post_attempts -- not dispatcher_max_notice_post_attempts
                 # tries *on top of* the hard-stop attempt, which is what a plain
                 # `+` here previously allowed (dispatcher_max_notice_post_attempts + 1 tries).
+                _tuning = dispatcher_tuning_config.effective_config()
                 notice_post_ceiling = (
-                    settings.dispatcher_max_failure_attempts
-                    + settings.dispatcher_max_notice_post_attempts
+                    _tuning["dispatcher_max_failure_attempts"]
+                    + _tuning["dispatcher_max_notice_post_attempts"]
                     - 2
                 )
                 if next_attempt > notice_post_ceiling:
@@ -501,7 +529,10 @@ async def process_next_due(now: datetime) -> StepResult:
         return StepResult(action="skipped", ticket_id=ticket.id)
 
     if isinstance(outcome, ReviewRateLimited):
-        wait = max(outcome.retry_after, settings.dispatcher_min_retry_after_seconds)
+        wait = max(
+            outcome.retry_after,
+            dispatcher_tuning_config.effective_config()["dispatcher_min_retry_after_seconds"],
+        )
         until = now + timedelta(seconds=wait)
         _blocked_until[provider] = until
         await asyncio.to_thread(

@@ -48,13 +48,17 @@ async def test_run_performance_specialist_success(monkeypatch):
     )
 
     class FakeProvider:
-        async def complete(self, system, user, schema):
+        async def complete(self, system, user, schema, **kwargs):
             assert schema is PerformanceFindings
             return LLMResponse(raw_text="{}", tokens_in=18, tokens_out=9, parsed=parsed)
 
     monkeypatch.setattr("specialists.base.get_provider", lambda: FakeProvider())
 
-    result = await run_performance_specialist("annotated diff text")
+    result = await run_performance_specialist(
+        "annotated diff text",
+        timeout_seconds=45.0,
+        default_retry_after_seconds=60.0,
+    )
 
     assert result.name == "Performance"
     assert result.status == "ok"

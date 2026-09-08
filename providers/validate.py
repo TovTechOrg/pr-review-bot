@@ -34,7 +34,13 @@ class ValidatedResult:
 
 
 async def validate_and_repair(
-    provider: LLMProvider, system: str, user: str, schema: type[BaseModel]
+    provider: LLMProvider,
+    system: str,
+    user: str,
+    schema: type[BaseModel],
+    *,
+    timeout_seconds: float,
+    default_retry_after_seconds: float,
 ) -> ValidatedResult:
     """Call ``provider``, validating structured output with one repair retry.
 
@@ -45,15 +51,31 @@ async def validate_and_repair(
     3. If the repair retry also fails validation, return a failed
        ``ValidatedResult`` (never raises) — the caller renders this as a
        failed specialist rather than crashing.
+
+    ``timeout_seconds``/``default_retry_after_seconds`` are threaded straight
+    through to both calls -- see ``LLMProvider.complete()``'s docstring for
+    why these are parameters rather than something a provider reads itself.
     """
-    first = await provider.complete(system, user, schema)
+    first = await provider.complete(
+        system,
+        user,
+        schema,
+        timeout_seconds=timeout_seconds,
+        default_retry_after_seconds=default_retry_after_seconds,
+    )
     if first.parsed is not None:
         return ValidatedResult(
             ok=True, parsed=first.parsed, tokens_in=first.tokens_in, tokens_out=first.tokens_out
         )
 
     repaired_system = system + REPAIR_INSTRUCTION
-    second = await provider.complete(repaired_system, user, schema)
+    second = await provider.complete(
+        repaired_system,
+        user,
+        schema,
+        timeout_seconds=timeout_seconds,
+        default_retry_after_seconds=default_retry_after_seconds,
+    )
     tokens_in = first.tokens_in + second.tokens_in
     tokens_out = first.tokens_out + second.tokens_out
 

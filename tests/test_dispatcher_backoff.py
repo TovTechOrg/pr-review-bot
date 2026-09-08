@@ -3,14 +3,24 @@ from __future__ import annotations
 
 import pytest
 
-from config import settings
-from review_queue import dispatcher
+from review_queue import dispatcher, dispatcher_tuning_config
 
 
 @pytest.fixture(autouse=True)
-def _defaults(monkeypatch):
-    monkeypatch.setattr(settings, "dispatcher_failure_base_backoff_seconds", 2.0)
-    monkeypatch.setattr(settings, "dispatcher_failure_max_backoff_seconds", 300.0)
+def _defaults():
+    dispatcher_tuning_config.set_override_cache({
+        "llm_request_timeout_seconds": 45.0,
+        "dispatcher_default_retry_after_seconds": 60.0,
+        "dispatcher_failure_base_backoff_seconds": 2.0,
+        "dispatcher_failure_max_backoff_seconds": 300.0,
+        "dispatcher_max_failure_attempts": 5,
+        "dispatcher_max_notice_post_attempts": 3,
+        "dispatcher_min_retry_after_seconds": 1.0,
+        "dispatcher_backoff_jitter_seconds": 0.0,
+        "dispatcher_notice_sweep_batch_size": 20,
+    })
+    yield
+    dispatcher_tuning_config.reset_override_cache()
 
 
 def test_first_attempt_is_base():
@@ -32,8 +42,7 @@ def test_jitter_is_added_on_top():
     assert dispatcher.compute_backoff(1, jitter=5.0) == 7.0
 
 
-def test_jitter_seam_returns_zero_when_disabled(monkeypatch):
-    monkeypatch.setattr(settings, "dispatcher_backoff_jitter_seconds", 0.0)
+def test_jitter_seam_returns_zero_when_disabled():
     assert dispatcher._jitter() == 0.0
 
 

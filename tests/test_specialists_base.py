@@ -19,7 +19,7 @@ class FakeProvider:
     def __init__(self, response):
         self._response = response
 
-    async def complete(self, system, user, schema):
+    async def complete(self, system, user, schema, **kwargs):
         return self._response
 
 
@@ -35,6 +35,8 @@ async def test_run_specialist_success_populates_findings_and_usage(monkeypatch):
         annotated_diff="some diff",
         system_prompt="do a review",
         container_schema=DummyFindings,
+        timeout_seconds=45.0,
+        default_retry_after_seconds=60.0,
     )
 
     assert result.name == "Security"
@@ -57,6 +59,8 @@ async def test_run_specialist_failure_never_raises(monkeypatch):
         annotated_diff="some diff",
         system_prompt="do a review",
         container_schema=DummyFindings,
+        timeout_seconds=45.0,
+        default_retry_after_seconds=60.0,
     )
 
     assert result.status == "failed"
@@ -66,7 +70,7 @@ async def test_run_specialist_failure_never_raises(monkeypatch):
 
 async def test_run_specialist_never_raises_on_provider_exception(monkeypatch):
     class ExplodingProvider:
-        async def complete(self, system, user, schema):
+        async def complete(self, system, user, schema, **kwargs):
             raise RuntimeError("boom")
 
     monkeypatch.setattr("specialists.base.get_provider", lambda: ExplodingProvider())
@@ -76,6 +80,8 @@ async def test_run_specialist_never_raises_on_provider_exception(monkeypatch):
         annotated_diff="some diff",
         system_prompt="do a review",
         container_schema=DummyFindings,
+        timeout_seconds=45.0,
+        default_retry_after_seconds=60.0,
     )
 
     assert result.status == "failed"

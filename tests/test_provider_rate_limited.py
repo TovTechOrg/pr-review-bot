@@ -4,6 +4,7 @@ Uses a lightweight fake exception (status_code/code + response.headers) rather
 than constructing real SDK error objects, so the test is SDK-agnostic and makes
 no network call.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -61,16 +62,19 @@ async def test_groq_429_with_header_raises_rate_limited(monkeypatch):
     _groq_raising(FakeRateLimitError("30"), monkeypatch)
     provider = GroqProvider(api_key="dummy-key-for-construction-only", model=settings.groq_model)
     with pytest.raises(RateLimited) as ei:
-        await provider.complete("s", "u", Greeting)
+        await provider.complete(
+            "s", "u", Greeting, timeout_seconds=45.0, default_retry_after_seconds=60.0
+        )
     assert ei.value.retry_after == 30.0
 
 
 async def test_groq_429_without_header_uses_default(monkeypatch):
-    monkeypatch.setattr(settings, "dispatcher_default_retry_after_seconds", 60.0)
     _groq_raising(FakeRateLimitError(None), monkeypatch)
     provider = GroqProvider(api_key="dummy-key-for-construction-only", model=settings.groq_model)
     with pytest.raises(RateLimited) as ei:
-        await provider.complete("s", "u", Greeting)
+        await provider.complete(
+            "s", "u", Greeting, timeout_seconds=45.0, default_retry_after_seconds=60.0
+        )
     assert ei.value.retry_after == 60.0
 
 
@@ -78,4 +82,6 @@ async def test_groq_non_429_error_propagates_unchanged(monkeypatch):
     _groq_raising(RuntimeError("network down"), monkeypatch)
     provider = GroqProvider(api_key="dummy-key-for-construction-only", model=settings.groq_model)
     with pytest.raises(RuntimeError):
-        await provider.complete("s", "u", Greeting)
+        await provider.complete(
+            "s", "u", Greeting, timeout_seconds=45.0, default_retry_after_seconds=60.0
+        )

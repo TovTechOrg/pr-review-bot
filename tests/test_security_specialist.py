@@ -48,13 +48,17 @@ async def test_run_security_specialist_success(monkeypatch):
     )
 
     class FakeProvider:
-        async def complete(self, system, user, schema):
+        async def complete(self, system, user, schema, **kwargs):
             assert schema is SecurityFindings
             return LLMResponse(raw_text="{}", tokens_in=20, tokens_out=10, parsed=parsed)
 
     monkeypatch.setattr("specialists.base.get_provider", lambda: FakeProvider())
 
-    result = await run_security_specialist("annotated diff text")
+    result = await run_security_specialist(
+        "annotated diff text",
+        timeout_seconds=45.0,
+        default_retry_after_seconds=60.0,
+    )
 
     assert result.name == "Security"
     assert result.status == "ok"

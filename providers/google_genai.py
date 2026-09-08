@@ -23,19 +23,30 @@ from google.genai import types
 from google.oauth2 import service_account
 from pydantic import BaseModel
 
-from config import settings
 from providers.base import LLMResponse, parse_or_none, translate_rate_limit
 
 
 async def _complete(
-    client: genai.Client, model: str, system: str, user: str, schema: type[BaseModel]
+    client: genai.Client,
+    model: str,
+    system: str,
+    user: str,
+    schema: type[BaseModel],
+    *,
+    timeout_seconds: float,
+    default_retry_after_seconds: float,
 ) -> LLMResponse:
     config = types.GenerateContentConfig(
         system_instruction=system,
         response_mime_type="application/json",
         response_schema=schema,
+        # Per-call, not baked into the client at construction: timeout is a
+        # DB-refreshable value (LLM_REQUEST_TIMEOUT_SECONDS) and provider
+        # instances are cached for the process lifetime (providers/factory.py)
+        # -- baking it into the client would freeze it at first-build time.
+        http_options=types.HttpOptions(timeout=int(timeout_seconds * 1000)),
     )
-    async with translate_rate_limit(default=settings.dispatcher_default_retry_after_seconds):
+    async with translate_rate_limit(default=default_retry_after_seconds):
         response = await client.aio.models.generate_content(
             model=model, contents=user, config=config
         )
@@ -67,19 +78,34 @@ class GeminiProvider:
     """``gemini`` (AI-Studio) — the actually-live provider in this environment."""
 
     def __init__(self, api_key: str, model: str) -> None:
-        self._client = genai.Client(
-            api_key=api_key,
-            http_options=types.HttpOptions(
-                timeout=int(settings.llm_request_timeout_seconds * 1000)
-            ),
-        )
+        # No http_options/timeout here -- timeout_seconds is threaded into
+        # complete() per call instead (see _complete's docstring/comment) so
+        # a DB-refreshed value takes effect without waiting for this cached
+        # instance to be rebuilt.
+        self._client = genai.Client(api_key=api_key)
         # Passed in, never read from Settings here: providers/active_model.py
         # is the single resolver, so a DB model override and the model reported
         # in the PR comment can never disagree with what actually runs.
         self._model = model
 
-    async def complete(self, system: str, user: str, schema: type[BaseModel]) -> LLMResponse:
-        return await _complete(self._client, self._model, system, user, schema)
+    async def complete(
+        self,
+        system: str,
+        user: str,
+        schema: type[BaseModel],
+        *,
+        timeout_seconds: float,
+        default_retry_after_seconds: float,
+    ) -> LLMResponse:
+        return await _complete(
+            self._client,
+            self._model,
+            system,
+            user,
+            schema,
+            timeout_seconds=timeout_seconds,
+            default_retry_after_seconds=default_retry_after_seconds,
+        )
 
 
 _VERTEX_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
@@ -107,19 +133,34 @@ class VertexProvider:
             creds = service_account.Credentials.from_service_account_info(
                 service_account_info, scopes=_VERTEX_SCOPES
             )
+        # No http_options/timeout here -- see GeminiProvider.__init__'s
+        # comment; timeout_seconds is threaded into complete() per call.
         self._client = genai.Client(
             vertexai=True,
             project=project,
             location=location,
             credentials=creds,
-            http_options=types.HttpOptions(
-                timeout=int(settings.llm_request_timeout_seconds * 1000)
-            ),
         )
         # Passed in, never read from Settings here: providers/active_model.py
         # is the single resolver, so a DB model override and the model reported
         # in the PR comment can never disagree with what actually runs.
         self._model = model
 
-    async def complete(self, system: str, user: str, schema: type[BaseModel]) -> LLMResponse:
-        return await _complete(self._client, self._model, system, user, schema)
+    async def complete(
+        self,
+        system: str,
+        user: str,
+        schema: type[BaseModel],
+        *,
+        timeout_seconds: float,
+        default_retry_after_seconds: float,
+    ) -> LLMResponse:
+        return await _complete(
+            self._client,
+            self._model,
+            system,
+            user,
+            schema,
+            timeout_seconds=timeout_seconds,
+            default_retry_after_seconds=default_retry_after_seconds,
+        )

@@ -24,7 +24,6 @@ import json
 from groq import AsyncGroq
 from pydantic import BaseModel
 
-from config import settings
 from providers.base import LLMResponse, parse_or_none, translate_rate_limit
 
 
@@ -55,18 +54,27 @@ class GroqProvider:
         # visible via a placeholder/schedule-note comment -- so a second,
         # hidden retry layer underneath it is redundant at best and actively
         # hides a real signal at worst.
-        self._client = AsyncGroq(
-            api_key=api_key,
-            max_retries=0,
-            timeout=settings.llm_request_timeout_seconds,
-        )
+        # No client-level timeout here -- timeout_seconds is threaded into
+        # complete() per call instead (passed straight through to the SDK's
+        # own per-request `timeout` kwarg) so a DB-refreshed value takes
+        # effect without waiting for this cached instance to be rebuilt --
+        # see providers/base.py::LLMProvider's docstring.
+        self._client = AsyncGroq(api_key=api_key, max_retries=0)
         # Passed in, never read from Settings here: providers/active_model.py
         # is the single resolver, so a DB model override and the model reported
         # in the PR comment can never disagree with what actually runs.
         self._model = model
 
-    async def complete(self, system: str, user: str, schema: type[BaseModel]) -> LLMResponse:
-        async with translate_rate_limit(default=settings.dispatcher_default_retry_after_seconds):
+    async def complete(
+        self,
+        system: str,
+        user: str,
+        schema: type[BaseModel],
+        *,
+        timeout_seconds: float,
+        default_retry_after_seconds: float,
+    ) -> LLMResponse:
+        async with translate_rate_limit(default=default_retry_after_seconds):
             response = await self._client.chat.completions.create(
                 model=self._model,
                 messages=[
@@ -74,6 +82,7 @@ class GroqProvider:
                     {"role": "user", "content": user},
                 ],
                 response_format={"type": "json_object"},
+                timeout=timeout_seconds,
             )
 
         raw_text = response.choices[0].message.content or ""

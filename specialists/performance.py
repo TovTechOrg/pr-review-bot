@@ -51,10 +51,14 @@ class PerformanceFindings(BaseModel):
     findings: list[PerformanceFinding]
 
 
-async def run_performance_specialist(annotated_diff: str) -> SpecialistResult:
+async def run_performance_specialist(
+    annotated_diff: str, *, timeout_seconds: float, default_retry_after_seconds: float
+) -> SpecialistResult:
     return await run_specialist(
         name="Performance",
         annotated_diff=annotated_diff,
         system_prompt=PERFORMANCE_SYSTEM_PROMPT,
         container_schema=PerformanceFindings,
+        timeout_seconds=timeout_seconds,
+        default_retry_after_seconds=default_retry_after_seconds,
     )

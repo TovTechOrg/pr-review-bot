@@ -842,7 +842,17 @@ def tickets_needing_notice(now: str) -> list[Ticket]:
     already gone would be wrong. Capped at dispatcher_notice_sweep_batch_size
     per call so a mass re-arm can't stall process_next_due for a whole
     dispatcher tick; any ticket past the cap keeps its stale marker and is
-    picked up by the next call (self-healing, no new state)."""
+    picked up by the next call (self-healing, no new state).
+
+    The cap is read live via a subquery, not a Python-side cache -- this
+    query already runs once per run_forever iteration (dispatcher.py's
+    post_pending_notices), more often than the per-claimed-ticket refresh
+    cadence every other DB-only tuning knob uses, so piggybacking the read
+    onto this existing round-trip is both simpler and fresher than adding a
+    dedicated cache/refresh for just this one value. No env fallback: if the
+    singleton row is missing, the subquery returns NULL and LIMIT NULL means
+    "no limit" in Postgres -- this should never happen once
+    _seed_runtime_config_defaults has run."""
     with _require_pool().connection() as conn:
         rows = conn.execute(
             """
@@ -853,9 +863,9 @@ def tickets_needing_notice(now: str) -> list[Ticket]:
               AND last_reviewed_at IS NOT NULL
               AND (notice_not_before IS NULL OR notice_not_before != not_before)
             ORDER BY enqueued_at ASC, id ASC
-            LIMIT %s
+            LIMIT (SELECT dispatcher_notice_sweep_batch_size FROM runtime_config WHERE id = 1)
             """,
-            (now, settings.dispatcher_notice_sweep_batch_size),
+            (now,),
         ).fetchall()
         return [_row_to_ticket(row) for row in rows]
 

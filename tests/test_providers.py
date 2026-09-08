@@ -124,7 +124,13 @@ async def test_gemini_provider_parses_valid_structured_output(monkeypatch):
     provider = GeminiProvider(
         api_key="dummy-key-for-construction-only", model=settings.gemini_model
     )
-    result = await provider.complete("system prompt", "user prompt", Greeting)
+    result = await provider.complete(
+        "system prompt",
+        "user prompt",
+        Greeting,
+        timeout_seconds=45.0,
+        default_retry_after_seconds=60.0,
+    )
 
     assert result.parsed == Greeting(message="hi")
     assert result.tokens_in == 42
@@ -156,7 +162,13 @@ async def test_gemini_provider_includes_thinking_tokens_in_tokens_out(monkeypatc
     provider = GeminiProvider(
         api_key="dummy-key-for-construction-only", model=settings.gemini_model
     )
-    result = await provider.complete("system prompt", "user prompt", Greeting)
+    result = await provider.complete(
+        "system prompt",
+        "user prompt",
+        Greeting,
+        timeout_seconds=45.0,
+        default_retry_after_seconds=60.0,
+    )
 
     assert result.tokens_out == 22  # 7 candidates + 15 thinking
 
@@ -174,7 +186,13 @@ async def test_provider_returns_none_parsed_on_malformed_json(monkeypatch):
     provider = GeminiProvider(
         api_key="dummy-key-for-construction-only", model=settings.gemini_model
     )
-    result = await provider.complete("system prompt", "user prompt", Greeting)
+    result = await provider.complete(
+        "system prompt",
+        "user prompt",
+        Greeting,
+        timeout_seconds=45.0,
+        default_retry_after_seconds=60.0,
+    )
 
     assert result.parsed is None
     assert result.tokens_in == 10
@@ -196,7 +214,13 @@ async def test_provider_returns_none_parsed_on_off_schema_json(monkeypatch):
     provider = GeminiProvider(
         api_key="dummy-key-for-construction-only", model=settings.gemini_model
     )
-    result = await provider.complete("system prompt", "user prompt", Greeting)
+    result = await provider.complete(
+        "system prompt",
+        "user prompt",
+        Greeting,
+        timeout_seconds=45.0,
+        default_retry_after_seconds=60.0,
+    )
 
     assert result.parsed is None
 
@@ -223,10 +247,18 @@ async def test_vertex_provider_parses_valid_structured_output(monkeypatch):
     )
 
     provider = VertexProvider(
-        project="proj-x", location="us-central1", service_account_info=None,
+        project="proj-x",
+        location="us-central1",
+        service_account_info=None,
         model=settings.gemini_model,
     )
-    result = await provider.complete("system prompt", "user prompt", Greeting)
+    result = await provider.complete(
+        "system prompt",
+        "user prompt",
+        Greeting,
+        timeout_seconds=45.0,
+        default_retry_after_seconds=60.0,
+    )
 
     assert result.parsed == Greeting(message="hi")
     assert result.tokens_in == 42
@@ -249,7 +281,9 @@ def test_vertex_provider_passes_no_credentials_for_implicit_adc(monkeypatch):
     )
 
     VertexProvider(
-        project="proj-x", location="us-central1", service_account_info=None,
+        project="proj-x",
+        location="us-central1",
+        service_account_info=None,
         model=settings.gemini_model,
     )
 
@@ -282,7 +316,9 @@ def test_vertex_provider_builds_credentials_from_the_service_account_info(monkey
 
     info = {"type": "service_account", "project_id": "proj-x"}
     VertexProvider(
-        project="proj-x", location="us-central1", service_account_info=info,
+        project="proj-x",
+        location="us-central1",
+        service_account_info=info,
         model=settings.gemini_model,
     )
 
@@ -542,7 +578,7 @@ class FakeProvider:
         self._responses = list(responses)
         self.calls: list[tuple[str, str]] = []
 
-    async def complete(self, system, user, schema):
+    async def complete(self, system, user, schema, **kwargs):
         self.calls.append((system, user))
         return self._responses.pop(0)
 
@@ -562,7 +598,14 @@ async def test_validate_and_repair_succeeds_on_first_try():
         ]
     )
 
-    result = await validate_and_repair(provider, "sys", "usr", Greeting)
+    result = await validate_and_repair(
+        provider,
+        "sys",
+        "usr",
+        Greeting,
+        timeout_seconds=45.0,
+        default_retry_after_seconds=60.0,
+    )
 
     assert result.ok is True
     assert result.parsed == Greeting(message="hi")
@@ -587,7 +630,14 @@ async def test_validate_and_repair_retries_once_then_succeeds():
         ]
     )
 
-    result = await validate_and_repair(provider, "sys", "usr", Greeting)
+    result = await validate_and_repair(
+        provider,
+        "sys",
+        "usr",
+        Greeting,
+        timeout_seconds=45.0,
+        default_retry_after_seconds=60.0,
+    )
 
     assert result.ok is True
     assert result.parsed == Greeting(message="fixed")
@@ -610,7 +660,14 @@ async def test_validate_and_repair_fails_after_repair_also_fails():
         ]
     )
 
-    result = await validate_and_repair(provider, "sys", "usr", Greeting)
+    result = await validate_and_repair(
+        provider,
+        "sys",
+        "usr",
+        Greeting,
+        timeout_seconds=45.0,
+        default_retry_after_seconds=60.0,
+    )
 
     assert result.ok is False
     assert result.parsed is None
@@ -663,9 +720,7 @@ def test_estimate_cost_usd_vertex_gemini_2_5_flash():
     gemini-flash-latest doesn't exist as a Vertex publisher model for every
     project/region, so a real deployment needs this entry to avoid a
     KeyError after a successful live call."""
-    cost = pricing.estimate_cost_usd(
-        "vertex", "gemini-2.5-flash", tokens_in=4_000, tokens_out=500
-    )
+    cost = pricing.estimate_cost_usd("vertex", "gemini-2.5-flash", tokens_in=4_000, tokens_out=500)
     assert cost == pytest.approx(0.0012 + 0.00125)
 
 

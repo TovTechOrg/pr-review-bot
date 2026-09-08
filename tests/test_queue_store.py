@@ -826,8 +826,13 @@ def test_clear_notice_resets_marker_to_none(db_exec):
     assert store.get_ticket(tid).notice_not_before is None
 
 
-def test_tickets_needing_notice_respects_batch_cap(monkeypatch, db_exec):
-    monkeypatch.setattr(settings, "dispatcher_notice_sweep_batch_size", 2)
+def test_tickets_needing_notice_respects_batch_cap(db_exec):
+    db_exec(
+        "INSERT INTO runtime_config (id, updated_at, dispatcher_notice_sweep_batch_size) "
+        "VALUES (1, %s, 2) "
+        "ON CONFLICT (id) DO UPDATE SET dispatcher_notice_sweep_batch_size = 2",
+        (T0,),
+    )
     tids = []
     for pr in range(1, 4):  # 3 tickets, cap is 2
         tid = _enqueue(pr=pr, now=T0)

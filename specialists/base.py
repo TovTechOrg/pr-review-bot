@@ -40,12 +40,21 @@ async def run_specialist(
     annotated_diff: str,
     system_prompt: str,
     container_schema: type[BaseModel],
+    timeout_seconds: float,
+    default_retry_after_seconds: float,
 ) -> SpecialistResult:
     """Run one specialist end-to-end: provider call -> validate-repair -> envelope.
 
     ``container_schema`` must have a single ``findings: list[...]`` field.
     Never raises — any provider/validation failure becomes a
     ``status="failed"`` ``SpecialistResult``.
+
+    ``timeout_seconds``/``default_retry_after_seconds`` come from the caller
+    (orchestrator.py, which reads review_queue.dispatcher_tuning_config's
+    DB-refreshed cache) rather than being read here or inside providers/ --
+    this keeps providers/ and specialists/ fully dependency-free from
+    review_queue/, matching this project's existing layering (see
+    providers/base.py::LLMProvider's docstring).
     """
     started = time.monotonic()
     tokens_in = 0
@@ -54,7 +63,12 @@ async def run_specialist(
     try:
         provider = get_provider()
         validated = await validate_and_repair(
-            provider, system_prompt, annotated_diff, container_schema
+            provider,
+            system_prompt,
+            annotated_diff,
+            container_schema,
+            timeout_seconds=timeout_seconds,
+            default_retry_after_seconds=default_retry_after_seconds,
         )
         tokens_in = validated.tokens_in
         tokens_out = validated.tokens_out

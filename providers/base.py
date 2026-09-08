@@ -49,7 +49,26 @@ class LLMResponse:
 
 
 class LLMProvider(Protocol):
-    async def complete(self, system: str, user: str, schema: type[BaseModel]) -> LLMResponse: ...
+    """``timeout_seconds``/``default_retry_after_seconds`` are threaded in as
+    call parameters, not read from Settings/DB internally, so that a value
+    refreshed once per claimed ticket (review_queue/dispatcher_tuning_config.py)
+    actually takes effect on the very next call even though provider instances
+    are cached for the process lifetime (providers/factory.py) -- and so that
+    providers/ stays fully dependency-free from review_queue/, which it
+    otherwise would need to import to read the DB-refreshed cache directly.
+    The caller chain (orchestrator.py -> specialists/base.py -> here) is
+    where these values actually get sourced from
+    dispatcher_tuning_config.effective_config()."""
+
+    async def complete(
+        self,
+        system: str,
+        user: str,
+        schema: type[BaseModel],
+        *,
+        timeout_seconds: float,
+        default_retry_after_seconds: float,
+    ) -> LLMResponse: ...
 
 
 KNOWN_PROVIDERS = ("gemini", "groq", "vertex")

@@ -46,10 +46,14 @@ class QualityFindings(BaseModel):
     findings: list[QualityFinding]
 
 
-async def run_quality_specialist(annotated_diff: str) -> SpecialistResult:
+async def run_quality_specialist(
+    annotated_diff: str, *, timeout_seconds: float, default_retry_after_seconds: float
+) -> SpecialistResult:
     return await run_specialist(
         name="Code Quality",
         annotated_diff=annotated_diff,
         system_prompt=QUALITY_SYSTEM_PROMPT,
         container_schema=QualityFindings,
+        timeout_seconds=timeout_seconds,
+        default_retry_after_seconds=default_retry_after_seconds,
     )

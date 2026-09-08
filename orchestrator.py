@@ -28,7 +28,7 @@ from providers.active_model import active_model
 from providers.base import RateLimited
 from providers.key_index import active_key_index
 from providers.pricing import estimate_cost_usd
-from review_queue import review_draft_config, store
+from review_queue import dispatcher_tuning_config, review_draft_config, store
 from specialists.performance import run_performance_specialist
 from specialists.quality import run_quality_specialist
 from specialists.schemas import ReviewResult, SpecialistResult
@@ -112,13 +112,35 @@ async def attempt_review(
     if not annotated.text.strip():
         return ReviewSkipped()
 
+    # Sourced once here, not read inside providers/specialists: these two
+    # tuning knobs are DB-refreshed once per claimed ticket
+    # (review_queue/dispatcher.py::_refresh_dispatcher_tuning_config), and
+    # threading them down as call parameters keeps providers/ and
+    # specialists/ fully dependency-free from review_queue/ -- see
+    # providers/base.py::LLMProvider's docstring for the full reasoning.
+    tuning = dispatcher_tuning_config.effective_config()
+    timeout_seconds = tuning["llm_request_timeout_seconds"]
+    default_retry_after_seconds = tuning["dispatcher_default_retry_after_seconds"]
+
     # Referencing these as bare module-level names (not a precomputed tuple
     # of function objects) means they resolve at call time, so tests can
     # monkeypatch `orchestrator.run_security_specialist` etc. per-call.
     raw_results = await asyncio.gather(
-        run_security_specialist(annotated.text),
-        run_performance_specialist(annotated.text),
-        run_quality_specialist(annotated.text),
+        run_security_specialist(
+            annotated.text,
+            timeout_seconds=timeout_seconds,
+            default_retry_after_seconds=default_retry_after_seconds,
+        ),
+        run_performance_specialist(
+            annotated.text,
+            timeout_seconds=timeout_seconds,
+            default_retry_after_seconds=default_retry_after_seconds,
+        ),
+        run_quality_specialist(
+            annotated.text,
+            timeout_seconds=timeout_seconds,
+            default_retry_after_seconds=default_retry_after_seconds,
+        ),
         return_exceptions=True,
     )
 

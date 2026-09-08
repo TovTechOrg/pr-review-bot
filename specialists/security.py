@@ -57,10 +57,14 @@ class SecurityFindings(BaseModel):
     findings: list[SecurityFinding]
 
 
-async def run_security_specialist(annotated_diff: str) -> SpecialistResult:
+async def run_security_specialist(
+    annotated_diff: str, *, timeout_seconds: float, default_retry_after_seconds: float
+) -> SpecialistResult:
     return await run_specialist(
         name="Security",
         annotated_diff=annotated_diff,
         system_prompt=SECURITY_SYSTEM_PROMPT,
         container_schema=SecurityFindings,
+        timeout_seconds=timeout_seconds,
+        default_retry_after_seconds=default_retry_after_seconds,
     )

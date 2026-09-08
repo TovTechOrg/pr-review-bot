@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 from config import settings
 from providers.base import RateLimited
+from review_queue import dispatcher_tuning_config
 from specialists.schemas import SpecialistResult
 
 
@@ -24,6 +25,26 @@ def _provider(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "groq")
 
 
+@pytest.fixture(autouse=True)
+def _tuning_config():
+    """See tests/test_orchestrator.py's identical fixture docstring: this
+    file also calls attempt_review/run_review directly, bypassing the
+    dispatcher's own per-claimed-ticket refresh."""
+    dispatcher_tuning_config.set_override_cache({
+        "llm_request_timeout_seconds": 45.0,
+        "dispatcher_default_retry_after_seconds": 60.0,
+        "dispatcher_failure_base_backoff_seconds": 2.0,
+        "dispatcher_failure_max_backoff_seconds": 300.0,
+        "dispatcher_max_failure_attempts": 5,
+        "dispatcher_max_notice_post_attempts": 3,
+        "dispatcher_min_retry_after_seconds": 1.0,
+        "dispatcher_backoff_jitter_seconds": 0.0,
+        "dispatcher_notice_sweep_batch_size": 20,
+    })
+    yield
+    dispatcher_tuning_config.reset_override_cache()
+
+
 async def test_attempt_review_returns_rate_limited_and_posts_nothing(monkeypatch):
     import orchestrator as orchestrator
 
@@ -34,13 +55,13 @@ async def test_attempt_review_returns_rate_limited_and_posts_nothing(monkeypatch
     posted = []
     monkeypatch.setattr(orchestrator.github_app, "upsert_comment", lambda *a, **k: posted.append(a))
 
-    async def sec(_):
+    async def sec(_, **kwargs):
         return _ok("Security")
 
-    async def perf(_):
+    async def perf(_, **kwargs):
         raise RateLimited(30.0)
 
-    async def qual(_):
+    async def qual(_, **kwargs):
         raise RateLimited(45.0)
 
     monkeypatch.setattr(orchestrator, "run_security_specialist", sec)
@@ -71,7 +92,7 @@ async def test_attempt_review_completes_and_posts_when_ok(monkeypatch):
     monkeypatch.setattr(orchestrator.github_app, "upsert_comment", fake_upsert)
 
     async def mk(name):
-        async def _inner(_):
+        async def _inner(_, **kwargs):
             return _ok(name)
         return _inner
 
@@ -97,10 +118,10 @@ async def test_run_review_raises_on_rate_limited(monkeypatch):
     )
     monkeypatch.setattr(orchestrator.github_app, "upsert_comment", lambda *a, **k: None)
 
-    async def rl(_):
+    async def rl(_, **kwargs):
         raise RateLimited(12.0)
 
-    async def ok(_):
+    async def ok(_, **kwargs):
         return _ok("Security")
 
     monkeypatch.setattr(orchestrator, "run_security_specialist", ok)
@@ -117,7 +138,7 @@ async def test_run_specialist_lets_rate_limited_escape(monkeypatch):
     import specialists.base as base
 
     class FakeProvider:
-        async def complete(self, system, user, schema):
+        async def complete(self, system, user, schema, **kwargs):
             raise RateLimited(20.0)
 
     monkeypatch.setattr(base, "get_provider", lambda: FakeProvider())
@@ -130,4 +151,6 @@ async def test_run_specialist_lets_rate_limited_escape(monkeypatch):
             annotated_diff="diff",
             system_prompt=SECURITY_SYSTEM_PROMPT,
             container_schema=SecurityFindings,
+            timeout_seconds=45.0,
+            default_retry_after_seconds=60.0,
         )

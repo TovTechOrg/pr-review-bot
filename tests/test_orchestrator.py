@@ -6,8 +6,33 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from config import settings
+from review_queue import dispatcher_tuning_config
 from specialists.schemas import SpecialistResult
+
+
+@pytest.fixture(autouse=True)
+def _tuning_config():
+    """orchestrator.attempt_review reads llm_request_timeout_seconds/
+    dispatcher_default_retry_after_seconds from dispatcher_tuning_config's
+    DB-refreshed cache (no env fallback) -- this file calls attempt_review/
+    run_review directly, bypassing the dispatcher's own per-claimed-ticket
+    refresh, so the cache needs seeding here instead."""
+    dispatcher_tuning_config.set_override_cache({
+        "llm_request_timeout_seconds": 45.0,
+        "dispatcher_default_retry_after_seconds": 60.0,
+        "dispatcher_failure_base_backoff_seconds": 2.0,
+        "dispatcher_failure_max_backoff_seconds": 300.0,
+        "dispatcher_max_failure_attempts": 5,
+        "dispatcher_max_notice_post_attempts": 3,
+        "dispatcher_min_retry_after_seconds": 1.0,
+        "dispatcher_backoff_jitter_seconds": 0.0,
+        "dispatcher_notice_sweep_batch_size": 20,
+    })
+    yield
+    dispatcher_tuning_config.reset_override_cache()
 
 
 def _ok_result(name: str, tokens_in: int = 10, tokens_out: int = 5) -> SpecialistResult:
@@ -40,13 +65,13 @@ async def test_run_review_runs_all_three_specialists_and_posts_comment(monkeypat
 
     monkeypatch.setattr(orchestrator.github_app, "upsert_comment", fake_upsert)
 
-    async def fake_security(annotated_diff):
+    async def fake_security(annotated_diff, **kwargs):
         return _ok_result("Security", tokens_in=10, tokens_out=5)
 
-    async def fake_performance(annotated_diff):
+    async def fake_performance(annotated_diff, **kwargs):
         return _ok_result("Performance", tokens_in=8, tokens_out=4)
 
-    async def fake_quality(annotated_diff):
+    async def fake_quality(annotated_diff, **kwargs):
         return _ok_result("Code Quality", tokens_in=6, tokens_out=3)
 
     monkeypatch.setattr(orchestrator, "run_security_specialist", fake_security)
@@ -90,13 +115,13 @@ async def test_run_review_survives_one_specialist_raising(monkeypatch):
 
     monkeypatch.setattr(orchestrator.github_app, "upsert_comment", fake_upsert)
 
-    async def fake_security(annotated_diff):
+    async def fake_security(annotated_diff, **kwargs):
         return _ok_result("Security")
 
-    async def fake_performance(annotated_diff):
+    async def fake_performance(annotated_diff, **kwargs):
         raise RuntimeError("boom")
 
-    async def fake_quality(annotated_diff):
+    async def fake_quality(annotated_diff, **kwargs):
         return _ok_result("Code Quality")
 
     monkeypatch.setattr(orchestrator, "run_security_specialist", fake_security)
@@ -140,13 +165,13 @@ async def test_attempt_review_raises_when_every_specialist_fails(monkeypatch):
 
     monkeypatch.setattr(orchestrator.github_app, "upsert_comment", fake_upsert)
 
-    async def fake_security(annotated_diff):
+    async def fake_security(annotated_diff, **kwargs):
         raise ValueError("no credential configured for provider=groq index=0")
 
-    async def fake_performance(annotated_diff):
+    async def fake_performance(annotated_diff, **kwargs):
         raise ValueError("no credential configured for provider=groq index=0")
 
-    async def fake_quality(annotated_diff):
+    async def fake_quality(annotated_diff, **kwargs):
         raise ValueError("no credential configured for provider=groq index=0")
 
     monkeypatch.setattr(orchestrator, "run_security_specialist", fake_security)
@@ -176,7 +201,7 @@ async def test_run_review_reflects_active_model_per_provider(monkeypatch):
     )
 
     async def ok(name):
-        async def _inner(annotated_diff):
+        async def _inner(annotated_diff, **kwargs):
             return _ok_result(name)
 
         return _inner
@@ -208,13 +233,13 @@ async def test_run_review_records_the_completed_review(monkeypatch):
         lambda repo, pr, body, comment_id=None: SimpleNamespace(id=111),
     )
 
-    async def fake_security(annotated_diff):
+    async def fake_security(annotated_diff, **kwargs):
         return _ok_result("Security")
 
-    async def fake_performance(annotated_diff):
+    async def fake_performance(annotated_diff, **kwargs):
         return _ok_result("Performance")
 
-    async def fake_quality(annotated_diff):
+    async def fake_quality(annotated_diff, **kwargs):
         return _ok_result("Code Quality")
 
     monkeypatch.setattr(orchestrator, "run_security_specialist", fake_security)
@@ -258,13 +283,13 @@ async def test_run_review_survives_record_review_raising(monkeypatch):
         lambda repo, pr, body, comment_id=None: SimpleNamespace(id=111),
     )
 
-    async def fake_security(annotated_diff):
+    async def fake_security(annotated_diff, **kwargs):
         return _ok_result("Security")
 
-    async def fake_performance(annotated_diff):
+    async def fake_performance(annotated_diff, **kwargs):
         return _ok_result("Performance")
 
-    async def fake_quality(annotated_diff):
+    async def fake_quality(annotated_diff, **kwargs):
         return _ok_result("Code Quality")
 
     monkeypatch.setattr(orchestrator, "run_security_specialist", fake_security)
@@ -297,7 +322,7 @@ async def test_attempt_review_migrates_a_renamed_repo(monkeypatch):
         lambda repo, pr, body, comment_id=None: SimpleNamespace(id=1),
     )
 
-    async def ok(_):
+    async def ok(_, **kwargs):
         return _ok_result("Security")
 
     monkeypatch.setattr(orchestrator, "run_security_specialist", ok)
@@ -330,7 +355,7 @@ async def test_attempt_review_does_not_migrate_when_name_is_unchanged(monkeypatc
         lambda repo, pr, body, comment_id=None: SimpleNamespace(id=1),
     )
 
-    async def ok(_):
+    async def ok(_, **kwargs):
         return _ok_result("Security")
 
     monkeypatch.setattr(orchestrator, "run_security_specialist", ok)
@@ -360,7 +385,7 @@ async def test_attempt_review_survives_migrate_repo_rename_raising(monkeypatch):
         lambda repo, pr, body, comment_id=None: SimpleNamespace(id=1),
     )
 
-    async def ok(_):
+    async def ok(_, **kwargs):
         return _ok_result("Security")
 
     monkeypatch.setattr(orchestrator, "run_security_specialist", ok)
@@ -442,7 +467,7 @@ async def test_attempt_review_reviews_a_draft_pr_when_the_override_allows_it(mon
         orchestrator.review_draft_config, "effective_review_draft_prs", lambda: True
     )
 
-    async def ok(_):
+    async def ok(_, **kwargs):
         return _ok_result("Security")
 
     monkeypatch.setattr(orchestrator, "run_security_specialist", ok)
