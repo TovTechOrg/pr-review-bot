@@ -1586,21 +1586,56 @@ async def test_capped_ticket_with_a_visible_review_gets_no_placeholder(monkeypat
     assert posted == []
 
 
-async def test_model_override_refresh_degrades_to_env_on_db_failure(monkeypatch):
-    """Same fail-safe shape as the provider/cooldown/key-index refreshes: a
-    failing refresh must never abort a review and never leave a stale cache."""
-    from providers import active_model
+async def test_slot_config_refresh_populates_model_and_vertex_overrides(monkeypatch):
+    """_refresh_slot_config (Task 9) reads slot_config once and populates
+    both active_model and active_vertex_slot's caches from it."""
+    from providers import active_model, active_vertex_slot
     from review_queue import dispatcher, store
 
-    active_model.set_override_cache({"groq": "stale-model"})
+    monkeypatch.setattr(
+        store,
+        "get_all_slot_configs",
+        lambda: {
+            ("groq", 0): {
+                "model": "llama-3.3-70b-versatile",
+                "vertex_gcp_project": None,
+                "vertex_gcp_location": None,
+            },
+            ("vertex", 1): {
+                "model": "gemini-2.5-flash",
+                "vertex_gcp_project": "proj-a",
+                "vertex_gcp_location": "us-east1",
+            },
+        },
+    )
+    await dispatcher._refresh_slot_config()
+    assert active_model.active_model("groq", 0) == "llama-3.3-70b-versatile"
+    assert active_model.active_model("vertex", 1) == "gemini-2.5-flash"
+    assert active_vertex_slot.active_vertex_project(1) == "proj-a"
+    assert active_vertex_slot.active_vertex_location(1) == "us-east1"
+    active_model.reset_override_cache()
+    active_vertex_slot.reset_override_cache()
+
+
+async def test_slot_config_refresh_degrades_to_no_configured_slots_on_db_failure(monkeypatch):
+    """Same fail-safe shape as the provider/cooldown/key-index refreshes: a
+    failing refresh must never abort a review and never leave a stale cache
+    in EITHER of the two caches it populates."""
+    from providers import active_model, active_vertex_slot
+    from review_queue import dispatcher, store
+
+    active_model.set_override_cache({("groq", 0): "stale-model"})
+    active_vertex_slot.set_override_cache({0: ("stale-proj", "stale-loc")})
 
     def _boom():
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(store, "get_all_model_overrides", _boom)
-    await dispatcher._refresh_model_overrides()
-    assert active_model.active_model("groq") != "stale-model"
+    monkeypatch.setattr(store, "get_all_slot_configs", _boom)
+    await dispatcher._refresh_slot_config()
+    assert active_model.active_model("groq", 0) is None
+    assert active_vertex_slot.active_vertex_project(0) is None
     active_model.reset_override_cache()
+    active_vertex_slot.reset_override_cache()
 
 
 async def test_usage_cap_override_refresh_degrades_to_env_on_db_failure(monkeypatch):

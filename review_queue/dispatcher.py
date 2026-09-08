@@ -36,7 +36,7 @@ from formatting import (
     format_schedule_notice,
 )
 from orchestrator import ReviewRateLimited, ReviewSkipped, attempt_review
-from providers import active, active_model, key_index
+from providers import active, active_model, active_vertex_slot, key_index
 from providers.active import active_provider
 from review_queue import (
     cooldown_config,
@@ -214,17 +214,28 @@ async def post_pending_notices(now: datetime) -> int:
     return posted
 
 
-async def _refresh_model_overrides() -> None:
-    """Refresh the per-provider model overrides once per claimed ticket, same
-    cadence and fail-safe shape as the provider/cooldown/key-index refreshes: a
-    failure here must never abort a review, and must never leave a stale cached
-    override in place -- degrade all the way to the env-configured models."""
+async def _refresh_slot_config() -> None:
+    """Refresh both per-slot model AND vertex project/location from the one
+    slot_config table in a single query, same cadence and fail-safe shape as
+    the other per-claimed-ticket refreshes. Supersedes the old flat
+    _refresh_model_overrides -- see docs/superpowers/specs/2026-09-08-
+    slotted-config-and-db-delegation-design.md section 4b."""
     try:
-        overrides = await asyncio.to_thread(store.get_all_model_overrides)
-        active_model.set_override_cache(overrides)
+        all_configs = await asyncio.to_thread(store.get_all_slot_configs)
+        model_overrides = {
+            key: config["model"] for key, config in all_configs.items() if config["model"]
+        }
+        vertex_overrides = {
+            slot: (config["vertex_gcp_project"], config["vertex_gcp_location"])
+            for (provider, slot), config in all_configs.items()
+            if provider == "vertex"
+        }
+        active_model.set_override_cache(model_overrides)
+        active_vertex_slot.set_override_cache(vertex_overrides)
     except Exception:  # noqa: BLE001
-        logger.exception("failed to refresh model overrides; using env models")
+        logger.exception("failed to refresh slot_config; degrading to no configured slots")
         active_model.reset_override_cache()
+        active_vertex_slot.reset_override_cache()
 
 
 async def _refresh_usage_cap_overrides() -> None:
@@ -319,7 +330,7 @@ async def process_next_due(now: datetime) -> StepResult:
         logger.exception("failed to refresh key-index overrides; using index 0")
         key_index.reset_override_cache()
 
-    await _refresh_model_overrides()
+    await _refresh_slot_config()
 
     await _refresh_usage_cap_overrides()
 
