@@ -423,10 +423,17 @@ def _apply_render_patch(payload: EnvironmentRenderPatch) -> dict:
             if key_index_overrides is None:
                 key_index_overrides = store.get_all_key_index_overrides()
                 provider_override_value = store.get_provider_override()
+            slot_config_row = None
+            for family in _LLM_PROVIDER_FAMILIES:
+                index = config_deps.slot_index_for_var(family, key)
+                if index is not None:
+                    slot_config_row = store.get_slot_config(family, index)
+                    break
             dependents = config_deps.dependents_of(
                 key,
                 key_index_overrides=key_index_overrides,
                 provider_override=provider_override_value,
+                slot_config_row=slot_config_row,
             )
             if dependents is not None and dependents.any():
                 failed.append({"key": key, "error": "has_dependents"})
@@ -646,8 +653,20 @@ def _cascade_delete(key: str, confirm: bool) -> tuple[int, dict]:
 
     key_index_overrides = store.get_all_key_index_overrides()
     provider_override = store.get_provider_override()
+    # dependents_of stays pure/I/O-free (its own module docstring) -- fetch
+    # the slot's current slot_config row here and hand it in, same as
+    # key_index_overrides/provider_override above.
+    slot_config_row = None
+    for family in _LLM_PROVIDER_FAMILIES:
+        index = config_deps.slot_index_for_var(family, key)
+        if index is not None:
+            slot_config_row = store.get_slot_config(family, index)
+            break
     dependents = config_deps.dependents_of(
-        key, key_index_overrides=key_index_overrides, provider_override=provider_override
+        key,
+        key_index_overrides=key_index_overrides,
+        provider_override=provider_override,
+        slot_config_row=slot_config_row,
     )
 
     if dependents is not None and dependents.any() and not confirm:
@@ -672,12 +691,15 @@ def _cascade_delete(key: str, confirm: bool) -> tuple[int, dict]:
     now = datetime.now(timezone.utc).isoformat()
     if dependents is not None:
         for family in _LLM_PROVIDER_FAMILIES:
-            if config_deps.slot_index_for_var(family, key) is None:
+            index = config_deps.slot_index_for_var(family, key)
+            if index is None:
                 continue
             if dependents.key_index_override:
                 store.set_key_index_override(family, None, now)
             if dependents.provider_override:
                 store.set_provider_override(None, now)
+            if dependents.slot_config:
+                store.delete_slot_config(family, index)
             break
 
     deploy_id = None

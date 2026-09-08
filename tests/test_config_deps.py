@@ -1,4 +1,5 @@
 """Pure-function tests -- no DB, no mocks, no I/O."""
+
 from __future__ import annotations
 
 from config_deps import (
@@ -52,9 +53,7 @@ def test_dependents_of_flags_matching_key_index_override():
 
 
 def test_dependents_of_flags_active_provider():
-    dependents = dependents_of(
-        "GEMINI_API_KEY", key_index_overrides={}, provider_override="gemini"
-    )
+    dependents = dependents_of("GEMINI_API_KEY", key_index_overrides={}, provider_override="gemini")
     assert dependents.provider_override is True
     assert dependents.any() is True
 
@@ -109,3 +108,31 @@ def test_conflicts_for_empty_when_no_current_value_set():
 
 def test_conflicts_for_empty_for_non_vertex_family():
     assert conflicts_for("gemini", "x", "y") == []
+
+
+def test_dependents_of_flags_slot_config_for_an_inactive_spare_slot():
+    """Independent of active/inactive -- a spare slot's leftover slot_config
+    is exactly the ghost scenario this guards against."""
+    dependents = dependents_of(
+        "GROQ_API_KEY_3",
+        key_index_overrides={"groq": 0},
+        provider_override="groq",
+        slot_config_row={
+            "model": "gemma2-9b-it",
+            "vertex_gcp_project": None,
+            "vertex_gcp_location": None,
+        },
+    )
+    assert dependents.slot_config is True
+    assert dependents.key_index_override is False  # slot 3 isn't the active one
+    assert "slotted model/project/location config" in dependents.labels()
+
+
+def test_dependents_of_does_not_flag_slot_config_when_none_configured():
+    dependents = dependents_of(
+        "GROQ_API_KEY_3",
+        key_index_overrides={"groq": 0},
+        provider_override="groq",
+        slot_config_row=None,
+    )
+    assert dependents.slot_config is False

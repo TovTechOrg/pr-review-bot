@@ -1,6 +1,7 @@
 """Tests for dashboard/environment.py: the Environment tab's Render env-var
 and runtime_config endpoints. Route-level, using the same authenticated
 AsyncClient pattern dashboard/tests/test_dashboard_page.py already uses."""
+
 from __future__ import annotations
 
 import io
@@ -63,12 +64,14 @@ async def test_patch_render_env_vars_applies_sets_and_fires_one_deploy(monkeypat
     monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
     pushed = []
     monkeypatch.setattr(
-        render_client, "push_env_var",
+        render_client,
+        "push_env_var",
         lambda service_id, key, value: pushed.append((key, value)),
     )
     deploys = []
     monkeypatch.setattr(
-        render_client, "trigger_deploy",
+        render_client,
+        "trigger_deploy",
         lambda service_id: deploys.append(service_id) or "dep-1",
     )
     client = await _client()
@@ -109,7 +112,8 @@ async def test_patch_render_env_vars_a_protected_delete_does_not_block_other_key
     monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
     deleted = []
     monkeypatch.setattr(
-        render_client, "delete_env_var",
+        render_client,
+        "delete_env_var",
         lambda service_id, key: deleted.append(key),
     )
     monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
@@ -170,9 +174,7 @@ async def test_patch_environment_config_partial_cooldown_merges_with_current_val
 
 async def test_patch_environment_config_rejects_an_unknown_provider_in_key_index():
     client = await _client()
-    resp = await client.patch(
-        "/api/environment/config", json={"key_index": {"not-a-provider": 1}}
-    )
+    resp = await client.patch("/api/environment/config", json={"key_index": {"not-a-provider": 1}})
     body = resp.json()
     assert body["applied"] == []
     assert body["failed"] == [{"key": "key_index.not-a-provider", "error": "unknown_provider"}]
@@ -289,6 +291,7 @@ async def test_guided_github_app_validate_no_installation_is_structural_error(mo
 async def test_guided_gemini_apply_writes_credential_and_model(monkeypatch):
     applied = {}
     monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+
     def _push(service_id, key, value):
         applied[key] = value
 
@@ -310,6 +313,7 @@ async def test_guided_gemini_apply_writes_credential_and_model(monkeypatch):
 async def test_guided_github_app_apply_writes_id_key_and_installation(monkeypatch):
     applied = {}
     monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+
     def _push(service_id, key, value):
         applied[key] = value
 
@@ -549,6 +553,7 @@ async def test_delete_non_dependent_slot_succeeds_immediately(monkeypatch):
     monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
     monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {})
     monkeypatch.setattr(store, "get_provider_override", lambda: None)
+    monkeypatch.setattr(store, "get_slot_config", lambda family, index: None)
     client = await _client()
     resp = await client.delete("/api/environment/render/GEMINI_API_KEY_2")
     assert resp.status_code == 200
@@ -558,6 +563,7 @@ async def test_delete_non_dependent_slot_succeeds_immediately(monkeypatch):
 async def test_delete_dependent_slot_without_confirm_returns_409(monkeypatch):
     monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"gemini": 2})
     monkeypatch.setattr(store, "get_provider_override", lambda: None)
+    monkeypatch.setattr(store, "get_slot_config", lambda family, index: None)
     client = await _client()
     resp = await client.delete("/api/environment/render/GEMINI_API_KEY_2")
     assert resp.status_code == 409
@@ -567,10 +573,58 @@ async def test_delete_dependent_slot_without_confirm_returns_409(monkeypatch):
 async def test_delete_active_provider_credential_without_confirm_returns_409(monkeypatch):
     monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {})
     monkeypatch.setattr(store, "get_provider_override", lambda: "gemini")
+    monkeypatch.setattr(store, "get_slot_config", lambda family, index: None)
     client = await _client()
     resp = await client.delete("/api/environment/render/GEMINI_API_KEY")
     assert resp.status_code == 409
     assert resp.json()["dependents"] == ["active provider override"]
+
+
+async def test_delete_slot_with_configured_slot_config_without_confirm_returns_409(monkeypatch):
+    monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"groq": 0})
+    monkeypatch.setattr(store, "get_provider_override", lambda: None)
+    monkeypatch.setattr(
+        store,
+        "get_slot_config",
+        lambda family, index: {
+            "model": "gemma2-9b-it",
+            "vertex_gcp_project": None,
+            "vertex_gcp_location": None,
+        },
+    )
+    client = await _client()
+    resp = await client.delete("/api/environment/render/GROQ_API_KEY_3")
+    assert resp.status_code == 409
+    assert resp.json()["dependents"] == ["slotted model/project/location config"]
+
+
+async def test_confirmed_delete_of_a_slot_with_slot_config_removes_the_row(monkeypatch):
+    monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+    monkeypatch.setattr(render_client, "delete_env_var", lambda *a, **k: None)
+    monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
+    monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"groq": 0})
+    monkeypatch.setattr(store, "get_provider_override", lambda: None)
+    monkeypatch.setattr(
+        store,
+        "get_slot_config",
+        lambda family, index: {
+            "model": "gemma2-9b-it",
+            "vertex_gcp_project": None,
+            "vertex_gcp_location": None,
+        },
+    )
+    deleted = {}
+
+    def _delete_slot_config(family, index):
+        deleted["family"] = family
+        deleted["index"] = index
+
+    monkeypatch.setattr(store, "delete_slot_config", _delete_slot_config)
+    client = await _client()
+    resp = await client.delete("/api/environment/render/GROQ_API_KEY_3?confirm=true")
+    assert resp.status_code == 200
+    assert resp.json()["applied"] == ["GROQ_API_KEY_3"]
+    assert deleted == {"family": "groq", "index": 3}
 
 
 async def test_confirmed_delete_cascades_runtime_config(monkeypatch):
@@ -580,6 +634,7 @@ async def test_confirmed_delete_cascades_runtime_config(monkeypatch):
     monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
     monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"gemini": 2})
     monkeypatch.setattr(store, "get_provider_override", lambda: "gemini")
+    monkeypatch.setattr(store, "get_slot_config", lambda family, index: None)
 
     def _set_key_index(provider, index, now):
         cleared["key_index"] = (provider, index)
@@ -817,6 +872,7 @@ async def test_patch_render_bulk_delete_of_dependent_slot_is_rejected(monkeypatc
     monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
     monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"gemini": 2})
     monkeypatch.setattr(store, "get_provider_override", lambda: None)
+    monkeypatch.setattr(store, "get_slot_config", lambda family, index: None)
     client = await _client()
     resp = await client.patch(
         "/api/environment/render", json={"sets": {}, "deletes": ["GEMINI_API_KEY_2"]}
@@ -835,6 +891,7 @@ async def test_patch_render_bulk_delete_of_non_dependent_slot_still_works(monkey
     monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
     monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {})
     monkeypatch.setattr(store, "get_provider_override", lambda: None)
+    monkeypatch.setattr(store, "get_slot_config", lambda family, index: None)
     client = await _client()
     resp = await client.patch(
         "/api/environment/render", json={"sets": {}, "deletes": ["GEMINI_API_KEY_2"]}

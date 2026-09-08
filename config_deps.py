@@ -71,6 +71,7 @@ def slot_index_for_var(family: str, var: str) -> int | None:
 class DeleteDependents:
     key_index_override: bool = False
     provider_override: bool = False
+    slot_config: bool = False
 
     def labels(self) -> list[str]:
         labels = []
@@ -78,10 +79,12 @@ class DeleteDependents:
             labels.append("key_index override")
         if self.provider_override:
             labels.append("active provider override")
+        if self.slot_config:
+            labels.append("slotted model/project/location config")
         return labels
 
     def any(self) -> bool:
-        return self.key_index_override or self.provider_override
+        return self.key_index_override or self.provider_override or self.slot_config
 
 
 def dependents_of(
@@ -89,14 +92,23 @@ def dependents_of(
     *,
     key_index_overrides: dict[str, int],
     provider_override: str | None,
+    slot_config_row: dict | None = None,
 ) -> DeleteDependents | None:
-    """What runtime_config state would dangle if `var` were deleted.
+    """What runtime_config/slot_config state would dangle if `var` were deleted.
 
     Only LLM-provider credential slots have anything to compute: github_app's
     credential vars are protected (dashboard/environment.py never reaches
-    this path for them) and model vars aren't credential-slot-specific, so
-    deleting a credential slot never needs to touch a model var. Returns
-    None for any var that isn't an LLM-provider credential slot at all.
+    this path for them). Returns None for any var that isn't an LLM-provider
+    credential slot at all.
+
+    `slot_config_row` is the caller's already-fetched
+    store.get_slot_config(family, index) result (this module stays pure/I/O
+    -free per its own module docstring) -- a non-None row means that slot has
+    durable model/project/location config that would otherwise dangle as a
+    "ghost" if a new credential later lands in the same slot number.
+    Independent of whether the slot is currently active (unlike
+    key_index_override/provider_override below): a spare, inactive slot can
+    still carry a leftover slot_config row from when it was last configured.
     """
     for family in _SLOTTED_FAMILIES:
         index = slot_index_for_var(family, var)
@@ -114,6 +126,7 @@ def dependents_of(
             # spare slot must not silently switch the bot off a provider
             # that was never depending on that slot in the first place.
             provider_override=(provider_override == family and is_active_slot),
+            slot_config=slot_config_row is not None,
         )
     return None
 
