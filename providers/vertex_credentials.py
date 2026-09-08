@@ -1,4 +1,4 @@
-"""Resolves the Vertex service-account credential: GCP_SERVICE_ACCOUNT_KEY
+"""Resolves the Vertex service-account credential: VERTEX_GCP_SERVICE_ACCOUNT_KEY
 (env, index-aware) -> None, meaning "let google-auth discover implicit ADC".
 
 Separate from credentials.py on purpose: that module knows exactly one
@@ -7,7 +7,7 @@ providers that need nothing more. The JSON parsing lives here instead of
 complicating it for them.
 
 One index, one meaning everywhere: it selects among the numbered
-GCP_SERVICE_ACCOUNT_KEY_{n} env-var slots -- provisioned on Render, exported
+VERTEX_GCP_SERVICE_ACCOUNT_KEY_{n} env-var slots -- provisioned on Render, exported
 locally when a developer wants to test against several different service
 accounts (a quota-exhausted one vs. a healthy one) without touching Render
 or Supabase at all.

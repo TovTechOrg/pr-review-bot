@@ -41,7 +41,7 @@ def test_empty_override_degrades_to_env(monkeypatch):
 
 
 def test_unknown_provider_degrades_to_the_gemini_model(monkeypatch):
-    monkeypatch.setattr(settings, "llm_model", "env-gemini")
+    monkeypatch.setattr(settings, "gemini_model", "env-gemini")
     assert active_model.active_model("nonesuch") == "env-gemini"
 
 
@@ -52,5 +52,5 @@ def test_empty_env_model_degrades_to_the_gemini_model(monkeypatch):
     a live provider SDK, not just a display string, so it must never come
     back as "" the way an unset/empty DB override is allowed to degrade."""
     monkeypatch.setattr(settings, "vertex_model", "")
-    monkeypatch.setattr(settings, "llm_model", "env-gemini")
+    monkeypatch.setattr(settings, "gemini_model", "env-gemini")
     assert active_model.active_model("vertex") == "env-gemini"

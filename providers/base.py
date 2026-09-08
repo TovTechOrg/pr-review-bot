@@ -59,7 +59,7 @@ class RateLimited(Exception):
     """Raised by an adapter when the provider returns HTTP 429.
 
     ``retry_after`` is seconds until a retry is allowed, taken from the
-    provider's ``Retry-After`` header (or ``DEFAULT_RETRY_AFTER_SECONDS`` when
+    provider's ``Retry-After`` header (or ``DISPATCHER_DEFAULT_RETRY_AFTER_SECONDS`` when
     the header is absent/unparseable). It is the SINGLE quota signal the
     dispatcher understands — a short value means a per-minute limit, a long
     value means a daily limit; the code does not distinguish them.

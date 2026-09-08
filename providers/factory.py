@@ -46,15 +46,15 @@ def _build(provider: str, index: int, model: str) -> LLMProvider:
         # "fall through to implicit ADC"), unlike gemini/groq where an empty
         # string always means misconfigured. The locally-detectable invalid
         # state here is instead "no project to call with at all", which
-        # happens only with no GCP_PROJECT override AND no service-account key
+        # happens only with no VERTEX_GCP_PROJECT override AND no service-account key
         # anywhere to derive one from. Both steps are local -- decoding an env
         # var, reading a file -- so this is still a no-network fast-fail, just
         # performed after credential resolution instead of before it.
         info = vertex_credentials.resolve_service_account_info(index)
-        project = settings.gcp_project or (info or {}).get("project_id", "")
+        project = settings.vertex_gcp_project or (info or {}).get("project_id", "")
         if not project:
             raise ValueError(
-                "no credential configured for provider='vertex': GCP_PROJECT not set "
+                "no credential configured for provider='vertex': VERTEX_GCP_PROJECT not set "
                 "and no service-account key found to derive it from"
             )
         # Deferred: google.genai is a large SDK (~4.2s import cost, measured
@@ -66,7 +66,7 @@ def _build(provider: str, index: int, model: str) -> LLMProvider:
 
         return VertexProvider(
             project=project,
-            location=settings.gcp_location,
+            location=settings.vertex_gcp_location,
             service_account_info=info,
             model=model,
         )

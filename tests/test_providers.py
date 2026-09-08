@@ -121,7 +121,7 @@ async def test_gemini_provider_parses_valid_structured_output(monkeypatch):
         ),
     )
 
-    provider = GeminiProvider(api_key="dummy-key-for-construction-only", model=settings.llm_model)
+    provider = GeminiProvider(api_key="dummy-key-for-construction-only", model=settings.gemini_model)
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.parsed == Greeting(message="hi")
@@ -129,7 +129,7 @@ async def test_gemini_provider_parses_valid_structured_output(monkeypatch):
     assert result.tokens_out == 7
     fake_generate.assert_awaited_once()
     _, kwargs = fake_generate.call_args
-    assert kwargs["model"] == settings.llm_model
+    assert kwargs["model"] == settings.gemini_model
 
 
 @pytest.mark.asyncio
@@ -151,7 +151,7 @@ async def test_gemini_provider_includes_thinking_tokens_in_tokens_out(monkeypatc
         ),
     )
 
-    provider = GeminiProvider(api_key="dummy-key-for-construction-only", model=settings.llm_model)
+    provider = GeminiProvider(api_key="dummy-key-for-construction-only", model=settings.gemini_model)
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.tokens_out == 22  # 7 candidates + 15 thinking
@@ -167,7 +167,7 @@ async def test_provider_returns_none_parsed_on_malformed_json(monkeypatch):
         ),
     )
 
-    provider = GeminiProvider(api_key="dummy-key-for-construction-only", model=settings.llm_model)
+    provider = GeminiProvider(api_key="dummy-key-for-construction-only", model=settings.gemini_model)
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.parsed is None
@@ -187,7 +187,7 @@ async def test_provider_returns_none_parsed_on_off_schema_json(monkeypatch):
         ),
     )
 
-    provider = GeminiProvider(api_key="dummy-key-for-construction-only", model=settings.llm_model)
+    provider = GeminiProvider(api_key="dummy-key-for-construction-only", model=settings.gemini_model)
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.parsed is None
@@ -216,7 +216,7 @@ async def test_vertex_provider_parses_valid_structured_output(monkeypatch):
 
     provider = VertexProvider(
         project="proj-x", location="us-central1", service_account_info=None,
-        model=settings.llm_model,
+        model=settings.gemini_model,
     )
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
@@ -227,7 +227,7 @@ async def test_vertex_provider_parses_valid_structured_output(monkeypatch):
     assert captured["project"] == "proj-x"
     assert captured["location"] == "us-central1"
     _, kwargs = fake_generate.call_args
-    assert kwargs["model"] == settings.llm_model
+    assert kwargs["model"] == settings.gemini_model
 
 
 def test_vertex_provider_passes_no_credentials_for_implicit_adc(monkeypatch):
@@ -242,7 +242,7 @@ def test_vertex_provider_passes_no_credentials_for_implicit_adc(monkeypatch):
 
     VertexProvider(
         project="proj-x", location="us-central1", service_account_info=None,
-        model=settings.llm_model,
+        model=settings.gemini_model,
     )
 
     assert captured["credentials"] is None
@@ -275,7 +275,7 @@ def test_vertex_provider_builds_credentials_from_the_service_account_info(monkey
     info = {"type": "service_account", "project_id": "proj-x"}
     VertexProvider(
         project="proj-x", location="us-central1", service_account_info=info,
-        model=settings.llm_model,
+        model=settings.gemini_model,
     )
 
     assert captured["credentials"] is sentinel
@@ -418,15 +418,15 @@ def _mock_vertex_client(monkeypatch, captured: dict | None = None):
 
 
 def test_factory_selects_vertex_and_derives_the_project_from_the_key(monkeypatch):
-    """GCP_PROJECT unset is the COMMON case: an operator handed nothing but a
+    """VERTEX_GCP_PROJECT unset is the COMMON case: an operator handed nothing but a
     service-account JSON key gets the project from the key's own project_id."""
     from providers.google_genai import VertexProvider
 
     captured: dict = {}
     _mock_vertex_client(monkeypatch, captured)
     monkeypatch.setattr(settings, "llm_provider", "vertex")
-    monkeypatch.setattr(settings, "gcp_project", "")
-    monkeypatch.setattr(settings, "gcp_location", "us-central1")
+    monkeypatch.setattr(settings, "vertex_gcp_project", "")
+    monkeypatch.setattr(settings, "vertex_gcp_location", "us-central1")
     monkeypatch.setattr(
         "providers.factory.vertex_credentials.resolve_service_account_info",
         lambda index: {"type": "service_account", "project_id": "proj-from-key"},
@@ -442,12 +442,12 @@ def test_factory_selects_vertex_and_derives_the_project_from_the_key(monkeypatch
 
 
 def test_factory_prefers_an_explicit_gcp_project_over_the_keys_own(monkeypatch):
-    """GCP_PROJECT still exists as an override -- for pointing a key at a
+    """VERTEX_GCP_PROJECT still exists as an override -- for pointing a key at a
     different project than the one it was minted in."""
     captured: dict = {}
     _mock_vertex_client(monkeypatch, captured)
     monkeypatch.setattr(settings, "llm_provider", "vertex")
-    monkeypatch.setattr(settings, "gcp_project", "proj-explicit")
+    monkeypatch.setattr(settings, "vertex_gcp_project", "proj-explicit")
     monkeypatch.setattr(
         "providers.factory.vertex_credentials.resolve_service_account_info",
         lambda index: {"type": "service_account", "project_id": "proj-from-key"},
@@ -470,7 +470,7 @@ def test_factory_builds_vertex_from_implicit_adc_when_a_project_is_set(monkeypat
 
     _mock_vertex_client(monkeypatch)
     monkeypatch.setattr(settings, "llm_provider", "vertex")
-    monkeypatch.setattr(settings, "gcp_project", "proj-explicit")
+    monkeypatch.setattr(settings, "vertex_gcp_project", "proj-explicit")
     monkeypatch.setattr(
         "providers.factory.vertex_credentials.resolve_service_account_info",
         lambda index: None,
@@ -485,7 +485,7 @@ def test_factory_raises_when_vertex_has_neither_a_project_nor_a_credential(monke
     three specialists each discover the same problem the expensive way."""
     _mock_vertex_client(monkeypatch)
     monkeypatch.setattr(settings, "llm_provider", "vertex")
-    monkeypatch.setattr(settings, "gcp_project", "")
+    monkeypatch.setattr(settings, "vertex_gcp_project", "")
     monkeypatch.setattr(
         "providers.factory.vertex_credentials.resolve_service_account_info",
         lambda index: None,
@@ -494,7 +494,7 @@ def test_factory_raises_when_vertex_has_neither_a_project_nor_a_credential(monke
     with pytest.raises(ValueError) as exc:
         get_provider()
     assert "vertex" in str(exc.value)
-    assert "GCP_PROJECT" in str(exc.value)
+    assert "VERTEX_GCP_PROJECT" in str(exc.value)
 
 
 def test_factory_passes_the_active_key_index_to_vertex_credentials(monkeypatch):
@@ -507,7 +507,7 @@ def test_factory_passes_the_active_key_index_to_vertex_credentials(monkeypatch):
     _mock_vertex_client(monkeypatch)
     seen: list[int] = []
     monkeypatch.setattr(settings, "llm_provider", "vertex")
-    monkeypatch.setattr(settings, "gcp_project", "proj-explicit")
+    monkeypatch.setattr(settings, "vertex_gcp_project", "proj-explicit")
     monkeypatch.setattr(
         "providers.factory.vertex_credentials.resolve_service_account_info",
         lambda index: seen.append(index) or None,
@@ -688,14 +688,14 @@ def test_a_model_change_is_a_cache_miss(monkeypatch):
     assert second._model == "model-b"
 
 
-def test_gemini_provider_uses_the_db_override_not_settings_llm_model(monkeypatch):
+def test_gemini_provider_uses_the_db_override_not_settings_gemini_model(monkeypatch):
     """Tautology guard for GeminiProvider: test_gemini_provider_parses_valid_
-    structured_output above asserts kwargs["model"] == settings.llm_model on
+    structured_output above asserts kwargs["model"] == settings.gemini_model on
     BOTH sides of the comparison, so it would not catch a regression where
-    GeminiProvider.__init__ silently went back to reading settings.llm_model
+    GeminiProvider.__init__ silently went back to reading settings.gemini_model
     internally instead of using its constructor argument. Setting a DB model
-    override to a sentinel that DIFFERS from settings.llm_model, and asserting
-    the constructed instance's _model equals the sentinel (not settings.llm_model),
+    override to a sentinel that DIFFERS from settings.gemini_model, and asserting
+    the constructed instance's _model equals the sentinel (not settings.gemini_model),
     proves the constructor argument is what actually populates self._model --
     the single most important correctness property this branch adds (the model
     reported in the PR comment must equal the model actually sent)."""
@@ -704,27 +704,27 @@ def test_gemini_provider_uses_the_db_override_not_settings_llm_model(monkeypatch
     factory.reset_provider_cache()
     monkeypatch.setattr(settings, "llm_provider", "gemini")
     monkeypatch.setattr(settings, "gemini_api_key", "dummy-key-for-construction-only")
-    monkeypatch.setattr(settings, "llm_model", "settings-model-must-not-be-used")
+    monkeypatch.setattr(settings, "gemini_model", "settings-model-must-not-be-used")
     active_model.set_override_cache({"gemini": "sentinel-gemini-model"})
 
     provider = factory.get_provider()
 
     assert isinstance(provider, GeminiProvider)
     assert provider._model == "sentinel-gemini-model"
-    assert provider._model != settings.llm_model
+    assert provider._model != settings.gemini_model
 
 
 def test_vertex_provider_uses_the_db_override_not_settings_vertex_model(monkeypatch):
     """Same tautology guard as the gemini test above, for VertexProvider: a
     regression to reading settings.vertex_model internally would go uncaught
-    by the existing vertex tests, which all pass settings.llm_model/whatever
+    by the existing vertex tests, which all pass settings.gemini_model/whatever
     the ambient value is on both sides of their assertions."""
     from providers import active_model, factory
 
     factory.reset_provider_cache()
     _mock_vertex_client(monkeypatch)
     monkeypatch.setattr(settings, "llm_provider", "vertex")
-    monkeypatch.setattr(settings, "gcp_project", "proj-explicit")
+    monkeypatch.setattr(settings, "vertex_gcp_project", "proj-explicit")
     monkeypatch.setattr(settings, "vertex_model", "settings-model-must-not-be-used")
     monkeypatch.setattr(
         "providers.factory.vertex_credentials.resolve_service_account_info",

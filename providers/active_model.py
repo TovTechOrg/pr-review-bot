@@ -41,8 +41,8 @@ def active_model(provider: str) -> str:
         return override
     entry = registry.PROVIDERS.get(provider)
     if entry is None:
-        return settings.llm_model
-    return getattr(settings, entry[1].lower(), "") or settings.llm_model
+        return settings.gemini_model
+    return getattr(settings, entry[1].lower(), "") or settings.gemini_model
 
 
 def set_override_cache(overrides: dict[str, str]) -> None:

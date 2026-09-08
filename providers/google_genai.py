@@ -35,7 +35,7 @@ async def _complete(
         response_mime_type="application/json",
         response_schema=schema,
     )
-    async with translate_rate_limit(default=settings.default_retry_after_seconds):
+    async with translate_rate_limit(default=settings.dispatcher_default_retry_after_seconds):
         response = await client.aio.models.generate_content(
             model=model, contents=user, config=config
         )

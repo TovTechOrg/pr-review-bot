@@ -66,7 +66,7 @@ class GroqProvider:
         self._model = model
 
     async def complete(self, system: str, user: str, schema: type[BaseModel]) -> LLMResponse:
-        async with translate_rate_limit(default=settings.default_retry_after_seconds):
+        async with translate_rate_limit(default=settings.dispatcher_default_retry_after_seconds):
             response = await self._client.chat.completions.create(
                 model=self._model,
                 messages=[
