@@ -290,6 +290,8 @@ class ApplyLlmCredentialRequest(BaseModel):
     slot: int = Field(default=0, ge=0, lt=MAX_CREDENTIAL_SLOTS)
     credential: dict[str, str]
     model: str
+    vertex_gcp_project: str | None = None
+    vertex_gcp_location: str | None = None
     clear_vertex_gcp_project: bool = False
 
 
@@ -300,12 +302,17 @@ class ApplyGithubAppRequest(BaseModel):
 
 
 def _apply_llm_credential(family: str, payload: ApplyLlmCredentialRequest) -> dict:
+    """Split-push: the credential is the only thing that still goes to
+    Render. Model (and for vertex, project/location) is DB-only now --
+    store.set_slot_config's contract is all three fields together, never a
+    partial write, so this is one upsert call, not per-field pushes. See
+    docs/superpowers/specs/2026-09-08-slotted-config-and-db-delegation-
+    design.md section 8."""
     service_id = render_client.find_service_id()
     if service_id is None:
         return {"applied": [], "failed": [{"key": "*", "error": "service_not_found"}]}
 
     credential_var = slot_env_name(family, payload.slot)
-    model_var = CREDENTIAL_FAMILIES[family]["model"]
     credential_value = (
         payload.credential.get("service_account_b64", "")
         if family == "vertex"
@@ -313,31 +320,30 @@ def _apply_llm_credential(family: str, payload: ApplyLlmCredentialRequest) -> di
     )
     applied: list[str] = []
     failed: list[dict] = []
-    for key, value in ((credential_var, credential_value), (model_var, payload.model)):
-        try:
-            render_client.push_env_var(service_id, key, value)
-            applied.append(key)
-        except Exception as exc:  # noqa: BLE001
-            failed.append({"key": key, "error": type(exc).__name__})
-    if family == "vertex" and payload.clear_vertex_gcp_project:
-        try:
-            render_client.delete_env_var(service_id, "VERTEX_GCP_PROJECT")
-            applied.append("VERTEX_GCP_PROJECT")
-        except Exception as exc:  # noqa: BLE001
-            failed.append({"key": "VERTEX_GCP_PROJECT", "error": type(exc).__name__})
-    if model_var in applied:
-        # Keep the runtime_config model override in sync with the env var
-        # just pushed -- active_model() reads the DB override FIRST, so
-        # without this a guided-setup model pick could be silently
-        # shadowed by a stale override from an earlier plain config-panel
-        # edit, even though the new env var was applied successfully.
-        try:
-            now = datetime.now(timezone.utc).isoformat()
-            store.set_model_override(family, payload.model, now)
-            applied.append(f"model.{family}")
-        except Exception as exc:  # noqa: BLE001
-            failed.append({"key": f"model.{family}", "error": type(exc).__name__})
-    if applied:
+    try:
+        render_client.push_env_var(service_id, credential_var, credential_value)
+        applied.append(credential_var)
+    except Exception as exc:  # noqa: BLE001
+        failed.append({"key": credential_var, "error": type(exc).__name__})
+
+    slot_config_key = f"slot_config.{family}.{payload.slot}"
+    try:
+        vertex_gcp_project = (
+            None if payload.clear_vertex_gcp_project else payload.vertex_gcp_project
+        )
+        store.set_slot_config(
+            family,
+            payload.slot,
+            model=payload.model,
+            vertex_gcp_project=vertex_gcp_project if family == "vertex" else None,
+            vertex_gcp_location=payload.vertex_gcp_location if family == "vertex" else None,
+            now=datetime.now(timezone.utc).isoformat(),
+        )
+        applied.append(slot_config_key)
+    except Exception as exc:  # noqa: BLE001
+        failed.append({"key": slot_config_key, "error": type(exc).__name__})
+
+    if credential_var in applied:
         try:
             render_client.trigger_deploy(service_id)
         except Exception:  # noqa: BLE001

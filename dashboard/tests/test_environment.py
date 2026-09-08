@@ -288,7 +288,8 @@ async def test_guided_github_app_validate_no_installation_is_structural_error(mo
     assert resp.json()["error"] == "installation_not_found"
 
 
-async def test_guided_gemini_apply_writes_credential_and_model(monkeypatch):
+async def test_guided_gemini_apply_writes_credential_only_to_render(monkeypatch, db):
+    """Model lives in slot_config only now -- Render never sees it."""
     applied = {}
     monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
 
@@ -305,9 +306,64 @@ async def test_guided_gemini_apply_writes_credential_and_model(monkeypatch):
     assert resp.status_code == 200
     result = resp.json()
     assert "GEMINI_API_KEY" in result["applied"]
-    assert "GEMINI_MODEL" in result["applied"]
-    assert applied["GEMINI_API_KEY"] == "the-key"
-    assert applied["GEMINI_MODEL"] == "gemini-flash-latest"
+    assert applied == {"GEMINI_API_KEY": "the-key"}  # not GEMINI_MODEL
+
+
+async def test_apply_writes_model_to_slot_config(monkeypatch, db):
+    monkeypatch.setattr(render_client, "push_env_var", lambda *a: None)
+    monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+    monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
+    client = await _client()
+    await client.post(
+        "/api/environment/credential/groq/apply",
+        json={"slot": 2, "credential": {"api_key": "real-key"}, "model": "gemma2-9b-it"},
+    )
+    row = store.get_slot_config("groq", 2)
+    assert row["model"] == "gemma2-9b-it"
+
+
+async def test_apply_writes_vertex_project_and_location_to_slot_config(monkeypatch, db):
+    monkeypatch.setattr(render_client, "push_env_var", lambda *a: None)
+    monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+    monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
+    client = await _client()
+    await client.post(
+        "/api/environment/credential/vertex/apply",
+        json={
+            "slot": 0,
+            "credential": {"service_account_b64": "..."},
+            "model": "gemini-2.5-flash",
+            "vertex_gcp_project": "proj-a",
+            "vertex_gcp_location": "us-east1",
+        },
+    )
+    row = store.get_slot_config("vertex", 0)
+    assert row == {
+        "model": "gemini-2.5-flash",
+        "vertex_gcp_project": "proj-a",
+        "vertex_gcp_location": "us-east1",
+    }
+
+
+async def test_apply_reports_slot_config_write_failure_as_a_named_failed_entry(monkeypatch, db):
+    """Acceptance criterion from docs/superpowers/specs/2026-09-08-slotted-
+    config-and-db-delegation-design.md section 8: a partial failure must be
+    visible, not silently swallowed."""
+    monkeypatch.setattr(render_client, "push_env_var", lambda *a: None)
+    monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+
+    def _boom(*a, **kw):
+        raise RuntimeError("db unreachable")
+
+    monkeypatch.setattr(store, "set_slot_config", _boom)
+    client = await _client()
+    resp = await client.post(
+        "/api/environment/credential/groq/apply",
+        json={"slot": 0, "credential": {"api_key": "real-key"}, "model": "llama-3.3-70b-versatile"},
+    )
+    body = resp.json()
+    assert "GROQ_API_KEY" in body["applied"]
+    assert any(f["key"] == "slot_config.groq.0" for f in body["failed"])
 
 
 async def test_guided_github_app_apply_writes_id_key_and_installation(monkeypatch):
@@ -773,18 +829,22 @@ async def test_guided_github_app_validate_transport_failure_is_github_unreachabl
     assert resp.json()["error"] == "github_unreachable"
 
 
-async def test_guided_gemini_apply_also_sets_runtime_config_model_override(monkeypatch, db):
+async def test_guided_gemini_apply_also_sets_slot_config_model(monkeypatch, db):
     monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
     monkeypatch.setattr(render_client, "push_env_var", lambda *a, **k: None)
     monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
-    store.set_model_override("gemini", "stale-model", "2026-01-01T00:00:00+00:00")
+    store.set_slot_config(
+        "gemini", 0,
+        model="stale-model", vertex_gcp_project=None, vertex_gcp_location=None,
+        now="2026-01-01T00:00:00+00:00",
+    )
     client = await _client()
     resp = await client.post(
         "/api/environment/credential/gemini/apply",
         json={"slot": 0, "credential": {"api_key": "the-key"}, "model": "gemini-flash-latest"},
     )
     assert resp.status_code == 200
-    assert store.get_all_model_overrides().get("gemini") == "gemini-flash-latest"
+    assert store.get_slot_config("gemini", 0)["model"] == "gemini-flash-latest"
 
 
 async def test_validate_vertex_model_no_credential_configured(monkeypatch):
