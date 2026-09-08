@@ -39,45 +39,15 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
-      - key: GEMINI_MODEL
-        sync: false
       - key: GROQ_API_KEY
         sync: false
       - key: GROQ_API_KEY_1
         sync: false
       - key: GROQ_API_KEY_2
         sync: false
-      - key: GROQ_MODEL
-        sync: false
-      - key: VERTEX_MODEL
-        sync: false
       - key: VERTEX_GCP_SERVICE_ACCOUNT_KEY
         sync: false
       - key: VERTEX_GCP_SERVICE_ACCOUNT_KEY_1
         sync: false
       - key: VERTEX_GCP_SERVICE_ACCOUNT_KEY_2
-        sync: false
-      - key: VERTEX_GCP_PROJECT
-        sync: false
-      - key: VERTEX_GCP_LOCATION
-        sync: false
-      - key: LLM_REQUEST_TIMEOUT_SECONDS
-        sync: false
-      - key: DISPATCHER_IDLE_SLEEP_SECONDS
-        sync: false
-      - key: DISPATCHER_DEFAULT_RETRY_AFTER_SECONDS
-        sync: false
-      - key: DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS
-        sync: false
-      - key: DISPATCHER_FAILURE_MAX_BACKOFF_SECONDS
-        sync: false
-      - key: DISPATCHER_MAX_FAILURE_ATTEMPTS
-        sync: false
-      - key: DISPATCHER_MAX_NOTICE_POST_ATTEMPTS
-        sync: false
-      - key: DISPATCHER_MIN_RETRY_AFTER_SECONDS
-        sync: false
-      - key: DISPATCHER_BACKOFF_JITTER_SECONDS
-        sync: false
-      - key: DISPATCHER_NOTICE_SWEEP_BATCH_SIZE
         sync: false
