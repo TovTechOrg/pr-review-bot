@@ -103,7 +103,7 @@ def env_vars(service_id: str) -> dict[str, str]:
     which made every caller blind to any var that happened to land on page
     2+. Confirmed live: this project's Render service carries 29 vars
     against a 20-per-page default, with DATABASE_URL and
-    GCP_SERVICE_ACCOUNT_KEY both on page 2.
+    VERTEX_GCP_SERVICE_ACCOUNT_KEY both on page 2.
     """
     current: dict[str, str] = {}
     params: dict[str, int | str] = {"limit": _ENV_VARS_PAGE_LIMIT}

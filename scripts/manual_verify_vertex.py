@@ -2,7 +2,7 @@
 
 Not part of the pytest suite (CI never runs this) -- it depends on a real,
 live call to Vertex AI using whatever credential
-providers/vertex_credentials.py resolves: GCP_SERVICE_ACCOUNT_KEY, then
+providers/vertex_credentials.py resolves: VERTEX_GCP_SERVICE_ACCOUNT_KEY, then
 implicit ADC (`gcloud auth application-default login`).
 
 Run it directly:
@@ -21,7 +21,7 @@ stop and investigate via docs rather than retrying.
 Resolves key-index slot 0 only: the DB key-index override is a dispatcher-
 runtime concern (it is refreshed into a process-local cache per claimed
 ticket), and a one-shot CLI has no such cache to read. To verify a different
-service account locally, set GCP_SERVICE_ACCOUNT_KEY to its base64 form
+service account locally, set VERTEX_GCP_SERVICE_ACCOUNT_KEY to its base64 form
 (scripts/encode_credential.py).
 
 Never prints the credential. The GCP project id IS printed -- an operator
@@ -49,25 +49,25 @@ class Greeting(BaseModel):
 
 def main() -> int:
     info = vertex_credentials.resolve_service_account_info(0)
-    project = settings.gcp_project or (info or {}).get("project_id", "")
+    project = settings.vertex_gcp_project or (info or {}).get("project_id", "")
     source = "service-account key" if info is not None else "implicit ADC (gcloud)"
 
     print(f"Provider: vertex   Model: {settings.vertex_model}")
     print(f"Credential source: {source}")
-    print(f"Project: {project or '(none resolved)'}   Location: {settings.gcp_location}")
+    print(f"Project: {project or '(none resolved)'}   Location: {settings.vertex_gcp_location}")
     print("(never printing the credential)")
 
     if not project:
         print(
-            "\nno project to call with: set GCP_PROJECT, or provide a service-account "
-            "key via GCP_SERVICE_ACCOUNT_KEY",
+            "\nno project to call with: set VERTEX_GCP_PROJECT, or provide a service-account "
+            "key via VERTEX_GCP_SERVICE_ACCOUNT_KEY",
             file=sys.stderr,
         )
         return 2
 
     provider = VertexProvider(
         project=project,
-        location=settings.gcp_location,
+        location=settings.vertex_gcp_location,
         service_account_info=info,
         model=settings.vertex_model,
     )

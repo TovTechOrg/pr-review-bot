@@ -71,7 +71,7 @@ _ALWAYS_SYNCED = (
     # silently missing it, with no check catching the gap.
     "RENDER_API_KEY",
 )
-# GCP_PROJECT unset means "use the project_id embedded in the service-account
+# VERTEX_GCP_PROJECT unset means "use the project_id embedded in the service-account
 # key" (see config.py), not a missing value -- exempt from sync_env()'s
 # "refuse to push empty values" guard below. GITHUB_TARGET_REPO used to be
 # exempt too (empty meant "track all repos"), but that sentinel is now the
@@ -79,7 +79,7 @@ _ALWAYS_SYNCED = (
 # support-design.md's track-all mode, updated 2026-09-07): a genuinely empty
 # GITHUB_TARGET_REPO is unconfigured, not deliberate, so it goes through the
 # ordinary empty-value refusal like every other required key.
-_OPTIONAL_EMPTY_ENV_KEYS = frozenset({"GCP_PROJECT"})
+_OPTIONAL_EMPTY_ENV_KEYS = frozenset({"VERTEX_GCP_PROJECT"})
 
 # OPERATIONAL_KEYS (config.py) names, mapped to the Settings attribute
 # holding their local value, for every one that has NO other sync path here:
@@ -91,11 +91,11 @@ _OPTIONAL_EMPTY_ENV_KEYS = frozenset({"GCP_PROJECT"})
 # "--sync-env silently never pushes 12 of the documented operational env
 # vars" entry.
 _GENERIC_OPERATIONAL_ENV_ATTRS = {
-    "GCP_PROJECT": "gcp_project",
-    "GCP_LOCATION": "gcp_location",
+    "VERTEX_GCP_PROJECT": "vertex_gcp_project",
+    "VERTEX_GCP_LOCATION": "vertex_gcp_location",
     "LLM_REQUEST_TIMEOUT_SECONDS": "llm_request_timeout_seconds",
     "DISPATCHER_IDLE_SLEEP_SECONDS": "dispatcher_idle_sleep_seconds",
-    "DEFAULT_RETRY_AFTER_SECONDS": "default_retry_after_seconds",
+    "DISPATCHER_DEFAULT_RETRY_AFTER_SECONDS": "dispatcher_default_retry_after_seconds",
     "DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS": "dispatcher_failure_base_backoff_seconds",
     "DISPATCHER_FAILURE_MAX_BACKOFF_SECONDS": "dispatcher_failure_max_backoff_seconds",
     "DISPATCHER_MAX_FAILURE_ATTEMPTS": "dispatcher_max_failure_attempts",

@@ -96,12 +96,12 @@ def test_env_vars_unwraps_the_service_env_list(monkeypatch):
 
 def test_env_vars_follows_the_cursor_across_a_full_page(monkeypatch):
     """A service with more vars than one page must not silently drop the
-    rest -- this is the bug that made DATABASE_URL and GCP_SERVICE_ACCOUNT_KEY
+    rest -- this is the bug that made DATABASE_URL and VERTEX_GCP_SERVICE_ACCOUNT_KEY
     invisible to every check built on env_vars() once the live service grew
     past Render's per-page limit."""
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
     full_page = {f"KEY_{i}": str(i) for i in range(_render._ENV_VARS_PAGE_LIMIT)}
-    second_page = {"DATABASE_URL": "postgres://...", "GCP_SERVICE_ACCOUNT_KEY": "ey..."}
+    second_page = {"DATABASE_URL": "postgres://...", "VERTEX_GCP_SERVICE_ACCOUNT_KEY": "ey..."}
     with respx.mock:
         route = respx.get(f"{RENDER_SERVICES}/srv-1/env-vars")
         route.side_effect = [

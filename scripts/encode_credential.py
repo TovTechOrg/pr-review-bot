@@ -1,5 +1,5 @@
 """Prints a local file's base64 form -- for pasting into GITHUB_APP_PRIVATE_KEY
-or GCP_SERVICE_ACCOUNT_KEY[_n] in .env.
+or VERTEX_GCP_SERVICE_ACCOUNT_KEY[_n] in .env.
 
     uv run python -m scripts.encode_credential path/to/file.pem
 

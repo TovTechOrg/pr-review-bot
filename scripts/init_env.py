@@ -37,7 +37,7 @@ from config import OPERATIONAL_KEYS, Settings
 _KEY_LINE = re.compile(r"^\s*(?:export\s+)?([A-Z_0-9]+)=")
 
 # Keys whose value is a file's base64 form rather than something typed.
-_FILE_ENCODED_KEYS = frozenset({"GITHUB_APP_PRIVATE_KEY", "GCP_SERVICE_ACCOUNT_KEY"})
+_FILE_ENCODED_KEYS = frozenset({"GITHUB_APP_PRIVATE_KEY", "VERTEX_GCP_SERVICE_ACCOUNT_KEY"})
 
 
 def key_names(path: Path) -> frozenset[str]:

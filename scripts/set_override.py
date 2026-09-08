@@ -161,7 +161,7 @@ def _print_inventory() -> int:
     answer "is --index 2 valid?" without ever opening .env, which it may not do.
 
     Partial picture for vertex specifically: "local slots" here only reflects
-    GCP_SERVICE_ACCOUNT_KEY (and its numbered siblings) being set -- it says
+    VERTEX_GCP_SERVICE_ACCOUNT_KEY (and its numbered siblings) being set -- it says
     nothing about implicit ADC (`gcloud auth application-default login`),
     which providers/vertex_credentials.py also accepts as a valid way to
     authenticate. So vertex can print "local slots -" here even when a
@@ -216,11 +216,11 @@ def _print_inventory() -> int:
         index_source = "override" if provider in index_overrides else "default"
         model_source = "override" if provider in model_overrides else "env"
         # vertex-only caveat: "local slots" above only reflects
-        # GCP_SERVICE_ACCOUNT_KEY (and numbered siblings), never implicit ADC
+        # VERTEX_GCP_SERVICE_ACCOUNT_KEY (and numbered siblings), never implicit ADC
         # -- also valid per vertex_credentials.py -- so "local slots -" here
         # does not mean vertex is unusable.
         vertex_note = (
-            " (vertex: reflects GCP_SERVICE_ACCOUNT_KEY only, not implicit ADC)"
+            " (vertex: reflects VERTEX_GCP_SERVICE_ACCOUNT_KEY only, not implicit ADC)"
             if provider == "vertex"
             else ""
         )
