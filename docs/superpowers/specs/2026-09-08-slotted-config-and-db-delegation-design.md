@@ -254,26 +254,66 @@ project/location) per apply.
   it were independent field writes, unlike the Render-side keys which
   genuinely are independent single-key PUTs).
 
-## 9. Open decisions for you to confirm or correct
+## 9. Credential deletion must nullify its slot's `slot_config` row
+
+`config_deps.py::dependents_of`'s docstring currently says, correctly for
+today: "model vars aren't credential-slot-specific, so deleting a credential
+slot never needs to touch a model var." Slotting makes that false —
+`slot_config` rows are now genuinely per-slot state that dangles the same
+way `key_index_override`/`provider_override` already do when their slot's
+credential disappears.
+
+**Rule: deleting any credential slot var (`GEMINI_API_KEY[_n]`,
+`GROQ_API_KEY[_n]`, or `VERTEX_GCP_SERVICE_ACCOUNT_KEY[_n]`) deletes that
+`(family, index)`'s entire `slot_config` row** — for gemini/groq that's just
+`model`; for vertex it's `model` *and* `vertex_gcp_project` *and*
+`vertex_gcp_location` together, all three, never partially. Example: delete
+`GROQ_API_KEY_1` → `slot_config` row `("groq", 1)` is gone, so a model
+configured for that slot can never silently resurface — nothing is left to
+be a "ghost" and misleadingly reused if a new credential later lands in
+that same slot number. Same for `VERTEX_GCP_SERVICE_ACCOUNT_KEY_1` →
+`slot_config` row `("vertex", 1)` (model + project + location) is gone.
+
+**This is independent of whether the slot is currently active** — unlike
+`dependents_of`'s existing `key_index_override`/`provider_override` checks,
+which only fire for the *active* slot (deleting an unused spare is
+currently a no-op dependents-wise). A spare, inactive slot can still carry
+a leftover `slot_config` row from when it was last configured, and that's
+exactly the ghost scenario being guarded against here — so this check must
+run for *every* slot, active or not.
+
+**Wire it through the existing confirm-before-delete flow, don't do it
+silently**: `DeleteDependents` gains a new field (e.g. `slot_config: bool`,
+set whenever `slot_index_for_var` resolves and that `(family, index)` has a
+non-empty `slot_config` row), surfaced in `.labels()` and rendered in the
+dashboard's existing "This will also clear:" confirmation dialog
+(`deleteConfirmList`) alongside the key-index/provider-override lines —
+this is real, meaningful config being discarded, the same category of
+thing that dialog already exists to surface, not a silent side effect.
+
+## 10. Open decisions for you to confirm or correct
 
 1. ~~§4a: per-slot `model` for all three providers, or just Vertex
    project/location?~~ **Resolved: all three.**
 2. ~~Is the `slot_config` table name/shape acceptable?~~ **Resolved as
-   drafted**, with the persistence model in §4a made explicit — flag if
-   the name/shape itself still needs to change.
-3. §7: is the per-slot dashboard UI in scope for the same implementation
-   pass as §4b/§5's backend changes, or a follow-up once the backend
-   lands? **Still open** — not addressed yet.
-4. New from this round: should the *already-shipped* 6 DB-only vars
-   (cooldown trio, usage-cap pair, `REVIEW_DRAFT_PRS`) also lose their
-   env-fallback tier for consistency with the "DB is sole source of
-   truth" principle adopted here, or is that principle scoped to only the
-   *new* work in this spec, leaving the existing 6 as-is (two different
-   reliability philosophies side by side, deliberately)?
-5. §4b: when `active_model(provider, index)` (or the vertex-slot
-   accessors) find no row, should the function itself raise, or return
-   `None` and let each call site decide how to turn that into the
-   `ValueError` `factory.py::_build` needs? Either works; I'd lean
-   "return `None`, let `_build` raise" to keep the cache modules exactly
-   as narrow/dependency-free as `active_model.py`'s existing docstring
-   describes, but flagging it since the draft above hedged on this.
+   drafted**, with the persistence model in §4a made explicit.
+3. ~~§7: per-slot dashboard UI in the same pass as the backend, or a
+   follow-up?~~ **Resolved: best-effort in the same implementation pass**
+   — the backend and UI work are expected to share the same or similar
+   tests, so splitting them into separate passes would mostly duplicate
+   effort rather than save any.
+4. ~~Should the already-shipped 6 DB-only vars also lose their
+   env-fallback tier?~~ **Resolved: yes.** `cooldown_config.py`,
+   `usage_cap_config.py`, and `review_draft_config.py` all currently fall
+   back to a `Settings` field default (e.g.
+   `settings.dispatcher_rereview_cooldown_seconds`) when no DB override is
+   set — that fallback branch is removed from all three, matching §4b's
+   policy exactly: a missing value becomes a real failure, not a silent
+   default. The `Settings` fields themselves don't disappear — per §5,
+   they change *role* from "live runtime fallback" to "the seed value
+   `--sync-config-db`/onboarding provisioning writes into the DB," nothing
+   more.
+5. ~~Raise directly, or return `None` and let the caller raise?~~
+   **Resolved: return `None`, `_build` raises** — keeps the new cache
+   modules exactly as narrow/dependency-free as `active_model.py`'s
+   existing docstring describes.
