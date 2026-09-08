@@ -494,7 +494,7 @@ async def patch_render_env_vars(payload: EnvironmentRenderPatch) -> JSONResponse
 def _build_config_payload() -> dict:
     base, cap, factor = store.get_cooldown_overrides()
     tokens, reset = store.get_usage_cap_overrides()
-    return {
+    payload = {
         "provider": store.get_provider_override(),
         "cooldown_base_seconds": base,
         "cooldown_max_seconds": cap,
@@ -505,6 +505,28 @@ def _build_config_payload() -> dict:
         "key_index": store.get_all_key_index_overrides(),
         "model": store.get_all_model_overrides(),
     }
+    payload.update(store.get_dispatcher_tuning_config())
+    payload["slot_configs"] = _slot_configs_by_provider()
+    return payload
+
+
+def _slot_configs_by_provider() -> dict[str, list[dict]]:
+    """store.get_all_slot_configs() grouped and sorted for display -- one
+    list per provider, each entry a slot's configured (model, and for
+    vertex, project/location). Used by both the config payload above (Task
+    15) and the read-only per-slot listing (Task 16)."""
+    grouped: dict[str, list[dict]] = {p: [] for p in registry.PROVIDERS}
+    for (provider, slot), config in store.get_all_slot_configs().items():
+        if provider not in grouped:
+            continue
+        entry = {"slot": slot, "model": config["model"]}
+        if provider == "vertex":
+            entry["vertex_gcp_project"] = config["vertex_gcp_project"]
+            entry["vertex_gcp_location"] = config["vertex_gcp_location"]
+        grouped[provider].append(entry)
+    for entries in grouped.values():
+        entries.sort(key=lambda e: e["slot"])
+    return grouped
 
 
 @router.get("/api/environment/config")
@@ -553,6 +575,19 @@ async def get_credential_models(family: str, slot: int | None = None) -> JSONRes
     return JSONResponse(payload)
 
 
+_TUNING_KNOB_KEYS = (
+    "llm_request_timeout_seconds",
+    "dispatcher_default_retry_after_seconds",
+    "dispatcher_failure_base_backoff_seconds",
+    "dispatcher_failure_max_backoff_seconds",
+    "dispatcher_max_failure_attempts",
+    "dispatcher_max_notice_post_attempts",
+    "dispatcher_min_retry_after_seconds",
+    "dispatcher_backoff_jitter_seconds",
+    "dispatcher_notice_sweep_batch_size",
+)
+
+
 class EnvironmentConfigPatch(BaseModel):
     provider: str | None = None
     cooldown_base_seconds: float | None = None
@@ -563,6 +598,15 @@ class EnvironmentConfigPatch(BaseModel):
     review_draft_prs: bool | None = None
     key_index: dict[str, int | None] = {}
     model: dict[str, str | None] = {}
+    llm_request_timeout_seconds: float | None = None
+    dispatcher_default_retry_after_seconds: float | None = None
+    dispatcher_failure_base_backoff_seconds: float | None = None
+    dispatcher_failure_max_backoff_seconds: float | None = None
+    dispatcher_max_failure_attempts: int | None = None
+    dispatcher_max_notice_post_attempts: int | None = None
+    dispatcher_min_retry_after_seconds: float | None = None
+    dispatcher_backoff_jitter_seconds: float | None = None
+    dispatcher_notice_sweep_batch_size: int | None = None
 
 
 def _apply_config_patch(payload: EnvironmentConfigPatch) -> dict:
@@ -639,6 +683,16 @@ def _apply_config_patch(payload: EnvironmentConfigPatch) -> dict:
             applied.append(f"model.{provider}")
         except Exception as exc:  # noqa: BLE001
             failed.append({"key": f"model.{provider}", "error": type(exc).__name__})
+
+    tuning_fields = {k: fields[k] for k in _TUNING_KNOB_KEYS if k in fields}
+    if tuning_fields:
+        try:
+            current = store.get_dispatcher_tuning_config()
+            merged = {**current, **tuning_fields}
+            store.set_dispatcher_tuning_config(**merged, now=now)
+            applied.extend(tuning_fields.keys())
+        except Exception as exc:  # noqa: BLE001
+            failed.extend({"key": k, "error": type(exc).__name__} for k in tuning_fields)
 
     return {"applied": applied, "failed": failed}
 

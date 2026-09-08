@@ -414,3 +414,27 @@ async def test_guided_setup_strings_exist_in_both_languages():
     body = (await client.get("/")).text
     for key in ("env_guided_no_models", "env_guided_missing_input"):
         assert body.count(f"{key}:") == 2, key
+
+
+async def test_dashboard_page_declares_all_16_config_panel_field_ids():
+    """The config panel's 16 fields (provider + 15 flat tunables) must all
+    be present in the served page, or a field silently drops out of the
+    dashboard entirely."""
+    client = await _client()
+    resp = await client.get("/")
+    body = resp.text
+    for field_id in (
+        "cfgProvider",
+        "cfgCooldownBase", "cfgCooldownFactor", "cfgCooldownMax",
+        "cfgDispatcherBackoffJitterSeconds",
+        "cfgDispatcherDefaultRetryAfterSeconds",
+        "cfgDispatcherFailureBaseBackoffSeconds",
+        "cfgDispatcherFailureMaxBackoffSeconds",
+        "cfgDispatcherMaxFailureAttempts",
+        "cfgDispatcherMaxNoticePostAttempts",
+        "cfgDispatcherMinRetryAfterSeconds",
+        "cfgDispatcherNoticeSweepBatchSize",
+        "cfgLlmRequestTimeoutSeconds",
+        "cfgReviewDraftPrs", "cfgUsageCapReset", "cfgUsageCapTokens",
+    ):
+        assert f'id="{field_id}"' in body, f"{field_id} missing from the served page"

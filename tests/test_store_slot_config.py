@@ -81,3 +81,30 @@ def test_get_all_slot_configs_returns_every_configured_row_keyed_by_provider_and
     all_configs = store.get_all_slot_configs()
     assert all_configs[("groq", 0)]["model"] == "llama-3.3-70b-versatile"
     assert all_configs[("vertex", 1)]["vertex_gcp_project"] == "proj-a"
+
+
+def test_set_dispatcher_tuning_config_round_trips():
+    store.set_dispatcher_tuning_config(
+        llm_request_timeout_seconds=30.0,
+        dispatcher_default_retry_after_seconds=45.0,
+        dispatcher_failure_base_backoff_seconds=1.0,
+        dispatcher_failure_max_backoff_seconds=200.0,
+        dispatcher_max_failure_attempts=4,
+        dispatcher_max_notice_post_attempts=2,
+        dispatcher_min_retry_after_seconds=0.5,
+        dispatcher_backoff_jitter_seconds=1.5,
+        dispatcher_notice_sweep_batch_size=10,
+        now="2026-09-08T00:00:00+00:00",
+    )
+    row = store.get_dispatcher_tuning_config()
+    assert row == {
+        "llm_request_timeout_seconds": 30.0,
+        "dispatcher_default_retry_after_seconds": 45.0,
+        "dispatcher_failure_base_backoff_seconds": 1.0,
+        "dispatcher_failure_max_backoff_seconds": 200.0,
+        "dispatcher_max_failure_attempts": 4,
+        "dispatcher_max_notice_post_attempts": 2,
+        "dispatcher_min_retry_after_seconds": 0.5,
+        "dispatcher_backoff_jitter_seconds": 1.5,
+        "dispatcher_notice_sweep_batch_size": 10,
+    }

@@ -172,6 +172,77 @@ async def test_patch_environment_config_partial_cooldown_merges_with_current_val
     assert store.get_cooldown_overrides() == (9.0, 2.0, 3.0)
 
 
+async def test_get_environment_config_reflects_tuning_knob_overrides(db):
+    store.set_dispatcher_tuning_config(
+        llm_request_timeout_seconds=30.0,
+        dispatcher_default_retry_after_seconds=45.0,
+        dispatcher_failure_base_backoff_seconds=1.0,
+        dispatcher_failure_max_backoff_seconds=200.0,
+        dispatcher_max_failure_attempts=4,
+        dispatcher_max_notice_post_attempts=2,
+        dispatcher_min_retry_after_seconds=0.5,
+        dispatcher_backoff_jitter_seconds=1.5,
+        dispatcher_notice_sweep_batch_size=10,
+        now="2026-01-01T00:00:00+00:00",
+    )
+    client = await _client()
+    resp = await client.get("/api/environment/config")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["llm_request_timeout_seconds"] == 30.0
+    assert body["dispatcher_notice_sweep_batch_size"] == 10
+
+
+async def test_patch_environment_config_partial_tuning_knob_merges_with_current_values(db):
+    store.set_dispatcher_tuning_config(
+        llm_request_timeout_seconds=30.0,
+        dispatcher_default_retry_after_seconds=45.0,
+        dispatcher_failure_base_backoff_seconds=1.0,
+        dispatcher_failure_max_backoff_seconds=200.0,
+        dispatcher_max_failure_attempts=4,
+        dispatcher_max_notice_post_attempts=2,
+        dispatcher_min_retry_after_seconds=0.5,
+        dispatcher_backoff_jitter_seconds=1.5,
+        dispatcher_notice_sweep_batch_size=10,
+        now="2026-01-01T00:00:00+00:00",
+    )
+    client = await _client()
+    resp = await client.patch(
+        "/api/environment/config", json={"llm_request_timeout_seconds": 60.0}
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"applied": ["llm_request_timeout_seconds"], "failed": []}
+    row = store.get_dispatcher_tuning_config()
+    assert row["llm_request_timeout_seconds"] == 60.0
+    assert row["dispatcher_notice_sweep_batch_size"] == 10  # untouched
+
+
+async def test_get_environment_config_exposes_slot_configs_by_provider(db):
+    store.set_slot_config(
+        "groq", 0, model="llama-3.3-70b-versatile",
+        vertex_gcp_project=None, vertex_gcp_location=None,
+        now="2026-01-01T00:00:00+00:00",
+    )
+    store.set_slot_config(
+        "vertex", 1, model="gemini-2.5-flash",
+        vertex_gcp_project="proj-a", vertex_gcp_location="us-east1",
+        now="2026-01-01T00:00:00+00:00",
+    )
+    client = await _client()
+    resp = await client.get("/api/environment/config")
+    body = resp.json()
+    assert body["slot_configs"]["groq"] == [
+        {"slot": 0, "model": "llama-3.3-70b-versatile"}
+    ]
+    assert body["slot_configs"]["vertex"] == [
+        {
+            "slot": 1, "model": "gemini-2.5-flash",
+            "vertex_gcp_project": "proj-a", "vertex_gcp_location": "us-east1",
+        }
+    ]
+    assert body["slot_configs"]["gemini"] == []
+
+
 async def test_patch_environment_config_rejects_an_unknown_provider_in_key_index():
     client = await _client()
     resp = await client.patch("/api/environment/config", json={"key_index": {"not-a-provider": 1}})

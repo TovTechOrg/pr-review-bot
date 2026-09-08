@@ -1168,6 +1168,63 @@ def get_dispatcher_tuning_config() -> dict:
     return {k: row[k] for k in keys}
 
 
+def set_dispatcher_tuning_config(
+    *,
+    llm_request_timeout_seconds: float | None,
+    dispatcher_default_retry_after_seconds: float | None,
+    dispatcher_failure_base_backoff_seconds: float | None,
+    dispatcher_failure_max_backoff_seconds: float | None,
+    dispatcher_max_failure_attempts: int | None,
+    dispatcher_max_notice_post_attempts: int | None,
+    dispatcher_min_retry_after_seconds: float | None,
+    dispatcher_backoff_jitter_seconds: float | None,
+    dispatcher_notice_sweep_batch_size: int | None,
+    now: str,
+) -> None:
+    """Write-side counterpart to get_dispatcher_tuning_config -- upserts the
+    singleton row, same CHECK (id = 1) guarantee as set_cooldown_override.
+    Writes exactly the 9 values it's given; a caller applying a PARTIAL
+    update (e.g. the config panel's PATCH endpoint) is responsible for
+    reading the current 9 via get_dispatcher_tuning_config() and merging
+    first, mirroring set_cooldown_override's own contract."""
+    with _require_pool().connection() as conn:
+        conn.execute(
+            "INSERT INTO runtime_config ("
+            "    id, llm_request_timeout_seconds, dispatcher_default_retry_after_seconds,"
+            "    dispatcher_failure_base_backoff_seconds, dispatcher_failure_max_backoff_seconds,"
+            "    dispatcher_max_failure_attempts, dispatcher_max_notice_post_attempts,"
+            "    dispatcher_min_retry_after_seconds, dispatcher_backoff_jitter_seconds,"
+            "    dispatcher_notice_sweep_batch_size, updated_at"
+            ") VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+            "ON CONFLICT (id) DO UPDATE SET "
+            "llm_request_timeout_seconds = EXCLUDED.llm_request_timeout_seconds, "
+            "dispatcher_default_retry_after_seconds = "
+            "    EXCLUDED.dispatcher_default_retry_after_seconds, "
+            "dispatcher_failure_base_backoff_seconds = "
+            "    EXCLUDED.dispatcher_failure_base_backoff_seconds, "
+            "dispatcher_failure_max_backoff_seconds = "
+            "    EXCLUDED.dispatcher_failure_max_backoff_seconds, "
+            "dispatcher_max_failure_attempts = EXCLUDED.dispatcher_max_failure_attempts, "
+            "dispatcher_max_notice_post_attempts = EXCLUDED.dispatcher_max_notice_post_attempts, "
+            "dispatcher_min_retry_after_seconds = EXCLUDED.dispatcher_min_retry_after_seconds, "
+            "dispatcher_backoff_jitter_seconds = EXCLUDED.dispatcher_backoff_jitter_seconds, "
+            "dispatcher_notice_sweep_batch_size = EXCLUDED.dispatcher_notice_sweep_batch_size, "
+            "updated_at = EXCLUDED.updated_at",
+            (
+                llm_request_timeout_seconds,
+                dispatcher_default_retry_after_seconds,
+                dispatcher_failure_base_backoff_seconds,
+                dispatcher_failure_max_backoff_seconds,
+                dispatcher_max_failure_attempts,
+                dispatcher_max_notice_post_attempts,
+                dispatcher_min_retry_after_seconds,
+                dispatcher_backoff_jitter_seconds,
+                dispatcher_notice_sweep_batch_size,
+                now,
+            ),
+        )
+
+
 def get_idle_sleep_seconds() -> float | None:
     """DISPATCHER_IDLE_SLEEP_SECONDS's DB value, or None if unset (should not
     happen once seeded -- see get_dispatcher_tuning_config's docstring)."""

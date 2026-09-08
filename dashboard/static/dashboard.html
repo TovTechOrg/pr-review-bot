@@ -663,7 +663,13 @@
           </select>
           <div id="providerModelRows" class="provider-model-grid"></div>
           <!-- Alphabetized by field key (cooldown_base_seconds, cooldown_factor,
-               cooldown_max_seconds, review_draft_prs, usage_cap_reset,
+               cooldown_max_seconds, dispatcher_backoff_jitter_seconds,
+               dispatcher_default_retry_after_seconds,
+               dispatcher_failure_base_backoff_seconds,
+               dispatcher_failure_max_backoff_seconds,
+               dispatcher_max_failure_attempts, dispatcher_max_notice_post_attempts,
+               dispatcher_min_retry_after_seconds, dispatcher_notice_sweep_batch_size,
+               llm_request_timeout_seconds, review_draft_prs, usage_cap_reset,
                usage_cap_tokens) -- provider stays pinned above, since it
                drives #providerModelRows directly beneath it. -->
           <label>
@@ -711,6 +717,141 @@
             </span>
           </label>
           <input id="cfgCooldownMax" type="number" step="any">
+          <label>
+            <span data-i18n="env_config_dispatcher_backoff_jitter_seconds"></span>
+            <span class="info-wrap">
+              <button type="button" class="info-icon" data-action="info" aria-label="More info" data-i18n-aria="env_info_label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9"/>
+                  <line x1="12" y1="11" x2="12" y2="16"/>
+                  <circle cx="12" cy="7.5" r="0.75" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_dispatcher_backoff_jitter_seconds"></span>
+            </span>
+          </label>
+          <input id="cfgDispatcherBackoffJitterSeconds" type="number" step="any">
+          <label>
+            <span data-i18n="env_config_dispatcher_default_retry_after_seconds"></span>
+            <span class="info-wrap">
+              <button type="button" class="info-icon" data-action="info" aria-label="More info" data-i18n-aria="env_info_label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9"/>
+                  <line x1="12" y1="11" x2="12" y2="16"/>
+                  <circle cx="12" cy="7.5" r="0.75" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_dispatcher_default_retry_after_seconds"></span>
+            </span>
+          </label>
+          <input id="cfgDispatcherDefaultRetryAfterSeconds" type="number" step="any">
+          <label>
+            <span data-i18n="env_config_dispatcher_failure_base_backoff_seconds"></span>
+            <span class="info-wrap">
+              <button type="button" class="info-icon" data-action="info" aria-label="More info" data-i18n-aria="env_info_label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9"/>
+                  <line x1="12" y1="11" x2="12" y2="16"/>
+                  <circle cx="12" cy="7.5" r="0.75" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_dispatcher_failure_base_backoff_seconds"></span>
+            </span>
+          </label>
+          <input id="cfgDispatcherFailureBaseBackoffSeconds" type="number" step="any">
+          <label>
+            <span data-i18n="env_config_dispatcher_failure_max_backoff_seconds"></span>
+            <span class="info-wrap">
+              <button type="button" class="info-icon" data-action="info" aria-label="More info" data-i18n-aria="env_info_label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9"/>
+                  <line x1="12" y1="11" x2="12" y2="16"/>
+                  <circle cx="12" cy="7.5" r="0.75" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_dispatcher_failure_max_backoff_seconds"></span>
+            </span>
+          </label>
+          <input id="cfgDispatcherFailureMaxBackoffSeconds" type="number" step="any">
+          <label>
+            <span data-i18n="env_config_dispatcher_max_failure_attempts"></span>
+            <span class="info-wrap">
+              <button type="button" class="info-icon" data-action="info" aria-label="More info" data-i18n-aria="env_info_label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9"/>
+                  <line x1="12" y1="11" x2="12" y2="16"/>
+                  <circle cx="12" cy="7.5" r="0.75" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_dispatcher_max_failure_attempts"></span>
+            </span>
+          </label>
+          <input id="cfgDispatcherMaxFailureAttempts" type="number" step="1">
+          <label>
+            <span data-i18n="env_config_dispatcher_max_notice_post_attempts"></span>
+            <span class="info-wrap">
+              <button type="button" class="info-icon" data-action="info" aria-label="More info" data-i18n-aria="env_info_label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9"/>
+                  <line x1="12" y1="11" x2="12" y2="16"/>
+                  <circle cx="12" cy="7.5" r="0.75" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_dispatcher_max_notice_post_attempts"></span>
+            </span>
+          </label>
+          <input id="cfgDispatcherMaxNoticePostAttempts" type="number" step="1">
+          <label>
+            <span data-i18n="env_config_dispatcher_min_retry_after_seconds"></span>
+            <span class="info-wrap">
+              <button type="button" class="info-icon" data-action="info" aria-label="More info" data-i18n-aria="env_info_label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9"/>
+                  <line x1="12" y1="11" x2="12" y2="16"/>
+                  <circle cx="12" cy="7.5" r="0.75" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_dispatcher_min_retry_after_seconds"></span>
+            </span>
+          </label>
+          <input id="cfgDispatcherMinRetryAfterSeconds" type="number" step="any">
+          <label>
+            <span data-i18n="env_config_dispatcher_notice_sweep_batch_size"></span>
+            <span class="info-wrap">
+              <button type="button" class="info-icon" data-action="info" aria-label="More info" data-i18n-aria="env_info_label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9"/>
+                  <line x1="12" y1="11" x2="12" y2="16"/>
+                  <circle cx="12" cy="7.5" r="0.75" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_dispatcher_notice_sweep_batch_size"></span>
+            </span>
+          </label>
+          <input id="cfgDispatcherNoticeSweepBatchSize" type="number" step="1">
+          <label>
+            <span data-i18n="env_config_llm_request_timeout_seconds"></span>
+            <span class="info-wrap">
+              <button type="button" class="info-icon" data-action="info" aria-label="More info" data-i18n-aria="env_info_label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9"/>
+                  <line x1="12" y1="11" x2="12" y2="16"/>
+                  <circle cx="12" cy="7.5" r="0.75" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_llm_request_timeout_seconds"></span>
+            </span>
+          </label>
+          <input id="cfgLlmRequestTimeoutSeconds" type="number" step="any">
           <label>
             <input id="cfgReviewDraftPrs" type="checkbox">
             <span data-i18n="env_config_review_draft_prs"></span>
@@ -813,6 +954,15 @@
         env_config_usage_cap_tokens: "Usage cap (tokens)",
         env_config_usage_cap_reset: "Usage cap reset (UTC)",
         env_config_review_draft_prs: "Review draft PRs",
+        env_config_dispatcher_backoff_jitter_seconds: "Backoff jitter (s)",
+        env_config_dispatcher_default_retry_after_seconds: "Default retry-after (s)",
+        env_config_dispatcher_failure_base_backoff_seconds: "Failure backoff base (s)",
+        env_config_dispatcher_failure_max_backoff_seconds: "Failure backoff max (s)",
+        env_config_dispatcher_max_failure_attempts: "Max failure attempts",
+        env_config_dispatcher_max_notice_post_attempts: "Max notice post attempts",
+        env_config_dispatcher_min_retry_after_seconds: "Min retry-after (s)",
+        env_config_dispatcher_notice_sweep_batch_size: "Notice sweep batch size",
+        env_config_llm_request_timeout_seconds: "LLM request timeout (s)",
         env_save_config: "Save configuration",
         env_redeploying: "Redeploying…",
         env_reveal: "Reveal",
@@ -834,6 +984,15 @@
         cfg_desc_usage_cap_tokens: "Daily per-key token usage cap. Unset disables the cap entirely.",
         cfg_desc_usage_cap_reset: "Wall-clock UTC time the daily per-key usage cap resets at.",
         cfg_desc_review_draft_prs: "Whether draft PRs get reviewed on push (marking a PR ready for review always triggers one either way).",
+        cfg_desc_dispatcher_backoff_jitter_seconds: "Random jitter added to backoff delays, to avoid retries landing in lockstep.",
+        cfg_desc_dispatcher_default_retry_after_seconds: "Fallback delay before retrying a review when no other backoff applies.",
+        cfg_desc_dispatcher_failure_base_backoff_seconds: "Starting backoff delay after a review failure, doubling on each further failure up to the max below.",
+        cfg_desc_dispatcher_failure_max_backoff_seconds: "Upper bound on the failure backoff delay.",
+        cfg_desc_dispatcher_max_failure_attempts: "How many times a review is retried after failing before being given up on.",
+        cfg_desc_dispatcher_max_notice_post_attempts: "How many times posting a PR notice comment is retried before giving up.",
+        cfg_desc_dispatcher_min_retry_after_seconds: "Smallest allowed delay before a retry, regardless of what triggered it.",
+        cfg_desc_dispatcher_notice_sweep_batch_size: "How many pending notice comments are swept per batch.",
+        cfg_desc_llm_request_timeout_seconds: "Maximum time to wait for a single LLM response before giving up.",
         env_model_load_failed: "Could not load models",
         env_retry: "Retry",
         env_info_label: "More info",
@@ -905,6 +1064,15 @@
         env_config_usage_cap_tokens: "תקרת שימוש (טוקנים)",
         env_config_usage_cap_reset: "איפוס תקרת שימוש (UTC)",
         env_config_review_draft_prs: "בדיקת PR-ים בטיוטה",
+        env_config_dispatcher_backoff_jitter_seconds: "רעש נסיגה (שנ')",
+        env_config_dispatcher_default_retry_after_seconds: "ברירת מחדל לניסיון חוזר (שנ')",
+        env_config_dispatcher_failure_base_backoff_seconds: "בסיס נסיגה לכשל (שנ')",
+        env_config_dispatcher_failure_max_backoff_seconds: "מקסימום נסיגה לכשל (שנ')",
+        env_config_dispatcher_max_failure_attempts: "מקסימום ניסיונות כשל",
+        env_config_dispatcher_max_notice_post_attempts: "מקסימום ניסיונות פרסום הודעה",
+        env_config_dispatcher_min_retry_after_seconds: "מינימום לניסיון חוזר (שנ')",
+        env_config_dispatcher_notice_sweep_batch_size: "גודל אצוות איסוף הודעות",
+        env_config_llm_request_timeout_seconds: "פסק זמן בקשת LLM (שנ')",
         env_save_config: "שמור תצורה",
         env_redeploying: "פורס מחדש…",
         env_reveal: "הצג",
@@ -926,6 +1094,15 @@
         cfg_desc_usage_cap_tokens: "תקרת שימוש יומית בטוקנים לכל מפתח. השארה ללא הגדרה מבטלת את התקרה כליל.",
         cfg_desc_usage_cap_reset: "שעת UTC שבה תקרת השימוש היומית לכל מפתח מתאפסת.",
         cfg_desc_review_draft_prs: "האם PR-ים בטיוטה נבדקים בעת push (סימון PR כמוכן לבדיקה מפעיל בדיקה בכל מקרה).",
+        cfg_desc_dispatcher_backoff_jitter_seconds: "רעש אקראי המתווסף להשהיות הנסיגה, כדי למנוע ניסיונות חזרה בו-זמניים.",
+        cfg_desc_dispatcher_default_retry_after_seconds: "השהיה כברירת מחדל לפני ניסיון חזרה על בדיקה כשאין השהיה אחרת שחלה.",
+        cfg_desc_dispatcher_failure_base_backoff_seconds: "השהיית הנסיגה ההתחלתית לאחר כשל בבדיקה, מוכפלת בכל כשל נוסף עד למקסימום שמופיע להלן.",
+        cfg_desc_dispatcher_failure_max_backoff_seconds: "הגבול העליון להשהיית הנסיגה לאחר כשל.",
+        cfg_desc_dispatcher_max_failure_attempts: "כמה פעמים בדיקה תיוסה שוב לאחר כשל לפני שנוטשים אותה.",
+        cfg_desc_dispatcher_max_notice_post_attempts: "כמה פעמים פרסום תגובת הודעה ב-PR ינוסה שוב לפני נטישה.",
+        cfg_desc_dispatcher_min_retry_after_seconds: "ההשהיה המינימלית המותרת לפני ניסיון חזרה, ללא קשר לגורם לה.",
+        cfg_desc_dispatcher_notice_sweep_batch_size: "כמה תגובות הודעה ממתינות נאספות בכל אצווה.",
+        cfg_desc_llm_request_timeout_seconds: "זמן ההמתנה המרבי לתשובה אחת מה-LLM לפני נטישה.",
         env_model_load_failed: "לא ניתן היה לטעון מודלים",
         env_retry: "ניסיון חוזר",
         env_info_label: "מידע נוסף",
@@ -1999,6 +2176,22 @@
       });
     }
 
+    const TUNING_KNOB_FIELDS = [
+      "llm_request_timeout_seconds",
+      "dispatcher_default_retry_after_seconds",
+      "dispatcher_failure_base_backoff_seconds",
+      "dispatcher_failure_max_backoff_seconds",
+      "dispatcher_max_failure_attempts",
+      "dispatcher_max_notice_post_attempts",
+      "dispatcher_min_retry_after_seconds",
+      "dispatcher_backoff_jitter_seconds",
+      "dispatcher_notice_sweep_batch_size",
+    ];
+
+    function tuningKnobFieldId(field) {
+      return "cfg" + field.replace(/(^|_)([a-z])/g, (_m, _sep, c) => c.toUpperCase());
+    }
+
     function populateConfigForm(cfg) {
       document.getElementById("cfgProvider").value = cfg.provider || "";
       document.getElementById("cfgCooldownBase").value = cfg.cooldown_base_seconds ?? "";
@@ -2007,6 +2200,9 @@
       document.getElementById("cfgUsageCapTokens").value = cfg.usage_cap_tokens ?? "";
       document.getElementById("cfgUsageCapReset").value = cfg.usage_cap_reset ?? "";
       document.getElementById("cfgReviewDraftPrs").checked = Boolean(cfg.review_draft_prs);
+      TUNING_KNOB_FIELDS.forEach((field) => {
+        document.getElementById(tuningKnobFieldId(field)).value = cfg[field] ?? "";
+      });
       currentConfig = { model: cfg.model || {}, key_index: cfg.key_index || {} };
       invalidConfigFields.clear();
       updateSaveGuards();
@@ -2035,6 +2231,10 @@
         model: {},
         key_index: {},
       };
+      TUNING_KNOB_FIELDS.forEach((field) => {
+        const raw = document.getElementById(tuningKnobFieldId(field)).value;
+        body[field] = raw === "" ? null : parseFloat(raw);
+      });
       // Always set every provider's field (never conditional on truthiness)
       // so blanking a model input or resetting a key-slot select to "—"
       // actually clears the override server-side, instead of the field
