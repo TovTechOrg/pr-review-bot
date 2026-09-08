@@ -24,6 +24,11 @@ from review_queue import (
 )
 import orchestrator as orchestrator
 
+# Captured before the _env fixture below stubs store.get_cooldown_overrides
+# for the rest of this file -- lets one test (which exercises the real
+# DB-read wiring) restore the genuine function instead of the stub.
+_REAL_GET_COOLDOWN_OVERRIDES = store.get_cooldown_overrides
+
 NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
 # NOW is 2026-01-01T12:00Z and the reset defaults to 04:00 UTC, so the
@@ -72,6 +77,32 @@ def _env(db, monkeypatch):
             "dispatcher_backoff_jitter_seconds": settings.dispatcher_backoff_jitter_seconds,
             "dispatcher_notice_sweep_batch_size": settings.dispatcher_notice_sweep_batch_size,
         },
+    )
+    # cooldown_config/usage_cap_config/review_draft_config also lost their
+    # env-fallback tier (Task 6) -- stubbed here the same way, reading
+    # `settings` live at call time (not snapshotted) so existing test bodies
+    # that monkeypatch e.g. settings.key_usage_token_cap per-test keep
+    # working unchanged; a test exercising the refresh-failure path itself
+    # re-monkeypatches these below the fixture, which still wins.
+    # test_claimed_ticket_uses_the_db_cooldown_override specifically
+    # restores the REAL store.get_cooldown_overrides (via _REAL_GET_COOLDOWN_OVERRIDES
+    # below) to exercise the actual DB-read wiring this stub otherwise shadows.
+    monkeypatch.setattr(
+        dispatcher.store,
+        "get_cooldown_overrides",
+        lambda: (
+            settings.dispatcher_rereview_cooldown_seconds,
+            settings.dispatcher_rereview_cooldown_max_seconds,
+            settings.dispatcher_rereview_cooldown_factor,
+        ),
+    )
+    monkeypatch.setattr(
+        dispatcher.store,
+        "get_usage_cap_overrides",
+        lambda: (settings.key_usage_token_cap, settings.key_usage_reset_time_utc.isoformat()),
+    )
+    monkeypatch.setattr(
+        dispatcher.store, "get_review_draft_override", lambda: settings.review_draft_prs
     )
     yield
     dispatcher.reset_blocked_until()
@@ -600,8 +631,13 @@ async def test_blocked_gate_uses_current_settings_provider_not_stale_ticket_prov
 
 def _reviewed_then_pushed(pr, monkeypatch):
     """A ticket that HAS a completed review (last_reviewed_at set) and a pending
-    re-review queued by a later push (cooldown 0 -> immediately claimable)."""
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 0.0)
+    re-review queued by a later push (cooldown 0 -> immediately claimable).
+
+    cooldown_config is DB-only, no env fallback (Task 6) -- store.enqueue_or_update
+    (called below) reads the cache directly, not through process_next_due's
+    own refresh, so the cache is set here rather than via a settings monkeypatch.
+    """
+    cooldown_config.set_override_cache(0.0, 3600.0, 2.0)
     tid = _enqueue(pr=pr)
     store.claim_next_due(NOW.isoformat())
     store.finalize_review(
@@ -1323,9 +1359,10 @@ async def test_claimed_ticket_uses_the_db_cooldown_override(monkeypatch):
     """The behavioral guarantee: a mid-session cooldown override changes the
     next scheduled re-review, with no restart and no redeploy."""
     _stub_comments(monkeypatch)
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 3600.0)
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_factor", 2.0)
+    # Restore the real store.get_cooldown_overrides -- the _env fixture
+    # stubs it to read settings live (Task 6's no-fallback contract), which
+    # would shadow this test's own DB write below.
+    monkeypatch.setattr(dispatcher.store, "get_cooldown_overrides", _REAL_GET_COOLDOWN_OVERRIDES)
     store.set_cooldown_override(base=30.0, cap=600.0, factor=1.5, now=NOW.isoformat())
 
     async def fake_attempt(repo, pr, comment_id=None):
@@ -1345,17 +1382,17 @@ async def test_claimed_ticket_uses_the_db_cooldown_override(monkeypatch):
     assert t.not_before == expected.isoformat()
 
 
-async def test_claim_falls_back_to_env_cooldown_when_the_override_read_fails(monkeypatch):
-    """Fail-safe: an unreachable cooldown override must degrade to the
-    configured env defaults, never abort the review, and never keep serving a
-    stale cached override from a previous successful refresh."""
+async def test_claim_surfaces_a_real_failure_when_the_cooldown_read_fails(monkeypatch):
+    """cooldown_config is DB-only, no env fallback (Task 6) -- an unreachable
+    cooldown override degrades the cache to (None, None, None), so the
+    re-arm computation (store.effective_cooldown, consulted right after a
+    completed review) has nothing to compute with and must raise rather than
+    silently guess a cooldown. Unlike the pre-refactor "falls back to env"
+    behavior, this is a real, visible failure: it propagates out of
+    process_next_due to run_forever's own broad except (the ticket stays
+    'running' until the next recover_on_startup pass), the same category of
+    failure as a process crash mid-review."""
     _stub_comments(monkeypatch)
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 3600.0)
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_factor", 2.0)
-    # A prior successful refresh cached a DIFFERENT base. If the failure
-    # handler merely logged and left the cache alone, effective_cooldown would
-    # keep using 30.0 forever -- this is what catches that.
     cooldown_config.set_override_cache(30.0, 600.0, 1.5)
 
     def boom():
@@ -1364,21 +1401,12 @@ async def test_claim_falls_back_to_env_cooldown_when_the_override_read_fails(mon
     monkeypatch.setattr(store, "get_cooldown_overrides", boom)
 
     async def fake_attempt(repo, pr, comment_id=None):
-        # A push lands mid-review -> dirty flag -> the cooldown actually gets
-        # consulted on the re-arm path (see store.finalize_review).
-        store.enqueue_or_update(
-            repo_full_name="owner/repo", pr_number=1, head_sha="sha2",
-            provider="groq", now=NOW.isoformat(),
-        )
         return orchestrator.ReviewCompleted(review=type("R", (), {})())
 
     monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
     _enqueue(1)
-    result = await dispatcher.process_next_due(NOW)
-    t = store.get_ticket(1)
-    expected = NOW + timedelta(seconds=300.0)  # env default, not the stale 30.0
-    assert t.not_before == expected.isoformat()
-    assert result.action == "ran"
+    with pytest.raises(TypeError):
+        await dispatcher.process_next_due(NOW)
 
 
 async def test_over_token_cap_defers_without_calling_attempt_review(monkeypatch, db_exec):
@@ -1596,7 +1624,9 @@ async def test_usage_cap_override_refresh_degrades_to_env_on_db_failure(monkeypa
 
 async def test_review_draft_override_refresh_degrades_to_env_on_db_failure(monkeypatch):
     """Same fail-safe shape as the other refreshes: a failing DB read must
-    degrade the cache to "no override" rather than keep a stale value."""
+    degrade the cache to "no override" -- which, with no env fallback
+    (Task 6), reads back as None ("config not available this tick"), not a
+    stale value and not a silent env default."""
     from review_queue import dispatcher, review_draft_config, store
 
     review_draft_config.set_override_cache(True)
@@ -1606,8 +1636,7 @@ async def test_review_draft_override_refresh_degrades_to_env_on_db_failure(monke
 
     monkeypatch.setattr(store, "get_review_draft_override", _boom)
     await dispatcher._refresh_review_draft_override()
-    monkeypatch.setattr(settings, "review_draft_prs", False)
-    assert review_draft_config.effective_review_draft_prs() is False
+    assert review_draft_config.effective_review_draft_prs() is None
     review_draft_config.reset_override_cache()
 
 

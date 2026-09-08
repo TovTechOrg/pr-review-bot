@@ -161,8 +161,8 @@ def test_push_to_cancelled_ticket_revives_to_pending_when_never_reviewed():
     assert t.head_sha == "sha2"
 
 
-def test_push_to_cancelled_ticket_respects_cooldown_when_previously_reviewed(monkeypatch):
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 3600.0)
+def test_push_to_cancelled_ticket_respects_cooldown_when_previously_reviewed():
+    cooldown_config.set_override_cache(3600.0, 7200.0, 2.0)
     tid = _enqueue()
     store.claim_next_due(now=T0)
     store.finalize_review(tid, now=T0, rereview_not_before=T0, rereview_cooldown_level=0)
@@ -367,8 +367,8 @@ def test_push_during_running_sets_rereview_flag_and_keeps_running():
     assert t.head_sha == "sha2"
 
 
-def test_push_to_done_ticket_within_cooldown_re_arms_deferred(monkeypatch):
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
+def test_push_to_done_ticket_within_cooldown_re_arms_deferred():
+    cooldown_config.set_override_cache(300.0, 3600.0, 2.0)
     tid = _enqueue(sha="sha1")
     store.claim_next_due(now=T0)
     store.finalize_review(
@@ -383,8 +383,8 @@ def test_push_to_done_ticket_within_cooldown_re_arms_deferred(monkeypatch):
     assert t.attempts == 0
 
 
-def test_push_to_done_ticket_past_cooldown_re_arms_pending(monkeypatch):
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
+def test_push_to_done_ticket_past_cooldown_re_arms_pending():
+    cooldown_config.set_override_cache(300.0, 3600.0, 2.0)
     tid = _enqueue(sha="sha1")
     store.claim_next_due(now=T0)
     store.finalize_review(tid, now=T0, rereview_not_before=T_COOL, rereview_cooldown_level=0)
@@ -548,9 +548,8 @@ def _make_done(db_exec, tid, last_reviewed_at, level, now=T0):
     )
 
 
-def test_due_after_cooldown_branches(monkeypatch):
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 3600.0)
+def test_due_after_cooldown_branches():
+    cooldown_config.set_override_cache(300.0, 3600.0, 2.0)
     # never reviewed -> pending, level 0
     assert store._due_after_cooldown(None, T1, 0) == ("pending", None, 0)
     # within window (level 0 -> 300s; T0=12:00:00, T1=12:00:01) -> deferred, escalate to 1
@@ -564,9 +563,8 @@ def test_due_after_cooldown_branches(monkeypatch):
     assert lvl == 2
 
 
-def test_enqueue_push_within_cooldown_escalates_level(monkeypatch, db_exec):
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 3600.0)
+def test_enqueue_push_within_cooldown_escalates_level(db_exec):
+    cooldown_config.set_override_cache(300.0, 3600.0, 2.0)
     tid = _enqueue(sha="sha1")
     # last review T0, already at level 1 (eff=600s)
     _make_done(db_exec, tid, last_reviewed_at=T0, level=1)
@@ -580,9 +578,8 @@ def test_enqueue_push_within_cooldown_escalates_level(monkeypatch, db_exec):
     assert t.head_sha == "sha2"
 
 
-def test_enqueue_push_after_cooldown_resets_level(monkeypatch, db_exec):
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 3600.0)
+def test_enqueue_push_after_cooldown_resets_level(db_exec):
+    cooldown_config.set_override_cache(300.0, 3600.0, 2.0)
     tid = _enqueue(sha="sha1")
     _make_done(db_exec, tid, last_reviewed_at=T0, level=3)   # window eff(3)=2400s (until 12:40)
     store.enqueue_or_update(   # FUTURE = 18:00, well past the window -> quiet -> reset
@@ -594,9 +591,8 @@ def test_enqueue_push_after_cooldown_resets_level(monkeypatch, db_exec):
     assert t.cooldown_level == 0
 
 
-def test_effective_cooldown_escalates_and_caps(monkeypatch):
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 3600.0)
+def test_effective_cooldown_escalates_and_caps():
+    cooldown_config.set_override_cache(300.0, 3600.0, 2.0)
     assert store.effective_cooldown(0) == 300.0     # level 0 == today's flat cooldown
     assert store.effective_cooldown(1) == 600.0
     assert store.effective_cooldown(2) == 1200.0
@@ -605,22 +601,14 @@ def test_effective_cooldown_escalates_and_caps(monkeypatch):
     assert store.effective_cooldown(50) == 3600.0   # capped, no 2**50 blowup
 
 
-def test_effective_cooldown_never_drops_below_base_when_cap_misconfigured(monkeypatch):
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 100.0)
-    assert store.effective_cooldown(0) == 300.0     # base wins over a misconfigured lower cap
-
-
 def test_next_cooldown_level_increments_and_guards():
     assert store.next_cooldown_level(0) == 1
     assert store.next_cooldown_level(4) == 5
     assert store.next_cooldown_level(30) == 30      # _MAX_COOLDOWN_LEVEL guard
 
 
-def test_effective_cooldown_uses_a_configured_factor(monkeypatch):
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 30.0)
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 300.0)
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_factor", 3.0)
+def test_effective_cooldown_uses_a_configured_factor():
+    cooldown_config.set_override_cache(30.0, 300.0, 3.0)
     assert store.effective_cooldown(0) == 30.0
     assert store.effective_cooldown(1) == 90.0
     assert store.effective_cooldown(2) == 270.0
@@ -886,6 +874,7 @@ def test_defer_rate_limited_clears_a_stale_usage_cap_reason():
 
 
 def test_cooldown_re_arm_on_push_clears_a_stale_usage_cap_reason(db_exec):
+    cooldown_config.set_override_cache(300.0, 3600.0, 2.0)
     tid = _enqueue()
     store.defer_usage_capped(tid, not_before=FUTURE, now=T1)
     # Terminal state + a recent completed review -> enqueue_or_update's

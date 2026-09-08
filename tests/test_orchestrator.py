@@ -427,7 +427,7 @@ async def test_attempt_review_skips_entirely_on_an_empty_diff(monkeypatch):
     assert isinstance(outcome, orchestrator.ReviewSkipped)
 
 
-async def test_attempt_review_skips_a_draft_pr_by_default(monkeypatch):
+async def test_attempt_review_skips_a_draft_pr_when_the_override_disallows_it(monkeypatch):
     """ISSUES.md's 'Draft PRs are reviewed identically to ready-for-review
     PRs' gap: a draft PR must short-circuit before any specialist call,
     comment post, or dashboard record, same as an empty diff."""
@@ -436,6 +436,9 @@ async def test_attempt_review_skips_a_draft_pr_by_default(monkeypatch):
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
         lambda repo, pr: SimpleNamespace(text="real diff content", repo_full_name=repo, draft=True),
+    )
+    monkeypatch.setattr(
+        orchestrator.review_draft_config, "effective_review_draft_prs", lambda: False
     )
 
     def boom(*a, **k):
@@ -478,6 +481,25 @@ async def test_attempt_review_reviews_a_draft_pr_when_the_override_allows_it(mon
     outcome = await orchestrator.attempt_review("owner/repo", 1)
 
     assert isinstance(outcome, orchestrator.ReviewCompleted)
+
+
+async def test_attempt_review_raises_for_a_draft_pr_when_the_override_is_unrefreshed(monkeypatch):
+    """review_draft_config.effective_review_draft_prs() returning None means
+    the DB-only config hasn't been refreshed yet (Task 6, no env fallback) --
+    this must surface as a real failure, not silently skip or silently
+    review the draft."""
+    import orchestrator as orchestrator
+
+    monkeypatch.setattr(
+        orchestrator.github_app, "fetch_pr_diff",
+        lambda repo, pr: SimpleNamespace(text="real diff content", repo_full_name=repo, draft=True),
+    )
+    monkeypatch.setattr(
+        orchestrator.review_draft_config, "effective_review_draft_prs", lambda: None
+    )
+
+    with pytest.raises(RuntimeError, match="review-draft-PRs config not available"):
+        await orchestrator.attempt_review("owner/repo", 1)
 
 
 async def test_attempt_review_still_migrates_a_rename_on_an_empty_diff(monkeypatch):

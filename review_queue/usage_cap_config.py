@@ -1,5 +1,5 @@
 """The per-key daily usage cap actually in force: a DB override (token cap /
-reset time) when set and valid, else the env-configured defaults.
+reset time) as cached.
 
 Every read of the effective cap goes through effective_caps(). Mirrors
 review_queue/cooldown_config.py exactly, including the reason for the split: the
@@ -7,51 +7,47 @@ DB read lives in the dispatcher (where the asyncio.to_thread convention
 applies) and is pushed in via set_override_cache, keeping this module
 import-light and non-blocking.
 
-Fail-safe by construction: the cache starts empty, so before the first refresh
--- and whenever a refresh fails -- the service degrades to its configured
-defaults. An override that reads back invalid (a non-positive cap, or a reset
-time that will not parse) is discarded as a WHOLE PAIR, never partially
-applied, so a bad field can never pair with a stale override in the other
-field.
+No env fallback: DB is the sole source of truth, per
+docs/superpowers/specs/2026-09-08-slotted-config-and-db-delegation-design.md
+section 10.4. The cache starts empty, so before the first refresh -- and
+whenever a refresh fails -- effective_caps() returns (None, None), which a
+caller must treat as "config not yet available this tick" (defer), not
+synthesize a default for. An override that reads back invalid (a reset time
+that will not parse) is discarded as a WHOLE PAIR -- (None, None) -- never
+partially applied, so a bad field can never pair with a stale override in
+the other field.
 
-Why a non-positive cap is treated as invalid rather than clamped: the
-dispatcher's gate is `tokens >= cap`, which a 0 cap makes unconditionally true
--- every ticket deferred forever. That deferral is STICKY, because a ticket's
-not_before is already set to a real future timestamp by the time it happens, so
-correcting the override afterwards does not release already-deferred tickets.
+Why a non-positive cap is treated as "cap disabled" rather than "invalid":
+the dispatcher's gate is `tokens >= cap`, which a 0 cap makes unconditionally
+true -- every ticket deferred forever. Rather than reject the override
+outright (which would need a fallback to reject TO), a non-positive cap is
+normalized to None -- explicitly no cap -- the same value an operator would
+use to turn the cap off.
 """
 
 from __future__ import annotations
 
 from datetime import time
 
-from config import settings
-
 _tokens: int | None = None
 _reset: str | None = None
 
 
-def _env_caps() -> tuple[int | None, time]:
-    return (
-        settings.key_usage_token_cap,
-        settings.key_usage_reset_time_utc,
-    )
-
-
-def effective_caps() -> tuple[int | None, time]:
-    """(token cap, reset time) -- the DB override where fully valid, else the
-    env defaults. A None cap means the cap is not enforced."""
-    tokens = _tokens if _tokens is not None else settings.key_usage_token_cap
-    if _reset is not None:
-        try:
-            reset = time.fromisoformat(_reset)
-        except ValueError:
-            return _env_caps()
-    else:
-        reset = settings.key_usage_reset_time_utc
-    if tokens is not None and tokens <= 0:
-        return _env_caps()
-    return tokens, reset
+def effective_caps() -> tuple[int | None, time | None]:
+    """(token cap, reset time) as cached. A cap of None (with a real reset
+    time present) means the cap is intentionally disabled -- that's a valid
+    configured state, not "unset"; a reset time of None means genuinely not
+    yet refreshed/configured, since a cap being off never implies the reset
+    time is meaningless (it still gates when a *future* cap would reset)."""
+    if _reset is None:
+        return (None, None)
+    try:
+        reset = time.fromisoformat(_reset)
+    except ValueError:
+        return (None, None)
+    if _tokens is not None and _tokens <= 0:
+        return (None, reset)
+    return (_tokens, reset)
 
 
 def set_override_cache(tokens: int | None, reset: str | None) -> None:

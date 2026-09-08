@@ -104,8 +104,21 @@ async def attempt_review(
                 "failed to migrate renamed repo %s -> %s", repo_full_name, diff.repo_full_name
             )
 
-    if diff.draft and not review_draft_config.effective_review_draft_prs():
-        return ReviewSkipped()
+    if diff.draft:
+        review_drafts = review_draft_config.effective_review_draft_prs()
+        if review_drafts is None:
+            # DB-only, no env fallback (Task 6): a None here means the
+            # per-claimed-ticket refresh in dispatcher.py hasn't populated
+            # this cache yet, or its last refresh failed -- a real missing-
+            # config state, not "treat drafts like non-drafts". Raising
+            # routes this through the dispatcher's existing hard-failure
+            # retry/backoff path (visible, not silently skipped/discarded)
+            # exactly like any other unrefreshed DB-only config.
+            raise RuntimeError(
+                "review-draft-PRs config not available (not yet refreshed from the DB)"
+            )
+        if not review_drafts:
+            return ReviewSkipped()
 
     annotated = annotate_and_cap(diff.text)
 
