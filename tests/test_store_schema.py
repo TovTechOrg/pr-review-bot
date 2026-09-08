@@ -23,6 +23,16 @@ EXPECTED_COLUMNS = {
         "groq_key_index", "vertex_key_index", "gemini_model", "groq_model",
         "vertex_model", "key_usage_token_cap",
         "key_usage_reset_time_utc", "review_draft_prs",
+        "llm_request_timeout_seconds", "dispatcher_default_retry_after_seconds",
+        "dispatcher_failure_base_backoff_seconds",
+        "dispatcher_failure_max_backoff_seconds", "dispatcher_max_failure_attempts",
+        "dispatcher_max_notice_post_attempts", "dispatcher_min_retry_after_seconds",
+        "dispatcher_backoff_jitter_seconds", "dispatcher_notice_sweep_batch_size",
+        "dispatcher_idle_sleep_seconds",
+    },
+    "slot_config": {
+        "provider", "slot_index", "model", "vertex_gcp_project",
+        "vertex_gcp_location", "updated_at",
     },
     "reviews": {
         "id", "repo_full_name", "pr_number", "provider", "model", "comment_id",

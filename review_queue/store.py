@@ -53,6 +53,16 @@ RUNTIME_CONFIG_COLUMNS: tuple[tuple[str, str], ...] = (
     ("key_usage_token_cap", "INTEGER"),
     ("key_usage_reset_time_utc", "TEXT"),
     ("review_draft_prs", "BOOLEAN"),
+    ("llm_request_timeout_seconds", "DOUBLE PRECISION"),
+    ("dispatcher_default_retry_after_seconds", "DOUBLE PRECISION"),
+    ("dispatcher_failure_base_backoff_seconds", "DOUBLE PRECISION"),
+    ("dispatcher_failure_max_backoff_seconds", "DOUBLE PRECISION"),
+    ("dispatcher_max_failure_attempts", "INTEGER"),
+    ("dispatcher_max_notice_post_attempts", "INTEGER"),
+    ("dispatcher_min_retry_after_seconds", "DOUBLE PRECISION"),
+    ("dispatcher_backoff_jitter_seconds", "DOUBLE PRECISION"),
+    ("dispatcher_notice_sweep_batch_size", "INTEGER"),
+    ("dispatcher_idle_sleep_seconds", "DOUBLE PRECISION"),
 )
 
 # Declared, not migrated: this is the final shape, provisioned in one pass on
@@ -109,6 +119,16 @@ CREATE TABLE IF NOT EXISTS runtime_config (
 ) + """
 );
 ALTER TABLE runtime_config ENABLE ROW LEVEL SECURITY;
+CREATE TABLE IF NOT EXISTS slot_config (
+    provider            TEXT    NOT NULL,
+    slot_index          INTEGER NOT NULL,
+    model               TEXT,
+    vertex_gcp_project  TEXT,
+    vertex_gcp_location TEXT,
+    updated_at          TEXT    NOT NULL,
+    PRIMARY KEY (provider, slot_index)
+);
+ALTER TABLE slot_config ENABLE ROW LEVEL SECURITY;
 CREATE TABLE IF NOT EXISTS reviews (
     id                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     repo_full_name     TEXT    NOT NULL,
@@ -1013,6 +1033,79 @@ def get_all_model_overrides() -> dict[str, str]:
     if row is None:
         return {}
     return {provider: row[column] for provider, column in columns.items() if row[column]}
+
+
+def get_slot_config(provider: str, slot_index: int) -> dict | None:
+    """This slot's durable config (model, and for vertex, project/location),
+    or None if never configured. Independent of *_key_index (which slot is
+    active) -- see docs/superpowers/specs/2026-09-08-slotted-config-and-db-
+    delegation-design.md section 4a."""
+    with _require_pool().connection() as conn:
+        row = conn.execute(
+            "SELECT model, vertex_gcp_project, vertex_gcp_location "
+            "FROM slot_config WHERE provider = %s AND slot_index = %s",
+            (provider, slot_index),
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "model": row["model"],
+        "vertex_gcp_project": row["vertex_gcp_project"],
+        "vertex_gcp_location": row["vertex_gcp_location"],
+    }
+
+
+def set_slot_config(
+    provider: str,
+    slot_index: int,
+    *,
+    model: str | None,
+    vertex_gcp_project: str | None,
+    vertex_gcp_location: str | None,
+    now: str,
+) -> None:
+    """Upsert all three fields together -- never a partial-field update, so
+    a caller that only means to change one field must read-then-write the
+    other two itself (dashboard/environment.py's apply flow already has the
+    current row in hand from validation, so this is never a real gap)."""
+    with _require_pool().connection() as conn:
+        conn.execute(
+            "INSERT INTO slot_config "
+            "(provider, slot_index, model, vertex_gcp_project, vertex_gcp_location, updated_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s) "
+            "ON CONFLICT (provider, slot_index) DO UPDATE SET "
+            "model = EXCLUDED.model, "
+            "vertex_gcp_project = EXCLUDED.vertex_gcp_project, "
+            "vertex_gcp_location = EXCLUDED.vertex_gcp_location, "
+            "updated_at = EXCLUDED.updated_at",
+            (provider, slot_index, model, vertex_gcp_project, vertex_gcp_location, now),
+        )
+
+
+def delete_slot_config(provider: str, slot_index: int) -> None:
+    with _require_pool().connection() as conn:
+        conn.execute(
+            "DELETE FROM slot_config WHERE provider = %s AND slot_index = %s",
+            (provider, slot_index),
+        )
+
+
+def get_all_slot_configs() -> dict[tuple[str, int], dict]:
+    """Every configured (provider, slot_index) row, for the dispatcher's
+    once-per-claimed-ticket refresh -- one query, not one per provider."""
+    with _require_pool().connection() as conn:
+        rows = conn.execute(
+            "SELECT provider, slot_index, model, vertex_gcp_project, vertex_gcp_location "
+            "FROM slot_config"
+        ).fetchall()
+    return {
+        (row["provider"], row["slot_index"]): {
+            "model": row["model"],
+            "vertex_gcp_project": row["vertex_gcp_project"],
+            "vertex_gcp_location": row["vertex_gcp_location"],
+        }
+        for row in rows
+    }
 
 
 def get_usage_cap_overrides() -> tuple[int | None, str | None]:
