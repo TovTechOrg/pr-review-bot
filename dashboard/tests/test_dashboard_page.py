@@ -259,23 +259,17 @@ async def test_dashboard_page_self_hosts_its_display_font():
         assert emoji not in body
 
 
-async def test_dashboard_page_language_options_carry_authored_flag_icons():
-    """Same sync as the login page's language menu -- see its own test for
-    the full rationale."""
+async def test_dashboard_page_language_options_are_plain_text_no_icon():
+    """Same as the login page's language menu -- see its own test for the
+    full rationale (a per-language icon was tried and reverted; both
+    projects settled on plain text, no icon)."""
     client = await _client()
     body = (await client.get("/")).text
     lang_section = body[
-        body.index('id="langPopupBackdrop"') : body.index('id="langPopupBackdrop"') + 1200
+        body.index('id="langPopupBackdrop"') : body.index('id="langPopupBackdrop"') + 600
     ]
-    en_label = lang_section[
-        lang_section.index('value="en"') : lang_section.index('value="he"')
-    ]
-    he_label = lang_section[lang_section.index('value="he"') :]
-    for label in (en_label, he_label):
-        assert '<svg viewBox="0 0 24 24"' in label
-        assert 'stroke="currentColor"' in label
-        assert 'stroke-width="2"' in label
-    assert en_label != he_label
+    assert '<label><input type="radio" name="lang" value="en"> English</label>' in lang_section
+    assert '<label><input type="radio" name="lang" value="he"> עברית</label>' in lang_section
 
 
 async def test_env_info_icon_has_no_native_title_tooltip():
