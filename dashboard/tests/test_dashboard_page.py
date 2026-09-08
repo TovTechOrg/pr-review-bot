@@ -438,3 +438,11 @@ async def test_dashboard_page_declares_all_16_config_panel_field_ids():
         "cfgReviewDraftPrs", "cfgUsageCapReset", "cfgUsageCapTokens",
     ):
         assert f'id="{field_id}"' in body, f"{field_id} missing from the served page"
+
+
+async def test_dashboard_page_declares_slot_config_rows_container():
+    """The read-only per-slot listing (Task 16) must actually be present in
+    the served page for its JS to render into."""
+    client = await _client()
+    resp = await client.get("/")
+    assert 'id="slotConfigRows"' in resp.text

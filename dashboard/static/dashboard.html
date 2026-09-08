@@ -662,6 +662,11 @@
             <option value="vertex">vertex</option>
           </select>
           <div id="providerModelRows" class="provider-model-grid"></div>
+          <!-- Read-only listing of every configured slot's model (and for
+               vertex, project/location) across all providers -- editing
+               happens via guided setup, not here (Task 16, best-effort per
+               spec section 10.3). -->
+          <div id="slotConfigRows" class="provider-model-grid"></div>
           <!-- Alphabetized by field key (cooldown_base_seconds, cooldown_factor,
                cooldown_max_seconds, dispatcher_backoff_jitter_seconds,
                dispatcher_default_retry_after_seconds,
@@ -970,6 +975,7 @@
         env_delete: "Delete",
         env_config_model: "Model",
         env_config_key_slot: "Key slot",
+        env_no_slots_configured: "No slots configured yet — use Guided setup above.",
         env_validating: "Checking…",
         env_valid: "✓ valid",
         env_invalid: "✗ invalid",
@@ -1080,6 +1086,7 @@
         env_delete: "מחק",
         env_config_model: "מודל",
         env_config_key_slot: "חריץ מפתח",
+        env_no_slots_configured: "עדיין לא הוגדרו חריצים — השתמשו בהתקנה המודרכת למעלה.",
         env_validating: "בודק…",
         env_valid: "✓ תקין",
         env_invalid: "✗ לא תקין",
@@ -2176,6 +2183,28 @@
       });
     }
 
+    function renderSlotConfigRows(slotConfigs) {
+      const container = document.getElementById("slotConfigRows");
+      const rows = LLM_PROVIDERS.flatMap((provider) => {
+        const entries = (slotConfigs && slotConfigs[provider]) || [];
+        return entries.map((entry) => {
+          const parts = [`${t("env_config_key_slot")} ${entry.slot}`, entry.model || "—"];
+          if (provider === "vertex") {
+            parts.push(entry.vertex_gcp_project || "—", entry.vertex_gcp_location || "—");
+          }
+          return `
+            <div class="provider-model-row" data-provider="${provider}">
+              <span class="provider-name">${esc(provider)}</span>
+              <span>${parts.map(esc).join(" · ")}</span>
+            </div>
+          `;
+        });
+      });
+      container.innerHTML = rows.length
+        ? rows.join("")
+        : `<div class="provider-model-row"><span>${t("env_no_slots_configured")}</span></div>`;
+    }
+
     const TUNING_KNOB_FIELDS = [
       "llm_request_timeout_seconds",
       "dispatcher_default_retry_after_seconds",
@@ -2207,6 +2236,7 @@
       invalidConfigFields.clear();
       updateSaveGuards();
       renderProviderModelRows();
+      renderSlotConfigRows(cfg.slot_configs);
     }
 
     async function fetchEnvironmentConfig() {
