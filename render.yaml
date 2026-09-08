@@ -39,7 +39,7 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
-      - key: LLM_MODEL
+      - key: GEMINI_MODEL
         sync: false
       - key: GROQ_API_KEY
         sync: false
@@ -51,21 +51,21 @@ services:
         sync: false
       - key: VERTEX_MODEL
         sync: false
-      - key: GCP_SERVICE_ACCOUNT_KEY
+      - key: VERTEX_GCP_SERVICE_ACCOUNT_KEY
         sync: false
-      - key: GCP_SERVICE_ACCOUNT_KEY_1
+      - key: VERTEX_GCP_SERVICE_ACCOUNT_KEY_1
         sync: false
-      - key: GCP_SERVICE_ACCOUNT_KEY_2
+      - key: VERTEX_GCP_SERVICE_ACCOUNT_KEY_2
         sync: false
-      - key: GCP_PROJECT
+      - key: VERTEX_GCP_PROJECT
         sync: false
-      - key: GCP_LOCATION
+      - key: VERTEX_GCP_LOCATION
         sync: false
       - key: LLM_REQUEST_TIMEOUT_SECONDS
         sync: false
       - key: DISPATCHER_IDLE_SLEEP_SECONDS
         sync: false
-      - key: DEFAULT_RETRY_AFTER_SECONDS
+      - key: DISPATCHER_DEFAULT_RETRY_AFTER_SECONDS
         sync: false
       - key: DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS
         sync: false
