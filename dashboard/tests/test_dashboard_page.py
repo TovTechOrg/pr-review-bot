@@ -300,7 +300,7 @@ async def test_static_fonts_are_served_publicly_without_a_session():
 
 
 async def test_guided_modal_replaces_its_derived_block_instead_of_appending():
-    """Everything a successful Validate derives (model <select>, GCP_PROJECT
+    """Everything a successful Validate derives (model <select>, VERTEX_GCP_PROJECT
     keep/clear radios, installation-id label) must land in its own
     #guidedModalExtra container whose innerHTML is REPLACED per click.
 
@@ -325,7 +325,7 @@ async def test_guided_modal_never_applies_an_empty_model():
     <select> with zero options, so `.value` is "" -- Apply then posted
     model:"" and Render rejects an empty env-var value, so only the
     credential var landed and VERTEX_MODEL silently failed (reproduced live:
-    `applied: GCP_SERVICE_ACCOUNT_KEY_1; failed: VERTEX_MODEL`). Validate
+    `applied: VERTEX_GCP_SERVICE_ACCOUNT_KEY_1; failed: VERTEX_MODEL`). Validate
     must refuse to enable Apply in that state."""
     client = await _client()
     body = (await client.get("/")).text

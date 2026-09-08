@@ -231,7 +231,7 @@ async def test_guided_vertex_validate_uploads_file_and_flags_project_conflict(mo
 
     monkeypatch.setattr(catalog, "list_vertex_models", _list_vertex)
     monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
-    monkeypatch.setattr(render_client, "env_vars", lambda service_id: {"GCP_PROJECT": "old-proj"})
+    monkeypatch.setattr(render_client, "env_vars", lambda service_id: {"VERTEX_GCP_PROJECT": "old-proj"})
     client = await _client()
     resp = await client.post(
         "/api/environment/credential/vertex/validate",
@@ -240,7 +240,7 @@ async def test_guided_vertex_validate_uploads_file_and_flags_project_conflict(mo
     body = resp.json()
     assert body["ok"] is True
     assert body["project_id"] == "new-proj"
-    assert body["conflicts"] == [{"var": "GCP_PROJECT", "current": "old-proj", "new": "new-proj"}]
+    assert body["conflicts"] == [{"var": "VERTEX_GCP_PROJECT", "current": "old-proj", "new": "new-proj"}]
 
 
 async def test_guided_github_app_validate_success_shows_installation_id(monkeypatch):
@@ -298,9 +298,9 @@ async def test_guided_gemini_apply_writes_credential_and_model(monkeypatch):
     assert resp.status_code == 200
     result = resp.json()
     assert "GEMINI_API_KEY" in result["applied"]
-    assert "LLM_MODEL" in result["applied"]
+    assert "GEMINI_MODEL" in result["applied"]
     assert applied["GEMINI_API_KEY"] == "the-key"
-    assert applied["LLM_MODEL"] == "gemini-flash-latest"
+    assert applied["GEMINI_MODEL"] == "gemini-flash-latest"
 
 
 async def test_guided_github_app_apply_writes_id_key_and_installation(monkeypatch):
@@ -437,7 +437,7 @@ async def test_validate_model_var_ok_when_in_catalog(monkeypatch):
     )
     client = await _client()
     resp = await client.post(
-        "/api/environment/validate/LLM_MODEL", json={"value": "gemini-flash-latest"}
+        "/api/environment/validate/GEMINI_MODEL", json={"value": "gemini-flash-latest"}
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -455,7 +455,7 @@ async def test_validate_model_var_invalid_when_not_in_catalog(monkeypatch):
     )
     client = await _client()
     resp = await client.post(
-        "/api/environment/validate/LLM_MODEL", json={"value": "not-a-real-model"}
+        "/api/environment/validate/GEMINI_MODEL", json={"value": "not-a-real-model"}
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -486,7 +486,7 @@ async def test_validate_gcp_project_substitutes_project_override(monkeypatch):
 
     monkeypatch.setattr(catalog, "list_vertex_models", _list_vertex)
     client = await _client()
-    resp = await client.post("/api/environment/validate/GCP_PROJECT", json={"value": "new-proj"})
+    resp = await client.post("/api/environment/validate/VERTEX_GCP_PROJECT", json={"value": "new-proj"})
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
 
@@ -504,7 +504,7 @@ async def test_validate_gcp_location_substitutes_location_override(monkeypatch):
     monkeypatch.setattr(catalog, "list_vertex_models", _list_vertex)
     client = await _client()
     resp = await client.post(
-        "/api/environment/validate/GCP_LOCATION", json={"value": "europe-west1"}
+        "/api/environment/validate/VERTEX_GCP_LOCATION", json={"value": "europe-west1"}
     )
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
@@ -530,10 +530,10 @@ async def test_patch_render_rejects_model_not_in_catalog_but_applies_other_keys(
     client = await _client()
     resp = await client.patch(
         "/api/environment/render",
-        json={"sets": {"LLM_MODEL": "bogus-model", "OTHER_KEY": "fine"}, "deletes": []},
+        json={"sets": {"GEMINI_MODEL": "bogus-model", "OTHER_KEY": "fine"}, "deletes": []},
     )
     result = resp.json()
-    assert {"key": "LLM_MODEL", "error": "failed_validation"} in result["failed"]
+    assert {"key": "GEMINI_MODEL", "error": "failed_validation"} in result["failed"]
     assert "OTHER_KEY" in result["applied"]
 
 
@@ -729,7 +729,7 @@ async def test_guided_gemini_apply_also_sets_runtime_config_model_override(monke
 async def test_validate_vertex_model_no_credential_configured(monkeypatch):
     monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {})
     monkeypatch.setattr(vertex_credentials, "resolve_service_account_info", lambda index: None)
-    monkeypatch.setattr(settings, "gcp_project", "")
+    monkeypatch.setattr(settings, "vertex_gcp_project", "")
     client = await _client()
     resp = await client.post("/api/environment/validate/VERTEX_MODEL", json={"value": "x"})
     assert resp.status_code == 200
@@ -739,14 +739,14 @@ async def test_validate_vertex_model_no_credential_configured(monkeypatch):
 async def test_validate_gcp_project_no_credential_configured_does_not_hit_network(monkeypatch):
     monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {})
     monkeypatch.setattr(vertex_credentials, "resolve_service_account_info", lambda index: None)
-    monkeypatch.setattr(settings, "gcp_project", "")
+    monkeypatch.setattr(settings, "vertex_gcp_project", "")
 
     def _boom(*a, **k):
         raise AssertionError("list_vertex_models must not be called with no credential at all")
 
     monkeypatch.setattr(catalog, "list_vertex_models", _boom)
     client = await _client()
-    resp = await client.post("/api/environment/validate/GCP_PROJECT", json={"value": "new-proj"})
+    resp = await client.post("/api/environment/validate/VERTEX_GCP_PROJECT", json={"value": "new-proj"})
     assert resp.status_code == 200
     assert resp.json()["error"] == "no_credential_configured"
 
@@ -791,11 +791,11 @@ async def test_patch_render_survives_a_raising_validator_instead_of_500ing(monke
     client = await _client()
     resp = await client.patch(
         "/api/environment/render",
-        json={"sets": {"LLM_MODEL": "whatever", "OTHER_KEY": "fine"}, "deletes": []},
+        json={"sets": {"GEMINI_MODEL": "whatever", "OTHER_KEY": "fine"}, "deletes": []},
     )
     assert resp.status_code == 200
     result = resp.json()
-    assert {"key": "LLM_MODEL", "error": "failed_validation"} in result["failed"]
+    assert {"key": "GEMINI_MODEL", "error": "failed_validation"} in result["failed"]
     assert "OTHER_KEY" in result["applied"]
 
 

@@ -619,7 +619,7 @@
         <dialog id="guidedModal">
           <div id="guidedModalBody"></div>
           <!-- Everything a successful Validate derives (model picker,
-               GCP_PROJECT keep/clear prompt, installation-id label) lives in
+               VERTEX_GCP_PROJECT keep/clear prompt, installation-id label) lives in
                its own container so a repeat Validate click REPLACES it
                wholesale. It used to be appended into #guidedModalBody, which
                stacked a second copy per click -- duplicate id="guidedModelSelect"
@@ -847,9 +847,9 @@
         env_guided_validate: "Validate",
         env_guided_apply: "Apply",
         env_guided_cancel: "Cancel",
-        env_guided_project_conflict: "GCP_PROJECT is set to {current}, this key belongs to {new}.",
-        env_guided_keep_project: "Keep GCP_PROJECT",
-        env_guided_clear_project: "Clear GCP_PROJECT (use key's project)",
+        env_guided_project_conflict: "VERTEX_GCP_PROJECT is set to {current}, this key belongs to {new}.",
+        env_guided_keep_project: "Keep VERTEX_GCP_PROJECT",
+        env_guided_clear_project: "Clear VERTEX_GCP_PROJECT (use key's project)",
         env_guided_installation_label: "Installation ID (auto-discovered)",
         env_guided_no_models: "This credential is valid but reports no usable models — nothing to apply.",
         env_guided_missing_input: "Fill in every field before validating.",
@@ -939,9 +939,9 @@
         env_guided_validate: "אמת",
         env_guided_apply: "החל",
         env_guided_cancel: "ביטול",
-        env_guided_project_conflict: "GCP_PROJECT מוגדר ל-{current}, המפתח הזה שייך ל-{new}.",
-        env_guided_keep_project: "השאר GCP_PROJECT",
-        env_guided_clear_project: "נקה GCP_PROJECT (השתמש בפרויקט של המפתח)",
+        env_guided_project_conflict: "VERTEX_GCP_PROJECT מוגדר ל-{current}, המפתח הזה שייך ל-{new}.",
+        env_guided_keep_project: "השאר VERTEX_GCP_PROJECT",
+        env_guided_clear_project: "נקה VERTEX_GCP_PROJECT (השתמש בפרויקט של המפתח)",
         env_guided_installation_label: "מזהה התקנה (זוהה אוטומטית)",
         env_guided_no_models: "האישור תקין אך לא מדווח על מודלים שמישים — אין מה להחיל.",
         env_guided_missing_input: "מלא את כל השדות לפני האימות.",
@@ -969,18 +969,18 @@
         DASHBOARD_PASSWORD: "Password required to log into this dashboard.",
         DASHBOARD_SESSION_SECRET: "Signs the dashboard's session cookie. Rotating it immediately logs out every active session.",
         LLM_PROVIDER: "Which LLM provider (gemini, groq, or vertex) the bot currently reviews with.",
-        LLM_MODEL: "Gemini model used for code review when LLM_PROVIDER is gemini.",
+        GEMINI_MODEL: "Gemini model used for code review when LLM_PROVIDER is gemini.",
         GEMINI_API_KEY: "API key for Google's Gemini Developer API.",
         GROQ_API_KEY: "API key for Groq.",
         GROQ_MODEL: "Groq model used for code review when LLM_PROVIDER is groq.",
         VERTEX_MODEL: "Vertex AI model used for code review when LLM_PROVIDER is vertex.",
-        GCP_PROJECT: "GCP project Vertex AI calls are scoped to. Optional — defaults to the project embedded in the service-account key.",
-        GCP_LOCATION: "Vertex AI regional endpoint to call (e.g. us-central1).",
-        GCP_SERVICE_ACCOUNT_KEY: "Base64-encoded GCP service-account JSON credential used for Vertex AI.",
+        VERTEX_GCP_PROJECT: "GCP project Vertex AI calls are scoped to. Optional — defaults to the project embedded in the service-account key.",
+        VERTEX_GCP_LOCATION: "Vertex AI regional endpoint to call (e.g. us-central1).",
+        VERTEX_GCP_SERVICE_ACCOUNT_KEY: "Base64-encoded GCP service-account JSON credential used for Vertex AI.",
         LLM_REQUEST_TIMEOUT_SECONDS: "Maximum time to wait for a single LLM response before giving up.",
         DATABASE_URL: "Postgres connection string for the review queue. Required at boot.",
         DISPATCHER_IDLE_SLEEP_SECONDS: "How long the dispatcher sleeps between polls when the queue is empty.",
-        DEFAULT_RETRY_AFTER_SECONDS: "Fallback delay before retrying a review when no other backoff applies.",
+        DISPATCHER_DEFAULT_RETRY_AFTER_SECONDS: "Fallback delay before retrying a review when no other backoff applies.",
         DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS: "Starting backoff delay after a review failure, doubling on each further failure up to the max below.",
         DISPATCHER_FAILURE_MAX_BACKOFF_SECONDS: "Upper bound on the failure backoff delay.",
         DISPATCHER_MAX_FAILURE_ATTEMPTS: "How many times a review is retried after failing before being given up on.",
@@ -1009,18 +1009,18 @@
         DASHBOARD_PASSWORD: "הסיסמה הנדרשת כדי להתחבר ללוח הבקרה הזה.",
         DASHBOARD_SESSION_SECRET: "חותם את עוגיית ההפעלה של לוח הבקרה. סיבוב הערך הזה מתנתק מכל ההפעלות הפעילות באופן מיידי.",
         LLM_PROVIDER: "איזה ספק LLM (gemini, groq או vertex) הבוט משתמש בו כרגע לבדיקת קוד.",
-        LLM_MODEL: "מודל Gemini המשמש לבדיקת קוד כאשר LLM_PROVIDER הוא gemini.",
+        GEMINI_MODEL: "מודל Gemini המשמש לבדיקת קוד כאשר LLM_PROVIDER הוא gemini.",
         GEMINI_API_KEY: "מפתח API עבור Gemini Developer API של גוגל.",
         GROQ_API_KEY: "מפתח API עבור Groq.",
         GROQ_MODEL: "מודל Groq המשמש לבדיקת קוד כאשר LLM_PROVIDER הוא groq.",
         VERTEX_MODEL: "מודל Vertex AI המשמש לבדיקת קוד כאשר LLM_PROVIDER הוא vertex.",
-        GCP_PROJECT: "פרויקט ה-GCP שאליו קריאות Vertex AI מוגבלות. אופציונלי — כברירת מחדל נלקח הפרויקט המוטבע במפתח חשבון השירות.",
-        GCP_LOCATION: "האזור האזורי של Vertex AI שאליו פונים (לדוגמה us-central1).",
-        GCP_SERVICE_ACCOUNT_KEY: "אישור JSON של חשבון שירות GCP, מקודד בבסיס 64, המשמש עבור Vertex AI.",
+        VERTEX_GCP_PROJECT: "פרויקט ה-GCP שאליו קריאות Vertex AI מוגבלות. אופציונלי — כברירת מחדל נלקח הפרויקט המוטבע במפתח חשבון השירות.",
+        VERTEX_GCP_LOCATION: "האזור האזורי של Vertex AI שאליו פונים (לדוגמה us-central1).",
+        VERTEX_GCP_SERVICE_ACCOUNT_KEY: "אישור JSON של חשבון שירות GCP, מקודד בבסיס 64, המשמש עבור Vertex AI.",
         LLM_REQUEST_TIMEOUT_SECONDS: "זמן ההמתנה המרבי לתשובה אחת מה-LLM לפני נטישה.",
         DATABASE_URL: "מחרוזת החיבור ל-Postgres של תור הבדיקות. נדרש בעלייה.",
         DISPATCHER_IDLE_SLEEP_SECONDS: "כמה זמן המפיץ נח בין בדיקות כאשר התור ריק.",
-        DEFAULT_RETRY_AFTER_SECONDS: "השהיה כברירת מחדל לפני ניסיון חזרה על בדיקה כשאין השהיה אחרת שחלה.",
+        DISPATCHER_DEFAULT_RETRY_AFTER_SECONDS: "השהיה כברירת מחדל לפני ניסיון חזרה על בדיקה כשאין השהיה אחרת שחלה.",
         DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS: "השהיית הנסיגה ההתחלתית לאחר כשל בבדיקה, מוכפלת בכל כשל נוסף עד למקסימום שמופיע להלן.",
         DISPATCHER_FAILURE_MAX_BACKOFF_SECONDS: "הגבול העליון להשהיית הנסיגה לאחר כשל.",
         DISPATCHER_MAX_FAILURE_ATTEMPTS: "כמה פעמים בדיקה תיוסה שוב לאחר כשל לפני שנוטשים אותה.",
@@ -1040,7 +1040,7 @@
       },
     };
 
-    const CREDENTIAL_SLOT_BASE_VARS = ["GEMINI_API_KEY", "GROQ_API_KEY", "GCP_SERVICE_ACCOUNT_KEY"];
+    const CREDENTIAL_SLOT_BASE_VARS = ["GEMINI_API_KEY", "GROQ_API_KEY", "VERTEX_GCP_SERVICE_ACCOUNT_KEY"];
 
     function envVarDescription(key) {
       let base = key;
@@ -1418,9 +1418,9 @@
     // *_MODEL vars -- those are now <select>s fed by the live catalog (see
     // MODEL_PROVIDER_FOR_VAR below) and can't hold an invalid value in the
     // first place, so they no longer need blur-time validation here.
-    const DIRECT_EDIT_VARS = new Set(["GCP_PROJECT", "GCP_LOCATION"]);
+    const DIRECT_EDIT_VARS = new Set(["VERTEX_GCP_PROJECT", "VERTEX_GCP_LOCATION"]);
 
-    const MODEL_PROVIDER_FOR_VAR = { LLM_MODEL: "gemini", GROQ_MODEL: "groq", VERTEX_MODEL: "vertex" };
+    const MODEL_PROVIDER_FOR_VAR = { GEMINI_MODEL: "gemini", GROQ_MODEL: "groq", VERTEX_MODEL: "vertex" };
 
     // Per-provider live model list, fetched once whenever the Environment
     // tab is switched into (see the nav-item click handler) and reused by
@@ -1879,7 +1879,7 @@
             slot,
             credential,
             model,
-            clear_gcp_project: Boolean(clearChoice && clearChoice.value === "clear"),
+            clear_vertex_gcp_project: Boolean(clearChoice && clearChoice.value === "clear"),
           };
         }
         const resp = await fetch(`/api/environment/credential/${family}/apply`, {
@@ -1952,7 +1952,7 @@
     const LLM_PROVIDERS = ["gemini", "groq", "vertex"];
     let currentConfig = { model: {}, key_index: {} };
     let currentAvailableKeySlots = { gemini: [], groq: [], vertex: [] };
-    // Scoped separately so an invalid GCP_PROJECT/GCP_LOCATION field edited
+    // Scoped separately so an invalid VERTEX_GCP_PROJECT/VERTEX_GCP_LOCATION field edited
     // directly in the render-vars table only blocks the render-vars Save
     // button, never the config panel's Save button (or vice versa).
     const invalidRenderFields = new Set();

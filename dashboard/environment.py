@@ -65,11 +65,11 @@ class EnvironmentRenderPatch(BaseModel):
 
 
 _DIRECT_EDIT_VARS = {
-    "LLM_MODEL": "gemini",
+    "GEMINI_MODEL": "gemini",
     "GROQ_MODEL": "groq",
     "VERTEX_MODEL": "vertex",
-    "GCP_PROJECT": "vertex",
-    "GCP_LOCATION": "vertex",
+    "VERTEX_GCP_PROJECT": "vertex",
+    "VERTEX_GCP_LOCATION": "vertex",
 }
 
 
@@ -84,7 +84,7 @@ def _safe_resolve_vertex_info(slot: int) -> tuple[dict | None, str | None]:
     `info` is always None in that case. `info is None` with no error means
     "no explicit key -- fall through to implicit ADC", mirroring
     providers/factory.py's own definition of "configured": a missing key
-    is only a problem when GCP_PROJECT isn't set either, since without
+    is only a problem when VERTEX_GCP_PROJECT isn't set either, since without
     either there is nothing for ADC to resolve against.
     """
     try:
@@ -93,7 +93,7 @@ def _safe_resolve_vertex_info(slot: int) -> tuple[dict | None, str | None]:
         # Covers json.JSONDecodeError, binascii.Error, and UnicodeDecodeError
         # too -- all are ValueError subclasses.
         return None, "invalid_service_account_json"
-    if info is None and not settings.gcp_project:
+    if info is None and not settings.vertex_gcp_project:
         return None, "no_credential_configured"
     return info, None
 
@@ -129,7 +129,7 @@ def _validate_gcp_var(var: str, candidate: str) -> dict:
         return {"ok": False, "error": error, "models": None}
     kwargs = (
         {"project_override": candidate}
-        if var == "GCP_PROJECT"
+        if var == "VERTEX_GCP_PROJECT"
         else {"location_override": candidate}
     )
     result = catalog.list_vertex_models(info, **kwargs)
@@ -138,7 +138,7 @@ def _validate_gcp_var(var: str, candidate: str) -> dict:
 
 def _validate_var(var: str, candidate: str) -> dict:
     provider = _DIRECT_EDIT_VARS[var]
-    if var in ("GCP_PROJECT", "GCP_LOCATION"):
+    if var in ("VERTEX_GCP_PROJECT", "VERTEX_GCP_LOCATION"):
         return _validate_gcp_var(var, candidate)
     return _validate_model_var(provider, candidate)
 
@@ -181,9 +181,9 @@ def _validate_vertex_credential(raw_bytes: bytes) -> dict:
         }
     project_id = info.get("project_id") if isinstance(info, dict) else None
     # Validate the uploaded key against ITS OWN project, not whatever
-    # GCP_PROJECT currently happens to be set to -- a replacement key for a
+    # VERTEX_GCP_PROJECT currently happens to be set to -- a replacement key for a
     # different (but perfectly valid) project must not be rejected just
-    # because the old GCP_PROJECT override hasn't been updated yet. The
+    # because the old VERTEX_GCP_PROJECT override hasn't been updated yet. The
     # mismatch itself is surfaced separately below, as a conflict prompt
     # rather than a validation failure.
     result = catalog.list_vertex_models(info, project_override=project_id)
@@ -191,7 +191,7 @@ def _validate_vertex_credential(raw_bytes: bytes) -> dict:
     if result.ok and project_id:
         service_id = render_client.find_service_id()
         current_project = (
-            render_client.env_vars(service_id).get("GCP_PROJECT") if service_id else None
+            render_client.env_vars(service_id).get("VERTEX_GCP_PROJECT") if service_id else None
         )
         conflicts = config_deps.conflicts_for("vertex", project_id, current_project)
     return {
@@ -290,7 +290,7 @@ class ApplyLlmCredentialRequest(BaseModel):
     slot: int = Field(default=0, ge=0, lt=MAX_CREDENTIAL_SLOTS)
     credential: dict[str, str]
     model: str
-    clear_gcp_project: bool = False
+    clear_vertex_gcp_project: bool = False
 
 
 class ApplyGithubAppRequest(BaseModel):
@@ -319,12 +319,12 @@ def _apply_llm_credential(family: str, payload: ApplyLlmCredentialRequest) -> di
             applied.append(key)
         except Exception as exc:  # noqa: BLE001
             failed.append({"key": key, "error": type(exc).__name__})
-    if family == "vertex" and payload.clear_gcp_project:
+    if family == "vertex" and payload.clear_vertex_gcp_project:
         try:
-            render_client.delete_env_var(service_id, "GCP_PROJECT")
-            applied.append("GCP_PROJECT")
+            render_client.delete_env_var(service_id, "VERTEX_GCP_PROJECT")
+            applied.append("VERTEX_GCP_PROJECT")
         except Exception as exc:  # noqa: BLE001
-            failed.append({"key": "GCP_PROJECT", "error": type(exc).__name__})
+            failed.append({"key": "VERTEX_GCP_PROJECT", "error": type(exc).__name__})
     if model_var in applied:
         # Keep the runtime_config model override in sync with the env var
         # just pushed -- active_model() reads the DB override FIRST, so
