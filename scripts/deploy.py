@@ -71,15 +71,20 @@ _ALWAYS_SYNCED = (
     # silently missing it, with no check catching the gap.
     "RENDER_API_KEY",
 )
-# VERTEX_GCP_PROJECT unset means "use the project_id embedded in the service-account
-# key" (see config.py), not a missing value -- exempt from sync_env()'s
-# "refuse to push empty values" guard below. GITHUB_TARGET_REPO used to be
-# exempt too (empty meant "track all repos"), but that sentinel is now the
-# explicit, non-empty "*" (docs/superpowers/specs/2026-08-17-multi-repo-
-# support-design.md's track-all mode, updated 2026-09-07): a genuinely empty
-# GITHUB_TARGET_REPO is unconfigured, not deliberate, so it goes through the
-# ordinary empty-value refusal like every other required key.
-_OPTIONAL_EMPTY_ENV_KEYS = frozenset({"VERTEX_GCP_PROJECT"})
+# Deliberately empty as of the 2026-09-08 slotted-config-and-db-delegation
+# work: VERTEX_GCP_PROJECT ("unset means use the project_id embedded in the
+# service-account key", the one entry this ever held) is DB-only now
+# (slot_config) and never appears in _wanted_env()'s output at all, so there
+# is nothing left for sync_env()'s "refuse to push empty values" guard to
+# exempt. GITHUB_TARGET_REPO used to be exempt too (empty meant "track all
+# repos"), but that sentinel is now the explicit, non-empty "*"
+# (docs/superpowers/specs/2026-08-17-multi-repo-support-design.md's
+# track-all mode, updated 2026-09-07): a genuinely empty GITHUB_TARGET_REPO
+# is unconfigured, not deliberate, so it goes through the ordinary
+# empty-value refusal like every other required key. Left in place, empty,
+# as the landing spot for a future var that genuinely needs this exemption
+# -- same reason _GENERIC_OPERATIONAL_ENV_ATTRS stays in place above.
+_OPTIONAL_EMPTY_ENV_KEYS: frozenset[str] = frozenset()
 
 # OPERATIONAL_KEYS (config.py) names, mapped to the Settings attribute
 # holding their local value, for every one that has NO other sync path here:
@@ -90,25 +95,24 @@ _OPTIONAL_EMPTY_ENV_KEYS = frozenset({"VERTEX_GCP_PROJECT"})
 # running --sync-env silently pushed nothing -- see ISSUES.md's 2026-08-17
 # "--sync-env silently never pushes 12 of the documented operational env
 # vars" entry.
-_GENERIC_OPERATIONAL_ENV_ATTRS = {
-    "VERTEX_GCP_PROJECT": "vertex_gcp_project",
-    "VERTEX_GCP_LOCATION": "vertex_gcp_location",
-    "LLM_REQUEST_TIMEOUT_SECONDS": "llm_request_timeout_seconds",
-    "DISPATCHER_IDLE_SLEEP_SECONDS": "dispatcher_idle_sleep_seconds",
-    "DISPATCHER_DEFAULT_RETRY_AFTER_SECONDS": "dispatcher_default_retry_after_seconds",
-    "DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS": "dispatcher_failure_base_backoff_seconds",
-    "DISPATCHER_FAILURE_MAX_BACKOFF_SECONDS": "dispatcher_failure_max_backoff_seconds",
-    "DISPATCHER_MAX_FAILURE_ATTEMPTS": "dispatcher_max_failure_attempts",
-    "DISPATCHER_MAX_NOTICE_POST_ATTEMPTS": "dispatcher_max_notice_post_attempts",
-    "DISPATCHER_MIN_RETRY_AFTER_SECONDS": "dispatcher_min_retry_after_seconds",
-    "DISPATCHER_BACKOFF_JITTER_SECONDS": "dispatcher_backoff_jitter_seconds",
-    "DISPATCHER_NOTICE_SWEEP_BATCH_SIZE": "dispatcher_notice_sweep_batch_size",
-}
+#
+# Deliberately empty as of the 2026-09-08 slotted-config-and-db-delegation
+# work: all 12 vars that used to live here (VERTEX_GCP_PROJECT/_LOCATION plus
+# the 9 dispatcher/timeout tuning knobs from before this table's rename) are
+# DB-only now, moved to _DB_SYNCED_OPERATIONAL_KEYS below -- see
+# docs/superpowers/specs/2026-09-08-slotted-config-and-db-delegation-design.md
+# section 6. Left in place (not deleted) as the landing spot for any FUTURE
+# operational var that genuinely needs to be a plain Render env var with no
+# other sync path -- the mechanism, not any specific entry, is the point.
+_GENERIC_OPERATIONAL_ENV_ATTRS: dict[str, str] = {}
 
-# These 6 have their own DB-backed live-override mechanism (runtime_config,
-# via cooldown_config.py/usage_cap_config.py/review_draft_config.py) --
-# unlike every other operational key, they are never a Render env var at all
-# (see render.yaml and the 2026-08-17 "two sources of truth" design note):
+# These 18 have their own DB-backed live-override mechanism (runtime_config,
+# via cooldown_config.py/usage_cap_config.py/review_draft_config.py/
+# dispatcher_tuning_config.py) -- unlike every other operational key, they
+# are never a Render env var at all (see render.yaml and the 2026-08-17 "two
+# sources of truth" design note, extended by the 2026-09-08 slotted-config-
+# and-db-delegation work to the 9 tuning knobs and Vertex's project/location,
+# which is now slot_config-only -- see that design's section 6):
 # --sync-config-db (and --sync-env, which calls the same push) mirrors
 # .env.config straight into runtime_config instead, which is what the app
 # actually reads.
@@ -120,6 +124,18 @@ _DB_SYNCED_OPERATIONAL_KEYS = frozenset(
         "DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS",
         "DISPATCHER_REREVIEW_COOLDOWN_FACTOR",
         "REVIEW_DRAFT_PRS",
+        "VERTEX_GCP_PROJECT",
+        "VERTEX_GCP_LOCATION",
+        "LLM_REQUEST_TIMEOUT_SECONDS",
+        "DISPATCHER_IDLE_SLEEP_SECONDS",
+        "DISPATCHER_DEFAULT_RETRY_AFTER_SECONDS",
+        "DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS",
+        "DISPATCHER_FAILURE_MAX_BACKOFF_SECONDS",
+        "DISPATCHER_MAX_FAILURE_ATTEMPTS",
+        "DISPATCHER_MAX_NOTICE_POST_ATTEMPTS",
+        "DISPATCHER_MIN_RETRY_AFTER_SECONDS",
+        "DISPATCHER_BACKOFF_JITTER_SECONDS",
+        "DISPATCHER_NOTICE_SWEEP_BATCH_SIZE",
     }
 )
 
@@ -1005,7 +1021,8 @@ def _wanted_env() -> dict[str, str]:
     _ALWAYS_SYNCED), plus LLM_PROVIDER, plus every provider's credential
     (the selected one always, the others only when they have a local value
     -- an opt-in .env lists the others empty, and must never be asked to
-    fill them), plus every provider's model var.
+    fill them). No model var: active_model() is DB-only (slot_config) now,
+    so a model var is never pushed to Render at all.
     """
     wanted = {
         "DATABASE_URL": settings.database_url,
@@ -1024,16 +1041,14 @@ def _wanted_env() -> dict[str, str]:
     if entry is not None:
         credential, _ = entry
         wanted[credential] = getattr(settings, credential.lower(), "")
-    for other_credential, model_var in _PROVIDERS.values():
+    for other_credential, _model_var in _PROVIDERS.values():
         value = getattr(settings, other_credential.lower(), "")
         if value and other_credential not in wanted:
             wanted[other_credential] = value
-        # EVERY provider's model var, not just the selected one's: a DB
-        # provider override can activate any provider with no redeploy, and a
-        # provider whose model var was never pushed would read a missing or
-        # stale value on the service. All model vars have non-empty defaults,
-        # so this can never trip the empty-value guard in sync_env().
-        wanted[model_var] = getattr(settings, model_var.lower(), "")
+        # No model_var push here anymore: active_model() is DB-only
+        # (slot_config), so a model var has no Render presence at all --
+        # see docs/superpowers/specs/2026-09-08-slotted-config-and-db-
+        # delegation-design.md section 6.
     for credential, _ in _PROVIDERS.values():
         wanted.update(_override.local_slot_values(credential))
     for env_name, attr in _GENERIC_OPERATIONAL_ENV_ATTRS.items():
@@ -1291,6 +1306,50 @@ def sync_config_db() -> int:
     return 0
 
 
+def _seed_slot_zero_config_if_missing() -> None:
+    """The slot_config equivalent of store._seed_runtime_config_defaults,
+    scoped to sync_env()'s slot-0 setup rather than first-boot -- slot_config
+    has no universal default (only whichever slots actually have credentials
+    need rows), so this seeds the currently-active provider's slot 0 the
+    first time --sync-env runs, mirroring what Settings already has for it.
+
+    Idempotent via its own early-return (a real row already there means an
+    operator has since edited slot 0 through the dashboard/guided-setup,
+    which must never be silently overwritten by a stale local .env.config
+    value on a later --sync-env run) -- not ON CONFLICT DO NOTHING, since
+    that would still require an INSERT attempt. Uses a raw, short-timeout
+    connection rather than store.init_pool()/store.get_slot_config, same
+    reason as sync_config_db(): a one-shot CLI must not pay the pool's 30s
+    connect timeout.
+    """
+    provider = settings.llm_provider
+    if provider not in _PROVIDERS:
+        return
+    model_var = _PROVIDERS[provider][1]
+    model = getattr(settings, model_var.lower(), None)
+    vertex_gcp_project = settings.vertex_gcp_project if provider == "vertex" else None
+    vertex_gcp_location = settings.vertex_gcp_location if provider == "vertex" else None
+    with psycopg.connect(settings.database_url, connect_timeout=_DB_CONNECT_TIMEOUT) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM slot_config WHERE provider = %s AND slot_index = 0", (provider,)
+        ).fetchone()
+        if row is not None:
+            return
+        conn.execute(
+            "INSERT INTO slot_config "
+            "(provider, slot_index, model, vertex_gcp_project, vertex_gcp_location, updated_at) "
+            "VALUES (%s, 0, %s, %s, %s, %s)",
+            (
+                provider,
+                model,
+                vertex_gcp_project,
+                vertex_gcp_location,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+    print(f"seeded slot_config for {provider} slot 0 (model={model!r})")
+
+
 def sync_env() -> int:
     """Push local config to the Render service, then deploy and wait.
 
@@ -1348,34 +1407,13 @@ def sync_env() -> int:
                 file=sys.stderr,
             )
             return 2
-        # Symmetric with the provider-override refusal above. An active model
-        # override wins at runtime, so pushing a different model var would
-        # report success while the service kept running the overridden model --
-        # "what you pushed is what runs" has to stay true, not nearly true.
-        # Checked for EVERY provider, not just the currently-active one:
-        # _wanted_env() pushes every provider's model var (a DB provider flip
-        # can activate any of them with no redeploy), so a non-active
-        # provider's own DB model override can just as easily diverge from
-        # what is about to be pushed for it. Resolved in ONE connection (not
-        # one per provider in the loop below) via _resolved_model_overrides().
-        try:
-            model_overrides = _resolved_model_overrides()
-        # deliberate: the provider check reports DB trouble
-        except Exception:  # noqa: BLE001
-            model_overrides = {}
-        for provider in sorted(_PROVIDERS):
-            model_override = model_overrides.get(provider)
-            model_var = _PROVIDERS[provider][1]
-            local_model = getattr(settings, model_var.lower(), "")
-            if model_override and model_override != local_model:
-                print(
-                    f"refusing to sync: a DB model override ({model_override}) is active for "
-                    f"{provider} and wins over the {model_var}={local_model} "
-                    "being pushed. Clear it first: uv run python -m scripts.set_override "
-                    f"{provider} --clear-model --no-activate",
-                    file=sys.stderr,
-                )
-                return 2
+        # The former model-override-disagreement guard (a Render model var
+        # could disagree with an active DB model override) no longer applies:
+        # active_model() is DB-only now (slot_config), and _wanted_env()
+        # never pushes a model var to Render at all -- see
+        # docs/superpowers/specs/2026-09-08-slotted-config-and-db-delegation-
+        # design.md section 6. Nothing here can disagree with a push that
+        # doesn't happen.
     # Deliberately NOT inside the `if settings.database_url:` block above: this
     # is a pure local pricing-table lookup, so it must run whether or not a
     # database is configured. A warning, not a refusal (design spec 2026-08-18
@@ -1412,6 +1450,21 @@ def sync_env() -> int:
     config_db_exit = sync_config_db()
     if config_db_exit != 0:
         return config_db_exit
+    if settings.database_url:
+        # Load-bearing, not best-effort: active_model() has no env fallback
+        # (2026-09-08 slotted-config-and-db-delegation), so a service that
+        # deploys with slot 0 unconfigured cannot run a single review. A
+        # failure here must refuse the sync, the same way every other
+        # required pre-push guard does, not degrade to a warning.
+        try:
+            _seed_slot_zero_config_if_missing()
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"refusing to sync: failed to seed slot_config for slot 0 "
+                f"({type(exc).__name__})",
+                file=sys.stderr,
+            )
+            return 2
     try:
         service_id = _render.find_service_id()
         if service_id is None:

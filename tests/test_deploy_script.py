@@ -1517,13 +1517,13 @@ def gemini_only_config(complete_config, monkeypatch):
     return None
 
 
-def test_wanted_env_pushes_the_selected_providers_credential_and_model(
+def test_wanted_env_pushes_the_selected_providers_credential_not_model(
     gemini_only_config, monkeypatch
 ):
     monkeypatch.setattr(settings, "gemini_model", "gemini-flash-latest")
     wanted = deploy._wanted_env()
     assert wanted["GEMINI_API_KEY"] == "gk_x"
-    assert wanted["GEMINI_MODEL"] == "gemini-flash-latest"
+    assert "GEMINI_MODEL" not in wanted  # model is DB-only (slot_config) now
     assert wanted["LLM_PROVIDER"] == "gemini"
 
 
@@ -1562,30 +1562,24 @@ def test_wanted_env_includes_installation_id_as_empty_when_unset(
     assert deploy._wanted_env()["GITHUB_APP_INSTALLATION_ID"] == ""
 
 
-def test_wanted_env_pushes_every_generic_operational_setting(gemini_only_config, monkeypatch):
-    """ISSUES.md 2026-08-17: these 12 keys used to be silently dropped by
-    _wanted_env() -- editing them in .env.config and running --sync-env did
-    nothing, with no error. Each must round-trip through _wanted_env() as its
-    stringified Settings value."""
-    values = {
-        "vertex_gcp_project": "my-project",
-        "vertex_gcp_location": "europe-west1",
-        "llm_request_timeout_seconds": 30.0,
-        "dispatcher_idle_sleep_seconds": 2.0,
-        "dispatcher_default_retry_after_seconds": 90.0,
-        "dispatcher_failure_base_backoff_seconds": 3.0,
-        "dispatcher_failure_max_backoff_seconds": 400.0,
-        "dispatcher_max_failure_attempts": 7,
-        "dispatcher_max_notice_post_attempts": 4,
-        "dispatcher_min_retry_after_seconds": 2.0,
-        "dispatcher_backoff_jitter_seconds": 5.0,
-        "dispatcher_notice_sweep_batch_size": 30,
-    }
-    for field, value in values.items():
-        monkeypatch.setattr(settings, field, value)
+def test_generic_operational_env_attrs_is_now_empty(gemini_only_config):
+    """ISSUES.md 2026-08-17's original 12 generic-operational keys are all
+    DB-only now (Task 13, 2026-09-08 slotted-config-and-db-delegation) --
+    moved to _DB_SYNCED_OPERATIONAL_KEYS. _GENERIC_OPERATIONAL_ENV_ATTRS is
+    deliberately left in place, empty, as the landing spot for a future
+    setting that genuinely needs this sync path -- see its own module
+    comment. _wanted_env() must never mention any of the 12 either."""
+    assert deploy._GENERIC_OPERATIONAL_ENV_ATTRS == {}
     wanted = deploy._wanted_env()
-    for env_name, attr in deploy._GENERIC_OPERATIONAL_ENV_ATTRS.items():
-        assert wanted[env_name] == str(values[attr])
+    for env_name in (
+        "VERTEX_GCP_PROJECT", "VERTEX_GCP_LOCATION", "LLM_REQUEST_TIMEOUT_SECONDS",
+        "DISPATCHER_IDLE_SLEEP_SECONDS", "DISPATCHER_DEFAULT_RETRY_AFTER_SECONDS",
+        "DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS", "DISPATCHER_FAILURE_MAX_BACKOFF_SECONDS",
+        "DISPATCHER_MAX_FAILURE_ATTEMPTS", "DISPATCHER_MAX_NOTICE_POST_ATTEMPTS",
+        "DISPATCHER_MIN_RETRY_AFTER_SECONDS", "DISPATCHER_BACKOFF_JITTER_SECONDS",
+        "DISPATCHER_NOTICE_SWEEP_BATCH_SIZE",
+    ):
+        assert env_name not in wanted
 
 
 def test_wanted_env_never_includes_the_never_synced_operational_keys(gemini_only_config):
@@ -1612,11 +1606,16 @@ def test_operational_keys_partition_cleanly_across_every_sync_destination():
     setting added to OPERATIONAL_KEYS but forgotten everywhere else fails a
     test instead of silently never syncing anywhere, the way the original 12
     did."""
-    handled_directly_in_wanted_env = {
-        "LLM_PROVIDER", "GEMINI_MODEL", "GROQ_MODEL", "VERTEX_MODEL", "GITHUB_TARGET_REPO",
-    }
+    handled_directly_in_wanted_env = {"LLM_PROVIDER", "GITHUB_TARGET_REPO"}
+    # GEMINI_MODEL/GROQ_MODEL/VERTEX_MODEL are no longer pushed to Render at
+    # all (active_model() is DB-only, slot_config) -- their one remaining
+    # sync path is sync_env()'s _seed_slot_zero_config_if_missing(), which
+    # reads them as the ONE-TIME seed value for the active provider's slot 0
+    # (Task 13), not a per-sync push like every other group here.
+    seeded_into_slot_zero_once = {"GEMINI_MODEL", "GROQ_MODEL", "VERTEX_MODEL"}
     groups = {
         "handled directly in _wanted_env()": handled_directly_in_wanted_env,
+        "seeded into slot_config slot 0 once": seeded_into_slot_zero_once,
         "_GENERIC_OPERATIONAL_ENV_ATTRS": set(deploy._GENERIC_OPERATIONAL_ENV_ATTRS),
         "_DB_SYNCED_OPERATIONAL_KEYS": set(deploy._DB_SYNCED_OPERATIONAL_KEYS),
         "_NEVER_SYNCED_OPERATIONAL_KEYS": set(deploy._NEVER_SYNCED_OPERATIONAL_KEYS),
@@ -1810,89 +1809,16 @@ def test_sync_env_pushes_a_target_repo_of_star_without_tripping_the_empty_guard(
     assert code == 1          # got past the empty-value guard, failed on the missing service
 
 
-def test_sync_env_deletes_rather_than_puts_an_empty_optional_key(sync_ready, monkeypatch):
-    """Render's PUT env-vars endpoint rejects an empty string outright (400:
-    "must provide a value or generateValue must be set to true"), confirmed
-    live -- an _OPTIONAL_EMPTY_ENV_KEYS entry (VERTEX_GCP_PROJECT) with an empty
-    wanted value must be unset via DELETE, never PUT with value=""."""
-    monkeypatch.setattr(settings, "vertex_gcp_project", "")
-    with respx.mock:
-        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
-        wanted = deploy._wanted_env()
-        current = dict(wanted)
-        current["VERTEX_GCP_PROJECT"] = "stale-project"  # stale non-empty value on Render
-        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
-            return_value=httpx.Response(200, json=_env_var_list(current))
-        )
-        delete_route = respx.delete(
-            f"{RENDER_SERVICES}/srv-1/env-vars/VERTEX_GCP_PROJECT"
-        ).mock(return_value=httpx.Response(204))
-        put_route = respx.put(f"{RENDER_SERVICES}/srv-1/env-vars/VERTEX_GCP_PROJECT").mock(
-            return_value=httpx.Response(200, json={})
-        )
-        respx.get(f"{RENDER_SERVICES}/srv-1/deploys").mock(
-            return_value=httpx.Response(200, json=[])
-        )
-        respx.post(f"{RENDER_SERVICES}/srv-1/deploys").mock(
-            return_value=httpx.Response(201, json={"deploy": {"id": "dep-1", "status": "created"}})
-        )
-        respx.get(f"{RENDER_SERVICES}/srv-1/deploys/dep-1").mock(
-            return_value=httpx.Response(200, json={"deploy": {"id": "dep-1", "status": "live"}})
-        )
-        code = deploy.sync_env()
-    assert delete_route.called
-    assert not put_route.called
-    assert code == 0
-
-
-def test_sync_env_treats_a_404_on_delete_as_already_unset(sync_ready, monkeypatch):
-    """A 404 deleting an already-absent var is success, not a failure -- the
-    var ends up unset either way, which is the actual goal."""
-    monkeypatch.setattr(settings, "vertex_gcp_project", "")
-    with respx.mock:
-        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
-        wanted = deploy._wanted_env()
-        current = dict(wanted)
-        current["VERTEX_GCP_PROJECT"] = "stale-project"
-        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
-            return_value=httpx.Response(200, json=_env_var_list(current))
-        )
-        respx.delete(f"{RENDER_SERVICES}/srv-1/env-vars/VERTEX_GCP_PROJECT").mock(
-            return_value=httpx.Response(404, json={"message": "not found"})
-        )
-        respx.get(f"{RENDER_SERVICES}/srv-1/deploys").mock(
-            return_value=httpx.Response(200, json=[])
-        )
-        respx.post(f"{RENDER_SERVICES}/srv-1/deploys").mock(
-            return_value=httpx.Response(201, json={"deploy": {"id": "dep-1", "status": "created"}})
-        )
-        respx.get(f"{RENDER_SERVICES}/srv-1/deploys/dep-1").mock(
-            return_value=httpx.Response(200, json={"deploy": {"id": "dep-1", "status": "live"}})
-        )
-        code = deploy.sync_env()
-    assert code == 0
-
-
-def test_sync_env_treats_an_already_absent_optional_key_as_in_sync(sync_ready, monkeypatch, capsys):
-    """An empty local VERTEX_GCP_PROJECT and no such key on Render at all (never in
-    `current`, not merely empty -- Render can't store an empty string) must
-    read as already-in-sync, not as a change needing a DELETE and a
-    redeploy on every single --sync-env run."""
-    monkeypatch.setattr(settings, "vertex_gcp_project", "")
-    with respx.mock:
-        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
-        wanted = deploy._wanted_env()
-        current = {k: v for k, v in wanted.items() if k != "VERTEX_GCP_PROJECT"}
-        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
-            return_value=httpx.Response(200, json=_env_var_list(current))
-        )
-        delete_route = respx.delete(
-            f"{RENDER_SERVICES}/srv-1/env-vars/VERTEX_GCP_PROJECT"
-        ).mock(return_value=httpx.Response(204))
-        code = deploy.sync_env()
-    assert not delete_route.called
-    assert code == 0
-    assert "already in sync" in capsys.readouterr().out
+def test_optional_empty_env_keys_is_now_empty():
+    """VERTEX_GCP_PROJECT (the one entry this ever held) is DB-only now
+    (slot_config) and never appears in _wanted_env()'s output -- see
+    _OPTIONAL_EMPTY_ENV_KEYS's own module comment. The DELETE-vs-PUT
+    empty-value handling this used to exercise
+    (test_sync_env_deletes_rather_than_puts_an_empty_optional_key,
+    test_sync_env_treats_a_404_on_delete_as_already_unset,
+    test_sync_env_treats_an_already_absent_optional_key_as_in_sync -- all
+    removed) has no real key left to trigger it."""
+    assert deploy._OPTIONAL_EMPTY_ENV_KEYS == frozenset()
 
 
 def test_sync_env_refuses_gemini_provider_with_no_synced_gemini_key(
@@ -1948,12 +1874,9 @@ def test_sync_env_pushes_only_changed_keys_via_the_single_key_endpoint(sync_read
         respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
         wanted = deploy._wanted_env()
         current = dict.fromkeys(wanted, "stale")
-        # Already correct -- VERTEX_GCP_PROJECT defaults to empty (derived from the
-        # service-account key), and an empty wanted value takes the DELETE
-        # branch, not this test's PUT endpoint (see
-        # test_sync_env_deletes_rather_than_puts_an_empty_optional_key).
-        for optional_empty_key in deploy._OPTIONAL_EMPTY_ENV_KEYS:
-            current[optional_empty_key] = wanted[optional_empty_key]
+        # _OPTIONAL_EMPTY_ENV_KEYS is empty now (Task 13), so there is no
+        # longer any key here that would take the DELETE branch instead of
+        # this test's PUT endpoint.
         respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
             return_value=httpx.Response(200, json=_env_var_list(current))
         )
@@ -2322,6 +2245,44 @@ def test_sync_config_db_an_existing_db_override_is_overwritten(
     assert row == (None,)
 
 
+def test_seed_slot_zero_config_seeds_when_missing(_real_db_target, db_query, monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(settings, "groq_model", "llama-3.3-70b-versatile")
+    deploy._seed_slot_zero_config_if_missing()
+    row = db_query(
+        "SELECT model, vertex_gcp_project, vertex_gcp_location "
+        "FROM slot_config WHERE provider = 'groq' AND slot_index = 0"
+    )
+    assert row == [("llama-3.3-70b-versatile", None, None)]
+
+
+def test_seed_slot_zero_config_is_a_no_op_when_a_row_already_exists(
+    _real_db_target, db_exec, db_query, monkeypatch
+):
+    """An operator's later dashboard/guided-setup edit to slot 0 must never
+    be silently overwritten by a stale local .env.config value on a later
+    --sync-env run."""
+    monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(settings, "groq_model", "some-other-model")
+    db_exec(
+        "INSERT INTO slot_config (provider, slot_index, model, updated_at) "
+        "VALUES ('groq', 0, 'operator-set-model', '2026-01-01T00:00:00+00:00')"
+    )
+    deploy._seed_slot_zero_config_if_missing()
+    row = db_query(
+        "SELECT model FROM slot_config WHERE provider = 'groq' AND slot_index = 0"
+    )
+    assert row == [("operator-set-model",)]
+
+
+def test_seed_slot_zero_config_does_nothing_for_an_unknown_provider(monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "bogus")
+    connected = []
+    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: connected.append(1))
+    deploy._seed_slot_zero_config_if_missing()
+    assert connected == []
+
+
 def test_sync_config_db_prints_a_render_reachability_line_without_a_key(monkeypatch, capsys):
     monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
     monkeypatch.setattr(settings, "render_api_key", "")
@@ -2421,9 +2382,10 @@ def test_render_yaml_declares_every_synced_var():
         | {"LLM_PROVIDER"}
         | set(deploy._GENERIC_OPERATIONAL_ENV_ATTRS)
     )
-    for credential, model_var in deploy._PROVIDERS.values():
+    # Model vars are no longer expected in render.yaml at all: active_model()
+    # is DB-only now (slot_config), so a model var is never pushed to Render.
+    for credential, _model_var in deploy._PROVIDERS.values():
         names.add(credential)
-        names.add(model_var)
     assert names <= declared, f"missing from render.yaml: {sorted(names - declared)}"
 
 
@@ -2889,10 +2851,10 @@ def test_sync_env_refuses_when_an_override_would_mask_the_push(
     assert called == []
 
 
-def test_wanted_env_pushes_every_providers_model_var(monkeypatch):
-    """A redeploy-free DB provider flip can activate ANY provider, so every
-    provider's model var must already be on the service -- not just the
-    currently-selected one's."""
+def test_wanted_env_never_pushes_any_providers_model_var(monkeypatch):
+    """Superseded by slot_config -- active_model() is DB-only now, so no
+    provider's model var (not even the currently-selected one's) is ever
+    pushed to Render. Was test_wanted_env_pushes_every_providers_model_var."""
     from config import settings
     from scripts import deploy
 
@@ -2902,106 +2864,25 @@ def test_wanted_env_pushes_every_providers_model_var(monkeypatch):
     monkeypatch.setattr(settings, "vertex_model", "model-vertex")
     monkeypatch.setattr(settings, "github_app_private_key", "pem-b64")
     wanted = deploy._wanted_env()
-    assert wanted["GEMINI_MODEL"] == "model-gemini"
-    assert wanted["GROQ_MODEL"] == "model-groq"
-    assert wanted["VERTEX_MODEL"] == "model-vertex"
+    assert "GEMINI_MODEL" not in wanted
+    assert "GROQ_MODEL" not in wanted
+    assert "VERTEX_MODEL" not in wanted
 
 
-def test_sync_env_refuses_when_a_model_override_disagrees(monkeypatch, capsys):
-    """Symmetric with the provider-override refusal: an active model override
-    wins at runtime, so pushing a different model would report success while
-    the service kept running the overridden one.
+def test_sync_env_no_longer_has_a_model_override_disagreement_guard():
+    """The old model-override-disagreement guard (a Render model var could
+    disagree with an active DB model override) no longer applies:
+    active_model() is DB-only now (slot_config), and _wanted_env() never
+    pushes a model var to Render at all -- see docs/superpowers/specs/
+    2026-09-08-slotted-config-and-db-delegation-design.md section 6.
+    Asserted against the source, matching
+    test_sync_env_no_longer_refuses_an_unpriced_model's approach: the
+    matched fragment is the f-string literal unique to the removed guard."""
+    import inspect
 
-    Narrowed to make ONLY the active provider (vertex) disagree -- gemini and
-    groq report no override at all -- so the refusal is provably triggered by
-    the active provider specifically, not merely by loop order (sorted(
-    _PROVIDERS) visits gemini first; an earlier version of this stub made
-    every provider disagree, which tripped the guard on gemini instead of
-    exercising the active-provider case this test is named for). See
-    test_sync_env_refuses_when_a_non_active_providers_model_override_disagrees
-    for the distinct non-active-provider case."""
-    from config import settings
-    from scripts import deploy
-
-    monkeypatch.setattr(settings, "render_api_key", "sentinel-render-key")
-    monkeypatch.setattr(settings, "database_url", REMOTE_PLACEHOLDER_DB_URL)
-    monkeypatch.setattr(settings, "llm_provider", "vertex")
-    monkeypatch.setattr(settings, "vertex_model", "gemini-2.5-flash")
-    monkeypatch.setattr(deploy, "_resolved_provider", lambda: ("vertex", None))
-    monkeypatch.setattr(
-        deploy, "_resolved_model_overrides",
-        lambda: {"gemini": None, "groq": None, "vertex": "some-other-model"},
-    )
-
-    assert deploy.sync_env() == 2
-    err = capsys.readouterr().err
-    assert "model override" in err
-    assert "--clear-model" in err
-    assert "vertex" in err          # proves the ACTIVE provider tripped it
-
-
-def test_sync_env_allows_an_agreeing_model_override(monkeypatch, capsys):
-    from config import settings
-    from scripts import deploy
-
-    monkeypatch.setattr(settings, "render_api_key", "sentinel-render-key")
-    monkeypatch.setattr(settings, "database_url", REMOTE_PLACEHOLDER_DB_URL)
-    monkeypatch.setattr(settings, "llm_provider", "vertex")
-    monkeypatch.setattr(settings, "vertex_model", "gemini-2.5-flash")
-    monkeypatch.setattr(deploy, "_resolved_provider", lambda: ("vertex", None))
-    # The guard now loops over every provider, not just the active one, so
-    # only vertex may have an (agreeing) override here -- the others must
-    # report "no override" (None), or a naive same-value-for-any-provider
-    # stub would falsely disagree with their own (untouched) local models.
-    monkeypatch.setattr(
-        deploy, "_resolved_model_overrides",
-        lambda: {"gemini": None, "groq": None, "vertex": "gemini-2.5-flash"},
-    )
-    monkeypatch.setattr(deploy, "_wanted_env", lambda: {"LLM_PROVIDER": "vertex"})
-    # sync_config_db() (run as part of sync_env() now) reads/writes
-    # runtime_config via a raw psycopg.connect() -- stub it so this test's
-    # fake REMOTE_PLACEHOLDER_DB_URL is never actually dialed.
-    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(None))
-    # Mocked so this test makes no live Render call; returning None makes the
-    # script stop at "no such service" -- which proves it got PAST the model
-    # guard, the thing under test, without needing a full push to succeed.
-    monkeypatch.setattr(deploy._render, "find_service_id", lambda: None)
-
-    assert deploy.sync_env() == 1
-    assert "no Render service named" in capsys.readouterr().err
-
-
-def test_sync_env_refuses_when_a_non_active_providers_model_override_disagrees(
-    monkeypatch, capsys
-):
-    """The gap-fix: gemini (the ACTIVE provider) agrees, but vertex -- not
-    active, but still pushed by _wanted_env() -- has its own DB model
-    override diverging from the VERTEX_MODEL value about to be pushed. The
-    old guard only ever checked the active provider and would have missed
-    this; the refusal must name vertex specifically."""
-    from config import settings
-    from scripts import deploy
-
-    monkeypatch.setattr(settings, "render_api_key", "sentinel-render-key")
-    monkeypatch.setattr(settings, "database_url", REMOTE_PLACEHOLDER_DB_URL)
-    monkeypatch.setattr(settings, "llm_provider", "gemini")
-    monkeypatch.setattr(settings, "gemini_model", "gemini-flash-latest")
-    monkeypatch.setattr(settings, "vertex_model", "gemini-2.5-flash")
-    monkeypatch.setattr(deploy, "_resolved_provider", lambda: ("gemini", None))
-    monkeypatch.setattr(
-        deploy, "_resolved_model_overrides",
-        lambda: {
-            "gemini": "gemini-flash-latest",     # agrees -- must not trip the guard
-            "groq": None,
-            "vertex": "some-other-vertex-model",  # disagrees -- must trip it
-        },
-    )
-
-    assert deploy.sync_env() == 2
-    err = capsys.readouterr().err
-    assert "vertex" in err
-    assert "VERTEX_MODEL" in err
-    assert "--clear-model" in err
+    source = inspect.getsource(deploy.sync_env)
+    assert "a DB model override" not in source
+    assert "_resolved_model_overrides" not in source
 
 
 @pytest.mark.parametrize("model_var", ["GEMINI_MODEL", "GROQ_MODEL", "VERTEX_MODEL"])
