@@ -116,12 +116,12 @@ def list_vertex_models(
 ) -> CatalogResult:
     project = (
         project_override
-        or settings.gcp_project
+        or settings.vertex_gcp_project
         or (service_account_info or {}).get("project_id", "")
     )
     if not project:
         return CatalogResult(ok=False, models=None, error="invalid_service_account_json")
-    location = location_override or settings.gcp_location
+    location = location_override or settings.vertex_gcp_location
 
     creds = None
     if service_account_info is not None:

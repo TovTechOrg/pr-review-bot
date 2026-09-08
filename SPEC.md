@@ -544,7 +544,7 @@ queries in the future without code change.
 **Reactive detection, no caps.** Adapters (`providers/base.py` +
 `google_genai.py`/`groq.py`/`github_models.py`) raise `RateLimited(retry_after)`
 only on an actual `429`, parsing `Retry-After` (seconds or HTTP-date) via
-`parse_retry_after`, falling back to `DEFAULT_RETRY_AFTER_SECONDS` (default
+`parse_retry_after`, falling back to `DISPATCHER_DEFAULT_RETRY_AFTER_SECONDS` (default
 `60`) when the header is missing or unparseable. No per-provider RPM/RPD
 number is hardcoded anywhere — a short `retry_after` behaves like a
 per-minute limit, a long one like a daily wall; the code does not
@@ -647,7 +647,7 @@ drains whatever is due.
 
 **Config** (`config.py`): `DATABASE_URL`
 (Postgres/Supabase connection string, required for production),
-`DEFAULT_RETRY_AFTER_SECONDS` (default `60`), `DISPATCHER_IDLE_SLEEP_SECONDS`
+`DISPATCHER_DEFAULT_RETRY_AFTER_SECONDS` (default `60`), `DISPATCHER_IDLE_SLEEP_SECONDS`
 (default `1`), `DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS` (default `2.0`),
 `DISPATCHER_FAILURE_MAX_BACKOFF_SECONDS` (default `300.0`),
 `DISPATCHER_MAX_FAILURE_ATTEMPTS` (default `5`),
@@ -707,7 +707,7 @@ restart-recovery behavior (`tests/test_dispatcher.py`), and the webhook's
 enqueue path (`tests/test_webhook.py`). One live-verification item remains
 per `CLAUDE.md`'s hygiene rules: confirming GitHub Models actually sends a
 usable `Retry-After` header on a `429` (one deliberate call) — not yet
-performed; until it is, the `DEFAULT_RETRY_AFTER_SECONDS` fallback is what
+performed; until it is, the `DISPATCHER_DEFAULT_RETRY_AFTER_SECONDS` fallback is what
 governs that provider's backoff.
 
 ## 13. PR lifecycle edge cases (2026-08-21 pre-flight audit)

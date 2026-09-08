@@ -277,7 +277,7 @@ generation as unavailable even though this bridge exists.
 - **Token:** `~/.config/impeccable-hf/token` — a Hugging Face access token
   with "Make calls to Inference Providers" permission, one line, mode 600.
   Not committed anywhere, not part of this project's own credential set
-  (`GEMINI_API_KEY`/`GCP_SERVICE_ACCOUNT_KEY`/etc.) — same handling
+  (`GEMINI_API_KEY`/`VERTEX_GCP_SERVICE_ACCOUNT_KEY`/etc.) — same handling
   discipline as any other credential applies: never print it, never pass it
   as a literal argument, never let it reach a git commit/PR/Artifact.
 - **Why the router path is hand-rolled and provider-specific:** HF's
@@ -314,7 +314,7 @@ generation as unavailable even though this bridge exists.
   real, live-runnable third provider, matching `SPEC.md`'s stated default.
   Its credential is a GCP
   service-account identity rather than an API-key string:
-  `GCP_SERVICE_ACCOUNT_KEY` (hosted, numbered slots, base64, verbatim only —
+  `VERTEX_GCP_SERVICE_ACCOUNT_KEY` (hosted, numbered slots, base64, verbatim only —
   see the 2026-08-16 credential-convention design) → implicit ADC, resolved
   in `providers/vertex_credentials.py`. No secret reaches Postgres — only
   the slot index, exactly as for gemini/groq.

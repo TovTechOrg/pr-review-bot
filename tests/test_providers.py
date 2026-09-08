@@ -121,7 +121,9 @@ async def test_gemini_provider_parses_valid_structured_output(monkeypatch):
         ),
     )
 
-    provider = GeminiProvider(api_key="dummy-key-for-construction-only", model=settings.gemini_model)
+    provider = GeminiProvider(
+        api_key="dummy-key-for-construction-only", model=settings.gemini_model
+    )
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.parsed == Greeting(message="hi")
@@ -151,7 +153,9 @@ async def test_gemini_provider_includes_thinking_tokens_in_tokens_out(monkeypatc
         ),
     )
 
-    provider = GeminiProvider(api_key="dummy-key-for-construction-only", model=settings.gemini_model)
+    provider = GeminiProvider(
+        api_key="dummy-key-for-construction-only", model=settings.gemini_model
+    )
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.tokens_out == 22  # 7 candidates + 15 thinking
@@ -167,7 +171,9 @@ async def test_provider_returns_none_parsed_on_malformed_json(monkeypatch):
         ),
     )
 
-    provider = GeminiProvider(api_key="dummy-key-for-construction-only", model=settings.gemini_model)
+    provider = GeminiProvider(
+        api_key="dummy-key-for-construction-only", model=settings.gemini_model
+    )
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.parsed is None
@@ -187,7 +193,9 @@ async def test_provider_returns_none_parsed_on_off_schema_json(monkeypatch):
         ),
     )
 
-    provider = GeminiProvider(api_key="dummy-key-for-construction-only", model=settings.gemini_model)
+    provider = GeminiProvider(
+        api_key="dummy-key-for-construction-only", model=settings.gemini_model
+    )
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.parsed is None

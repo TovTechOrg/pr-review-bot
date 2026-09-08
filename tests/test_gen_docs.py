@@ -26,7 +26,7 @@ def test_config_table_never_contains_a_configured_value(monkeypatch):
     """The regression guard for the rule this stage turns on. If a generator is
     ever changed to read `settings` instead of `Settings`, this fails."""
     for field in ("database_url", "github_webhook_secret", "groq_api_key",
-                  "gemini_api_key", "gcp_service_account_key", "github_app_private_key"):
+                  "gemini_api_key", "vertex_gcp_service_account_key", "github_app_private_key"):
         monkeypatch.setattr(settings, field, SENTINEL, raising=False)
     assert SENTINEL not in gen_docs.render_config()
 
@@ -38,7 +38,7 @@ def test_no_generated_file_contains_a_configured_value(tmp_path, monkeypatch):
     imports at module scope) would otherwise evade both the AST guard (which
     only inspects gen_docs.py's own imports) and a config-only sentinel."""
     for field in ("database_url", "github_webhook_secret", "groq_api_key",
-                  "gemini_api_key", "gcp_service_account_key", "github_app_private_key"):
+                  "gemini_api_key", "vertex_gcp_service_account_key", "github_app_private_key"):
         monkeypatch.setattr(settings, field, SENTINEL, raising=False)
     for path in gen_docs.write_all(tmp_path):
         assert SENTINEL not in path.read_text(encoding="utf-8"), path

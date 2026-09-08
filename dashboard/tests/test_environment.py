@@ -231,7 +231,9 @@ async def test_guided_vertex_validate_uploads_file_and_flags_project_conflict(mo
 
     monkeypatch.setattr(catalog, "list_vertex_models", _list_vertex)
     monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
-    monkeypatch.setattr(render_client, "env_vars", lambda service_id: {"VERTEX_GCP_PROJECT": "old-proj"})
+    monkeypatch.setattr(
+        render_client, "env_vars", lambda service_id: {"VERTEX_GCP_PROJECT": "old-proj"}
+    )
     client = await _client()
     resp = await client.post(
         "/api/environment/credential/vertex/validate",
@@ -240,7 +242,9 @@ async def test_guided_vertex_validate_uploads_file_and_flags_project_conflict(mo
     body = resp.json()
     assert body["ok"] is True
     assert body["project_id"] == "new-proj"
-    assert body["conflicts"] == [{"var": "VERTEX_GCP_PROJECT", "current": "old-proj", "new": "new-proj"}]
+    assert body["conflicts"] == [
+        {"var": "VERTEX_GCP_PROJECT", "current": "old-proj", "new": "new-proj"}
+    ]
 
 
 async def test_guided_github_app_validate_success_shows_installation_id(monkeypatch):
@@ -486,7 +490,9 @@ async def test_validate_gcp_project_substitutes_project_override(monkeypatch):
 
     monkeypatch.setattr(catalog, "list_vertex_models", _list_vertex)
     client = await _client()
-    resp = await client.post("/api/environment/validate/VERTEX_GCP_PROJECT", json={"value": "new-proj"})
+    resp = await client.post(
+        "/api/environment/validate/VERTEX_GCP_PROJECT", json={"value": "new-proj"}
+    )
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
 
@@ -746,7 +752,9 @@ async def test_validate_gcp_project_no_credential_configured_does_not_hit_networ
 
     monkeypatch.setattr(catalog, "list_vertex_models", _boom)
     client = await _client()
-    resp = await client.post("/api/environment/validate/VERTEX_GCP_PROJECT", json={"value": "new-proj"})
+    resp = await client.post(
+        "/api/environment/validate/VERTEX_GCP_PROJECT", json={"value": "new-proj"}
+    )
     assert resp.status_code == 200
     assert resp.json()["error"] == "no_credential_configured"
 

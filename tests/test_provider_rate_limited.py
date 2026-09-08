@@ -66,7 +66,7 @@ async def test_groq_429_with_header_raises_rate_limited(monkeypatch):
 
 
 async def test_groq_429_without_header_uses_default(monkeypatch):
-    monkeypatch.setattr(settings, "default_retry_after_seconds", 60.0)
+    monkeypatch.setattr(settings, "dispatcher_default_retry_after_seconds", 60.0)
     _groq_raising(FakeRateLimitError(None), monkeypatch)
     provider = GroqProvider(api_key="dummy-key-for-construction-only", model=settings.groq_model)
     with pytest.raises(RateLimited) as ei:

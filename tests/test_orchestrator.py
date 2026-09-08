@@ -191,7 +191,7 @@ async def test_run_review_reflects_active_model_per_provider(monkeypatch):
     assert result.model == "llama-3.3-70b-versatile"
 
     monkeypatch.setattr(settings, "llm_provider", "gemini")
-    monkeypatch.setattr(settings, "llm_model", "gemini-flash-latest")
+    monkeypatch.setattr(settings, "gemini_model", "gemini-flash-latest")
     result = await orchestrator.run_review("owner/repo", 1)
     assert result.model == "gemini-flash-latest"
 
@@ -484,7 +484,7 @@ def test_active_model_resolves_per_provider_through_the_registry(monkeypatch):
     from config import settings
     from providers import active
 
-    monkeypatch.setattr(settings, "llm_model", "model-gemini")
+    monkeypatch.setattr(settings, "gemini_model", "model-gemini")
     monkeypatch.setattr(settings, "groq_model", "model-groq")
     monkeypatch.setattr(settings, "vertex_model", "model-vertex")
     for provider, expected in (

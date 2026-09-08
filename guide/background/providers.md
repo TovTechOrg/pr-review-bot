@@ -119,7 +119,7 @@ completion request involved; it's the right way to narrow configuration
 `gemini-flash-latest` all 404'd; `gemini-2.5-flash` and
 `gemini-2.5-flash-lite` both existed — this project's Vertex catalog only
 carries the 2.5 generation. One deliberate `generateContent` call was then
-made with `LLM_MODEL=gemini-2.5-flash`: full success — a valid
+made with `GEMINI_MODEL=gemini-2.5-flash`: full success — a valid
 structured-output response with non-zero token usage
 (`Greeting(message='Hello there!')`, 20 tokens in / 8 out), the first
 genuinely complete end-to-end live verification of this provider. A
@@ -128,7 +128,7 @@ genuinely complete end-to-end live verification of this provider. A
 
 Vertex has since been split onto its own `VERTEX_MODEL` env var (default
 `gemini-2.5-flash`, the confirmed-working value) rather than sharing
-`LLM_MODEL` with gemini, so an operator enabling vertex gets a working model
+`GEMINI_MODEL` with gemini, so an operator enabling vertex gets a working model
 with no override needed.
 
 ## GitHub Models: the second cross-vendor provider (and its real retirement)

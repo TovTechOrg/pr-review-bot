@@ -135,4 +135,6 @@ def conflicts_for(
         return []
     if current_vertex_gcp_project == new_project_id:
         return []
-    return [{"var": "VERTEX_GCP_PROJECT", "current": current_vertex_gcp_project, "new": new_project_id}]
+    return [
+        {"var": "VERTEX_GCP_PROJECT", "current": current_vertex_gcp_project, "new": new_project_id}
+    ]

@@ -20,17 +20,17 @@ Plus `LLM_PROVIDER`, and `GITHUB_APP_INSTALLATION_ID` once it is set locally (it
 
 ## Every provider's model var
 
+- `GEMINI_MODEL`
 - `GROQ_MODEL`
-- `LLM_MODEL`
 - `VERTEX_MODEL`
 
 All of them, not just the active provider's: a database override can activate any provider with no redeploy, so a provider whose model var was never pushed would read a missing value on the service.
 
 ## Provider credentials
 
-- `GCP_SERVICE_ACCOUNT_KEY`
 - `GEMINI_API_KEY`
 - `GROQ_API_KEY`
+- `VERTEX_GCP_SERVICE_ACCOUNT_KEY`
 
 The selected provider's is always pushed. Another provider's is pushed only if you happen to have it set locally -- an unselected provider's key is never demanded.
 
@@ -38,8 +38,8 @@ Each credential also has numbered key-rotation slots: additional vars named `{cr
 
 ## Operational settings
 
-- `DEFAULT_RETRY_AFTER_SECONDS`
 - `DISPATCHER_BACKOFF_JITTER_SECONDS`
+- `DISPATCHER_DEFAULT_RETRY_AFTER_SECONDS`
 - `DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS`
 - `DISPATCHER_FAILURE_MAX_BACKOFF_SECONDS`
 - `DISPATCHER_IDLE_SLEEP_SECONDS`
@@ -47,9 +47,9 @@ Each credential also has numbered key-rotation slots: additional vars named `{cr
 - `DISPATCHER_MAX_NOTICE_POST_ATTEMPTS`
 - `DISPATCHER_MIN_RETRY_AFTER_SECONDS`
 - `DISPATCHER_NOTICE_SWEEP_BATCH_SIZE`
-- `GCP_LOCATION`
-- `GCP_PROJECT`
 - `LLM_REQUEST_TIMEOUT_SECONDS`
+- `VERTEX_GCP_LOCATION`
+- `VERTEX_GCP_PROJECT`
 
 ## Never pushed: database-only settings
 

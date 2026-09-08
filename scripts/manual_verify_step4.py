@@ -35,10 +35,10 @@ class Greeting(BaseModel):
 
 
 def main() -> None:
-    print(f"Provider: gemini   Model: {settings.llm_model}")
+    print(f"Provider: gemini   Model: {settings.gemini_model}")
     print("(never printing the API key)")
 
-    provider = GeminiProvider(api_key=settings.gemini_api_key, model=settings.llm_model)
+    provider = GeminiProvider(api_key=settings.gemini_api_key, model=settings.gemini_model)
 
     system = "Respond in the given JSON schema."
     user = "Say hello in one short sentence."
@@ -60,7 +60,7 @@ def main() -> None:
     assert result.tokens_in > 0, "expected non-zero real prompt token usage"
     assert result.tokens_out > 0, "expected non-zero real completion token usage"
 
-    cost = estimate_cost_usd("gemini", settings.llm_model, result.tokens_in, result.tokens_out)
+    cost = estimate_cost_usd("gemini", settings.gemini_model, result.tokens_in, result.tokens_out)
     print(f"est. cost: ${cost:.6f}" if cost is not None else "est. cost: n/a (unpriced model)")
 
     print(

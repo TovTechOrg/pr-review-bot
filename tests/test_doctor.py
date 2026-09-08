@@ -33,7 +33,7 @@ def bare(monkeypatch):
     for field in (
         "github_app_id", "github_app_private_key", "github_webhook_secret",
         "database_url", "llm_provider", "groq_api_key", "gemini_api_key",
-        "gcp_service_account_key", "public_base_url", "render_api_key",
+        "vertex_gcp_service_account_key", "public_base_url", "render_api_key",
         "uptimerobot_api_key", "github_target_repo",
     ):
         monkeypatch.setattr(settings, field, type(getattr(settings, field))(), raising=False)

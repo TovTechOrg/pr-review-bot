@@ -27,7 +27,7 @@ templates:
    line to `gemini`/`vertex` if you picked a different provider above.
 2. **`.env`** — the matching credential goes here, in the line the template
    already names for your provider (`GROQ_API_KEY`, `GEMINI_API_KEY`, or
-   `GCP_SERVICE_ACCOUNT_KEY`). Paste the value in yourself; nothing writes it
+   `VERTEX_GCP_SERVICE_ACCOUNT_KEY`). Paste the value in yourself; nothing writes it
    for you, and nothing needs to read it back to confirm it — the next
    command does that.
 

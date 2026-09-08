@@ -29,7 +29,7 @@ Each provider's credential env var can have numbered siblings —
 of time exactly like any other env var (one redeploy, via `--sync-env` or
 the Render dashboard, to add a new slot). `vertex` rides the identical
 mechanism with a differently-shaped (but still verbatim, base64-encoded, no
-file path) credential: `GCP_SERVICE_ACCOUNT_KEY`, `_1`, `_2`, ... — so
+file path) credential: `VERTEX_GCP_SERVICE_ACCOUNT_KEY`, `_1`, `_2`, ... — so
 `uv run python -m scripts.set_override vertex --index 1` swaps service
 accounts with no redeploy and no CLI change.
 
