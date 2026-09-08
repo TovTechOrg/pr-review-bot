@@ -6,8 +6,10 @@ unit-tested. Uses the shared Postgres test harness and a cleared blocked_until m
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -1624,3 +1626,24 @@ async def test_under_cap_still_respects_the_blocked_provider_gate(monkeypatch, d
     assert t.defer_reason is None                # provider gate, not the cap
     assert posted and "rate limit" in posted[0][1].lower()
     assert posted[0][2] == 9099
+
+
+async def test_run_forever_refreshes_idle_sleep_from_db_not_settings(monkeypatch):
+    """DISPATCHER_IDLE_SLEEP_SECONDS is DB-only (no env fallback) -- run_forever
+    must sleep the DB value, not settings.dispatcher_idle_sleep_seconds, once
+    a refresh has happened."""
+    dispatcher._idle_sleep_seconds = None
+    dispatcher._last_idle_sleep_refresh = 0.0
+    monkeypatch.setattr(store, "get_idle_sleep_seconds", lambda: 7.5)
+    sleeps = []
+
+    async def _fake_sleep(seconds):
+        sleeps.append(seconds)
+        raise asyncio.CancelledError  # stop run_forever after one iteration
+
+    monkeypatch.setattr(dispatcher.asyncio, "sleep", _fake_sleep)
+    monkeypatch.setattr(dispatcher, "process_next_due", AsyncMock(return_value=None))
+    monkeypatch.setattr(dispatcher, "post_pending_notices", AsyncMock(return_value=0))
+    with pytest.raises(asyncio.CancelledError):
+        await dispatcher.run_forever()
+    assert sleeps == [7.5]

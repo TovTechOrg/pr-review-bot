@@ -1158,6 +1158,16 @@ def get_dispatcher_tuning_config() -> dict:
     return {k: row[k] for k in keys}
 
 
+def get_idle_sleep_seconds() -> float | None:
+    """DISPATCHER_IDLE_SLEEP_SECONDS's DB value, or None if unset (should not
+    happen once seeded -- see get_dispatcher_tuning_config's docstring)."""
+    with _require_pool().connection() as conn:
+        row = conn.execute(
+            "SELECT dispatcher_idle_sleep_seconds FROM runtime_config WHERE id = 1"
+        ).fetchone()
+    return None if row is None else row["dispatcher_idle_sleep_seconds"]
+
+
 def get_usage_cap_overrides() -> tuple[int | None, str | None]:
     """(token cap, reset time) overrides, or Nones when unset.
 

@@ -20,6 +20,7 @@ import asyncio
 import logging
 import os
 import random
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -66,6 +67,10 @@ def compute_backoff(attempts: int, jitter: float = 0.0) -> float:
 
 
 _blocked_until: dict[str, datetime] = {}
+
+_IDLE_SLEEP_REFRESH_INTERVAL_SECONDS = 30
+_idle_sleep_seconds: float | None = None
+_last_idle_sleep_refresh: float = 0.0
 
 
 def reset_blocked_until() -> None:
@@ -533,13 +538,24 @@ async def run_forever() -> None:
     """Production loop: drain the queue, idling when empty. Thin wrapper over
     process_next_due (which holds the tested logic).
 
-    Sleeps ``dispatcher_idle_sleep_seconds`` after EVERY iteration, not only
+    Sleeps ``DISPATCHER_IDLE_SLEEP_SECONDS`` after EVERY iteration, not only
     "idle" ones. A "deferred"/"failed" step can otherwise fire again with
     zero delay (e.g. a ``Retry-After: 0`` or already-past HTTP-date response),
     hammering the same doomed call in a tight loop — the exact 429-hammering
     pattern that has already gotten a provider account-level blocked on this
     project (see CLAUDE.md). This floor is a blunt but robust backstop that
     also defends any future fast-loop path.
+
+    This is the one DB-only value that can't rely on process_next_due's
+    per-claimed-ticket refresh (Task 5/9's ``_refresh_*`` calls): that
+    refresh never fires while the queue is idle, which is exactly when this
+    value matters. So it gets its own throttled refresh here, re-querying
+    at most once every ``_IDLE_SLEEP_REFRESH_INTERVAL_SECONDS`` regardless
+    of how short the sleep value itself is -- see
+    docs/superpowers/specs/2026-09-08-slotted-config-and-db-delegation-
+    design.md section 6. No env fallback: a failed refresh reuses the last
+    known value, and before any refresh has ever succeeded, ``1.0`` is a
+    hardcoded floor to avoid busy-looping, not a config fallback.
     """
     while True:
         try:
@@ -556,4 +572,12 @@ async def run_forever() -> None:
         # notice sweep failure must not stop the loop
         except Exception:  # noqa: BLE001
             logger.exception("notice sweep failed")
-        await asyncio.sleep(settings.dispatcher_idle_sleep_seconds)
+        global _idle_sleep_seconds, _last_idle_sleep_refresh
+        now_monotonic = time.monotonic()
+        if now_monotonic - _last_idle_sleep_refresh >= _IDLE_SLEEP_REFRESH_INTERVAL_SECONDS:
+            try:
+                _idle_sleep_seconds = await asyncio.to_thread(store.get_idle_sleep_seconds)
+            except Exception:  # noqa: BLE001
+                logger.exception("failed to refresh idle-sleep-seconds; reusing last known value")
+            _last_idle_sleep_refresh = now_monotonic
+        await asyncio.sleep(_idle_sleep_seconds if _idle_sleep_seconds is not None else 1.0)
