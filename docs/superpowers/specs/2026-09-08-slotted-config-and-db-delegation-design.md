@@ -46,7 +46,7 @@ per the user's request:
 
 ## 4. Per-slot config: schema + resolution
 
-### 4a. New table, not more flat columns
+### 4a. New table, not more flat columns — durable per slot, independent of which slot is active
 
 `runtime_config` (one singleton row) already has `vertex_key_index`/
 `vertex_model` as flat per-provider columns. Slotting multiplies the
@@ -66,44 +66,109 @@ CREATE TABLE IF NOT EXISTS slot_config (
 ALTER TABLE slot_config ENABLE ROW LEVEL SECURITY;
 ```
 
-`vertex_gcp_project`/`vertex_gcp_location` are only ever populated/read when
-`provider = 'vertex'`; NULL for gemini/groq rows. **Open question for you**:
-is per-slot `model` actually wanted for gemini/groq too, or is the real gap
-just Vertex's project/location (the only fields that generalize your
-original `VERTEX_GCP_LOCATION` example)? I've scoped the table to cover all
-three since the model-catalog-per-slot fetch already exists, but this is the
-one place I'd narrow scope if that's not what you had in mind — it'd shrink
-to `vertex_slot_config(slot_index, gcp_project, gcp_location)` with model
-staying provider-flat as it is today.
+**Scope confirmed: per-slot `model` for all three providers**, not just
+Vertex's project/location — no schema change from the draft above, since
+`provider` is already a column rather than the table being Vertex-shaped.
+`vertex_gcp_project`/`vertex_gcp_location` stay NULL for gemini/groq rows
+(only meaningful for `provider = 'vertex'`).
 
-### 4b. Resolution: already 90% wired
+**Persistence, made explicit** (this is what the first draft under-specified):
+a `slot_config` row is durable and completely independent of which slot is
+currently *active*. "Which slot is active" is a separate concern, unchanged
+from today — it stays in `runtime_config.vertex_key_index`/
+`gemini_key_index`/`groq_key_index`. Switching that pointer (via the config
+panel or `scripts/set_override.py`) **never reads or writes `slot_config`
+at all** — it only changes which row later resolution joins against.
+Concretely:
+
+- Configure slot 2 (model, and for vertex, project/location) once, via
+  guided-setup apply.
+- Switch the active slot to 0, then later back to 2, any number of times.
+- Slot 2's row in `slot_config` is untouched the whole time — no
+  respecification needed on switching back, because switching back never
+  touched it in the first place.
+- The *only* way a `slot_config` row changes is an explicit edit to that
+  specific slot (guided-setup apply targeting that slot, or a future direct
+  edit in the config panel) — never as a side effect of `key_index`
+  changing.
+
+### 4b. Resolution — DB is the sole source of truth, no env fallback
 
 `providers/factory.py::get_provider()` already resolves `index =
 key_index.active_key_index(provider)` **before** calling `_build(provider,
 index, model)` — the exact per-slot join point already exists, it just isn't
-consulted for model/project/location yet:
+consulted for model/project/location yet. But the resolution shape itself
+changes from what the first draft proposed:
 
-- Widen `providers/active_model.py`'s cache from `dict[str, str]` (by
+**No env-default fallback tier, anywhere in this spec.** The first draft's
+"per-slot DB override → flat DB override → env default" chain was borrowed
+directly from the *already-shipped* pattern in `active_model.py`/
+`cooldown_config.py`: when there's no DB override, those modules fall back
+to whatever `Settings.<field>` resolves to — a real `.env`/`.env.config`/
+Render value if one's set, otherwise a hardcoded Python default baked into
+`config.py` (e.g. `vertex_model: str = "gemini-2.5-flash"`). That baked-in
+default is exactly the "potentially outdated default" risk: it only ever
+gets exercised in the degraded case, so it can drift from reality (a
+changed Vertex catalog, a deprecated model id) with nothing ever noticing.
+Per your direction, the DB is the *only* source of truth here — a missing
+value is a real, visible failure, not a silent default:
+
+- `providers/active_model.py`'s cache widens from `dict[str, str]` (by
   provider) to `dict[tuple[str, int], str]` (by provider+slot). Its
-  accessor becomes `active_model(provider, index)`, falling back to the
-  provider-flat DB override (unchanged), then the env default — a third
-  fallback tier, not a replacement for the existing two.
+  accessor becomes `active_model(provider, index) -> str`, and **raises**
+  `LookupError` (or returns `None`, TBD by whoever implements — see the
+  choice below) if `(provider, index)` has no row, rather than falling back
+  to anything.
 - New `providers/active_vertex_slot.py` (mirrors `active_model.py`/
-  `key_index.py` exactly): `active_vertex_project(index) -> str`,
-  `active_vertex_location(index) -> str`, each falling back to
-  `settings.vertex_gcp_project`/`vertex_gcp_location` (which become DB-only
-  per §5, so really: per-slot DB override → flat DB override → env default).
-- `factory.py::_build`'s vertex branch already receives `index` — swap
-  `settings.vertex_gcp_project`/`settings.vertex_gcp_location` for
-  `active_vertex_slot.active_vertex_project(index)`/`active_vertex_location(index)`.
+  `key_index.py`'s existing cache-module shape): `active_vertex_project(index)`,
+  `active_vertex_location(index)`, same no-fallback contract.
+- `factory.py::_build`'s vertex branch already receives `index` — it calls
+  these accessors and, on a missing value, raises the *same* `ValueError`
+  shape it already raises for "no credential configured" (`f"no credential
+  configured for provider={provider!r} index={index}..."` becomes a
+  sibling `f"no model/project/location configured for provider={provider!r}
+  slot={index}"`). This is not a new failure mechanism: `specialists/base.py`
+  already has a broad `except Exception` around `get_provider()` that turns
+  any `ValueError` here into a normal, visible per-specialist failure row —
+  exactly this project's existing "partial failure always visible"
+  convention, just reused for a new cause.
 - `dispatcher.py::process_next_due` gains one more refresh call, same
-  cadence and fail-safe shape as `_refresh_model_overrides` (degrade to
-  `reset_override_cache()` on any failure).
-- `dashboard/environment.py`'s guided-setup apply flow
-  (`_apply_llm_credential`) gains `slot`-scoped project/location fields
-  alongside its existing per-slot model field.
+  cadence and fail-safe shape as `_refresh_model_overrides` — "fail-safe"
+  here means "never crash the dispatcher if the DB read itself fails,"
+  which is different from "silently default when a row is simply absent."
+  A DB read that succeeds but returns nothing for the active `(provider,
+  index)` is not a refresh failure — it's a real missing-config state, and
+  must surface as the `ValueError` above the next time that provider/slot
+  is actually used, not be swallowed here.
 
-## 5. DB-only migration: 9 tuning knobs + Vertex project/location
+## 5. Consequence: the DB must always be fully seeded
+
+Removing the env-default fallback means normal operation now depends on
+`slot_config` (and, per §6, the flat DB-only tuning knobs) always having a
+real row for whatever `(provider, active slot)` is actually in use. Two
+places currently don't guarantee that, and both need hardening:
+
+- **`scripts/deploy.py --sync-config-db`**: today this mirrors
+  `.env.config`'s *optional* tuning values into `runtime_config` — a
+  best-effort sync, not a requirement (a value simply isn't pushed if
+  unset locally). Once these fields have no fallback, this command must
+  refuse to leave `slot_config`/the flat DB-only columns *unset* for
+  whatever slot/provider is actually configured as active — either by
+  requiring the relevant local values be present before syncing, or by
+  failing loudly (mirroring `sync_env()`'s existing "refuse to push empty
+  values" guard) rather than silently completing a partial sync.
+- **`onboarding-wizard`'s provisioning flow**: today it pushes credential +
+  model as Render env vars to a fresh service (`_LLM_ENV_VAR_NAMES`). It
+  needs an equivalent DB-seeding step for a newly-provisioned instance's
+  `runtime_config`/`slot_config` rows, run as part of the same provisioning
+  transaction — a wizard-provisioned service must never boot into "no
+  fallback, no DB row either" for its own just-configured provider.
+
+This is real, load-bearing work, not a footnote — I'd want to treat "does a
+freshly deployed/onboarded service have a fully-seeded config DB" as this
+spec's actual acceptance test, more than any individual field's plumbing.
+
+## 6. DB-only migration: 9 tuning knobs + Vertex project/location
 
 Same established pattern as `cooldown_config.py`: a `runtime_config` column
 + a tiny cache module + a refresh call in `process_next_due`.
@@ -120,9 +185,9 @@ Same established pattern as `cooldown_config.py`: a `runtime_config` column
 | `DISPATCHER_BACKOFF_JITTER_SECONDS` | `dispatcher.py` |
 | `DISPATCHER_NOTICE_SWEEP_BATCH_SIZE` | `store.py`'s notice sweep (already a DB round-trip inside `post_pending_notices`, called every `run_forever` iteration — piggyback the refresh there, no new query) |
 
-`VERTEX_GCP_PROJECT`/`VERTEX_GCP_LOCATION` migrate the same way (flat DB
-override, §4b's second fallback tier) — refreshed alongside the new
-`slot_config` refresh in the same `process_next_due` call.
+`VERTEX_GCP_PROJECT`/`VERTEX_GCP_LOCATION` as flat (non-slot) settings are
+superseded by §4's `slot_config` — there's no separate flat DB override for
+them once slotting exists, only the per-slot values.
 
 **`DISPATCHER_IDLE_SLEEP_SECONDS` is the one exception**, both here and in
 the per-slot work: it's read in `run_forever()`'s main loop *specifically
@@ -137,7 +202,7 @@ Once migrated: remove all 11 (9 knobs + project + location) from
 `_DB_SYNCED_OPERATIONAL_KEYS`, and drop their `render.yaml`/`.env.example`
 entries (matching how the existing 6 already have none).
 
-## 6. Dashboard implications
+## 7. Dashboard implications
 
 The config panel (`dashboard/environment.py` + `dashboard/static/
 dashboard.html`'s `#configForm`) already has info-hover + alphabetical
@@ -156,12 +221,59 @@ This adds:
   design pass (mockup/interaction question) once the rest of this spec is
   approved, rather than being fully speced here.
 
-## 7. Open decisions for you to confirm or correct
+## 8. Guided-setup split-push hardening
 
-1. §4a: per-slot `model` for all three providers, or just Vertex
-   project/location (narrower table)?
-2. Is the `slot_config` table name/shape acceptable, or would you rather
-   extend `runtime_config` some other way (e.g. one row per slot instead of
-   a separate table)?
-3. §6: is the per-slot dashboard UI in scope for the same implementation
-   pass as §4b/§5's backend changes, or a follow-up once the backend lands?
+This isn't a new problem this spec introduces — `_apply_llm_credential`
+already writes to two backends in one apply (Render for the credential,
+`runtime_config` for the model override), specifically so `active_model()`'s
+DB-first read doesn't get shadowed by a stale value. §4/§5 make this
+*larger*, not new in kind: model's Render write disappears entirely (no
+more fallback to feed), and vertex's project/location gain a DB write
+where today they have no DB path at all — one Render write (the
+credential) plus up to three DB writes (model, and for vertex,
+project/location) per apply.
+
+- Extend the function's existing `{"applied": [...], "failed": [...]}`
+  per-field reporting (already returned to `#renderSaveResult`, already
+  rendered as the nested applied/failed list from the 2026-09-08
+  prettify work) to cover every new field individually — a partial
+  failure (e.g. credential pushed to Render, but the `slot_config` write
+  failed) must show up as a named `failed` entry, not a silently
+  incomplete apply.
+- `payload.clear_vertex_gcp_project`'s current behavior (delete the Render
+  env var) has no equivalent left once project is DB-only — "clearing"
+  becomes writing `NULL` to the `slot_config` row's `vertex_gcp_project`
+  column instead of an env-var delete.
+- **Explicit test cases required** (not just "add tests" — these are the
+  acceptance criteria): credential push to Render succeeds, `slot_config`
+  write fails; credential push fails, `slot_config` write succeeds anyway
+  (must it be prevented, or is a DB-only value with no matching live
+  credential yet an acceptable transient state?); multiple `slot_config`
+  fields in one apply where one field's write fails and another
+  succeeds (must not partially commit a single logical row update as if
+  it were independent field writes, unlike the Render-side keys which
+  genuinely are independent single-key PUTs).
+
+## 9. Open decisions for you to confirm or correct
+
+1. ~~§4a: per-slot `model` for all three providers, or just Vertex
+   project/location?~~ **Resolved: all three.**
+2. ~~Is the `slot_config` table name/shape acceptable?~~ **Resolved as
+   drafted**, with the persistence model in §4a made explicit — flag if
+   the name/shape itself still needs to change.
+3. §7: is the per-slot dashboard UI in scope for the same implementation
+   pass as §4b/§5's backend changes, or a follow-up once the backend
+   lands? **Still open** — not addressed yet.
+4. New from this round: should the *already-shipped* 6 DB-only vars
+   (cooldown trio, usage-cap pair, `REVIEW_DRAFT_PRS`) also lose their
+   env-fallback tier for consistency with the "DB is sole source of
+   truth" principle adopted here, or is that principle scoped to only the
+   *new* work in this spec, leaving the existing 6 as-is (two different
+   reliability philosophies side by side, deliberately)?
+5. §4b: when `active_model(provider, index)` (or the vertex-slot
+   accessors) find no row, should the function itself raise, or return
+   `None` and let each call site decide how to turn that into the
+   `ValueError` `factory.py::_build` needs? Either works; I'd lean
+   "return `None`, let `_build` raise" to keep the cache modules exactly
+   as narrow/dependency-free as `active_model.py`'s existing docstring
+   describes, but flagging it since the draft above hedged on this.
