@@ -616,6 +616,13 @@
         <div id="renderSaveResult"></div>
         <dialog id="guidedModal">
           <div id="guidedModalBody"></div>
+          <!-- Everything a successful Validate derives (model picker,
+               GCP_PROJECT keep/clear prompt, installation-id label) lives in
+               its own container so a repeat Validate click REPLACES it
+               wholesale. It used to be appended into #guidedModalBody, which
+               stacked a second copy per click -- duplicate id="guidedModelSelect"
+               nodes, and getElementById then read the stale first one. -->
+          <div id="guidedModalExtra"></div>
           <button type="button" id="guidedValidateBtn" data-i18n="env_guided_validate"></button>
           <button type="button" id="guidedApplyBtn" data-i18n="env_guided_apply" disabled></button>
           <button type="button" id="guidedCancelBtn" data-i18n="env_guided_cancel"></button>
@@ -737,6 +744,8 @@
         env_guided_keep_project: "Keep GCP_PROJECT",
         env_guided_clear_project: "Clear GCP_PROJECT (use key's project)",
         env_guided_installation_label: "Installation ID (auto-discovered)",
+        env_guided_no_models: "This credential is valid but reports no usable models — nothing to apply.",
+        env_guided_missing_input: "Fill in every field before validating.",
         env_delete_confirm_title: "This will also clear:",
         env_delete_confirm_ok: "Delete anyway",
       },
@@ -814,6 +823,8 @@
         env_guided_keep_project: "השאר GCP_PROJECT",
         env_guided_clear_project: "נקה GCP_PROJECT (השתמש בפרויקט של המפתח)",
         env_guided_installation_label: "מזהה התקנה (זוהה אוטומטית)",
+        env_guided_no_models: "האישור תקין אך לא מדווח על מודלים שמישים — אין מה להחיל.",
+        env_guided_missing_input: "מלא את כל השדות לפני האימות.",
         env_delete_confirm_title: "פעולה זו תנקה גם:",
         env_delete_confirm_ok: "מחק בכל זאת",
       },
@@ -1567,107 +1578,188 @@
       `;
     }
 
-    document.getElementById("guidedSetupSelect").addEventListener("change", (event) => {
-      const family = event.target.value;
-      if (!family) return;
+    // Everything a successful Validate produced -- the derived block, the
+    // remembered payload, the enabled Apply button. Called before every
+    // Validate attempt and whenever the inputs it was derived FROM change,
+    // so no repeat interaction can leave a second copy of the block behind
+    // or let Apply act on a credential that is no longer the one on screen.
+    function resetGuidedValidation() {
       guidedValidatedPayload = null;
       document.getElementById("guidedApplyBtn").disabled = true;
       document.getElementById("guidedModalResult").textContent = "";
+      document.getElementById("guidedModalExtra").innerHTML = "";
+    }
+
+    document.getElementById("guidedSetupSelect").addEventListener("change", (event) => {
+      const family = event.target.value;
+      if (!family) return;
+      resetGuidedValidation();
       document.getElementById("guidedModalBody").innerHTML = guidedModalBodyFor(family);
       document.getElementById("guidedModal").dataset.family = family;
       document.getElementById("guidedModal").showModal();
     });
 
+    // Editing the credential itself invalidates the validation it produced --
+    // otherwise Apply would still send the previously validated file/key
+    // while the picker visibly shows a different one. The key-slot select is
+    // exempt: it is not part of what was validated, so changing it must not
+    // force another live provider call.
+    document.getElementById("guidedModalBody").addEventListener("input", (event) => {
+      if (event.target.id === "guidedSlotSelect") return;
+      resetGuidedValidation();
+    });
+
     document.getElementById("guidedValidateBtn").addEventListener("click", async () => {
       const family = document.getElementById("guidedModal").dataset.family;
-      const formData = new FormData();
-      if (family === "gemini" || family === "groq") {
-        formData.append("api_key", document.getElementById("guidedApiKey").value);
-      } else if (family === "vertex") {
-        formData.append("credential_file", document.getElementById("guidedCredentialFile").files[0]);
-      } else {
-        formData.append("app_id", document.getElementById("guidedAppId").value);
-        formData.append("credential_file", document.getElementById("guidedCredentialFile").files[0]);
-      }
-      const resp = await fetch(`/api/environment/credential/${family}/validate`, {
-        method: "POST",
-        body: formData,
-      });
-      const result = await resp.json();
       const resultEl = document.getElementById("guidedModalResult");
-      if (!result.ok) {
-        resultEl.textContent = `${t("env_invalid")}: ${result.error}`;
-        document.getElementById("guidedApplyBtn").disabled = true;
-        return;
+      const validateBtn = document.getElementById("guidedValidateBtn");
+      const applyBtn = document.getElementById("guidedApplyBtn");
+      resetGuidedValidation();
+      // Disabled for the whole request, not just while awaiting fetch: a
+      // second click before the first response lands would fire a second
+      // live provider-validation call, and could race the first response's
+      // guidedValidatedPayload assignment.
+      validateBtn.disabled = true;
+      try {
+        const formData = new FormData();
+        if (family === "gemini" || family === "groq") {
+          const apiKey = document.getElementById("guidedApiKey").value;
+          if (!apiKey) { resultEl.textContent = t("env_guided_missing_input"); return; }
+          formData.append("api_key", apiKey);
+        } else if (family === "vertex") {
+          // files[0] is undefined with nothing picked, and FormData would
+          // append the string "undefined" -- a 422 whose body has no `error`
+          // field, rendering as a bare "✗ invalid: undefined". Catch it here
+          // instead, which also skips a pointless live provider call.
+          const file = document.getElementById("guidedCredentialFile").files[0];
+          if (!file) { resultEl.textContent = t("env_guided_missing_input"); return; }
+          formData.append("credential_file", file);
+        } else {
+          const appId = document.getElementById("guidedAppId").value;
+          const file = document.getElementById("guidedCredentialFile").files[0];
+          if (!appId || !file) { resultEl.textContent = t("env_guided_missing_input"); return; }
+          formData.append("app_id", appId);
+          formData.append("credential_file", file);
+        }
+        const resp = await fetch(`/api/environment/credential/${family}/validate`, {
+          method: "POST",
+          body: formData,
+        });
+        const result = await resp.json();
+        if (!result.ok) {
+          resultEl.textContent = `${t("env_invalid")}: ${result.error}`;
+          return;
+        }
+        if (family !== "github_app" && (result.models || []).length === 0) {
+          // A valid credential whose catalog comes back empty would leave the
+          // model <select> with zero options, and Apply would then post
+          // model:"" -- which Render rejects, so only the credential var lands
+          // and the model var silently fails. Refuse to get there.
+          resultEl.textContent = t("env_guided_no_models");
+          return;
+        }
+        guidedValidatedPayload = { family, result, raw: formData };
+        let extra = "";
+        if (family !== "github_app") {
+          const options = (result.models || []).map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join("");
+          extra += `<label>${t("env_config_model")}</label><select id="guidedModelSelect">${options}</select>`;
+        }
+        if (result.conflicts && result.conflicts.length > 0) {
+          const c = result.conflicts[0];
+          extra += `<p>${t("env_guided_project_conflict").replace("{current}", esc(c.current)).replace("{new}", esc(c.new))}</p>`;
+          extra += `
+            <label><input type="radio" name="projectChoice" value="keep" checked> ${t("env_guided_keep_project")}</label>
+            <label><input type="radio" name="projectChoice" value="clear"> ${t("env_guided_clear_project")}</label>
+          `;
+        }
+        if (family === "github_app") {
+          extra += `<label>${t("env_guided_installation_label")}</label><span>${result.installation_id}</span>`;
+        }
+        document.getElementById("guidedModalExtra").innerHTML = extra;
+        resultEl.textContent = t("env_valid");
+      } finally {
+        validateBtn.disabled = false;
+        // Mirrors resetGuidedValidation's own invariant -- only enable Apply
+        // when a validation actually succeeded (guidedValidatedPayload set),
+        // never unconditionally.
+        applyBtn.disabled = !guidedValidatedPayload;
       }
-      guidedValidatedPayload = { family, result, raw: formData };
-      let extra = "";
-      if (family !== "github_app") {
-        const options = (result.models || []).map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join("");
-        extra += `<label>${t("env_config_model")}</label><select id="guidedModelSelect">${options}</select>`;
-      }
-      if (result.conflicts && result.conflicts.length > 0) {
-        const c = result.conflicts[0];
-        extra += `<p>${t("env_guided_project_conflict").replace("{current}", esc(c.current)).replace("{new}", esc(c.new))}</p>`;
-        extra += `
-          <label><input type="radio" name="projectChoice" value="keep" checked> ${t("env_guided_keep_project")}</label>
-          <label><input type="radio" name="projectChoice" value="clear"> ${t("env_guided_clear_project")}</label>
-        `;
-      }
-      if (family === "github_app") {
-        extra += `<label>${t("env_guided_installation_label")}</label><span>${result.installation_id}</span>`;
-      }
-      document.getElementById("guidedModalBody").insertAdjacentHTML("beforeend", extra);
-      resultEl.textContent = t("env_valid");
-      document.getElementById("guidedApplyBtn").disabled = false;
     });
 
     document.getElementById("guidedApplyBtn").addEventListener("click", async () => {
       if (!guidedValidatedPayload) return;
       const { family, result } = guidedValidatedPayload;
-      let body;
-      if (family === "github_app") {
-        const fileBuffer = await guidedValidatedPayload.raw.get("credential_file").arrayBuffer();
-        body = {
-          app_id: document.getElementById("guidedAppId").value,
-          private_key_b64: arrayBufferToBase64(fileBuffer),
-          installation_id: result.installation_id,
-        };
-      } else {
-        const model = document.getElementById("guidedModelSelect").value;
-        const slot = parseInt(document.getElementById("guidedSlotSelect").value, 10);
-        let credential;
-        if (family === "vertex") {
+      const validateBtn = document.getElementById("guidedValidateBtn");
+      const applyBtn = document.getElementById("guidedApplyBtn");
+      // Disabled for the whole request: a second click before the first
+      // response lands would push the same credential/model twice and could
+      // trigger two Render deploys.
+      validateBtn.disabled = true;
+      applyBtn.disabled = true;
+      try {
+        let body;
+        if (family === "github_app") {
           const fileBuffer = await guidedValidatedPayload.raw.get("credential_file").arrayBuffer();
-          credential = { service_account_b64: arrayBufferToBase64(fileBuffer) };
+          body = {
+            app_id: document.getElementById("guidedAppId").value,
+            private_key_b64: arrayBufferToBase64(fileBuffer),
+            installation_id: result.installation_id,
+          };
         } else {
-          credential = { api_key: guidedValidatedPayload.raw.get("api_key") };
+          const model = document.getElementById("guidedModelSelect").value;
+          const slot = parseInt(document.getElementById("guidedSlotSelect").value, 10);
+          let credential;
+          if (family === "vertex") {
+            const fileBuffer = await guidedValidatedPayload.raw.get("credential_file").arrayBuffer();
+            credential = { service_account_b64: arrayBufferToBase64(fileBuffer) };
+          } else {
+            credential = { api_key: guidedValidatedPayload.raw.get("api_key") };
+          }
+          const clearChoice = document.querySelector('input[name="projectChoice"]:checked');
+          body = {
+            slot,
+            credential,
+            model,
+            clear_gcp_project: Boolean(clearChoice && clearChoice.value === "clear"),
+          };
         }
-        const clearChoice = document.querySelector('input[name="projectChoice"]:checked');
-        body = {
-          slot,
-          credential,
-          model,
-          clear_gcp_project: Boolean(clearChoice && clearChoice.value === "clear"),
-        };
+        const resp = await fetch(`/api/environment/credential/${family}/apply`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const result2 = await resp.json();
+        // Report into #renderSaveResult, NOT #guidedModalResult: the latter
+        // lives inside the <dialog>, so close() below hid it the instant it
+        // was written and a partial apply ("failed: VERTEX_MODEL") was never
+        // visible at all -- leaving the refreshed var table, which shows one
+        // added row, as the operator's only feedback.
+        document.getElementById("renderSaveResult").textContent =
+          `applied: ${(result2.applied || []).join(LIST_SEPARATOR) || "-"}; failed: ${(result2.failed || []).map((f) => `${f.key} (${f.error})`).join(LIST_SEPARATOR) || "-"}`;
+        document.getElementById("guidedModal").close();
+        await fetchEnvironmentRender();
+        await fetchEnvironmentConfig();
+      } finally {
+        validateBtn.disabled = false;
+        // dialog close() (above) already ran resetGuidedValidation via the
+        // 'close' listener on success, which disabled this button -- mirror
+        // that invariant instead of unconditionally re-enabling it.
+        applyBtn.disabled = !guidedValidatedPayload;
       }
-      const resp = await fetch(`/api/environment/credential/${family}/apply`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const result2 = await resp.json();
-      document.getElementById("guidedModalResult").textContent =
-        `applied: ${result2.applied.join(LIST_SEPARATOR) || "-"}; failed: ${(result2.failed || []).map((f) => `${f.key} (${f.error})`).join(LIST_SEPARATOR) || "-"}`;
-      document.getElementById("guidedModal").close();
-      document.getElementById("guidedSetupSelect").value = "";
-      await fetchEnvironmentRender();
-      await fetchEnvironmentConfig();
     });
 
     document.getElementById("guidedCancelBtn").addEventListener("click", () => {
       document.getElementById("guidedModal").close();
+    });
+
+    // On the dialog's own close event, not per-button: Escape (and any other
+    // dismissal the browser handles itself) closes it without running the
+    // Cancel handler, which used to leave guidedSetupSelect stuck on the
+    // chosen family -- re-picking that same option then fires no `change`,
+    // so guided setup could not be reopened for it at all.
+    document.getElementById("guidedModal").addEventListener("close", () => {
       document.getElementById("guidedSetupSelect").value = "";
+      resetGuidedValidation();
     });
 
     document.getElementById("deleteConfirmOkBtn").addEventListener("click", async () => {

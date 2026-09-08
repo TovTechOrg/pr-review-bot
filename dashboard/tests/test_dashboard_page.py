@@ -297,3 +297,120 @@ async def test_static_fonts_are_served_publicly_without_a_session():
         resp = await client.get("/static/fonts/press-start-2p-v16-latin-regular.woff2")
     assert resp.status_code == 200
     assert resp.headers["content-type"] in ("font/woff2", "application/font-woff2")
+
+
+async def test_guided_modal_replaces_its_derived_block_instead_of_appending():
+    """Everything a successful Validate derives (model <select>, GCP_PROJECT
+    keep/clear radios, installation-id label) must land in its own
+    #guidedModalExtra container whose innerHTML is REPLACED per click.
+
+    It used to be appended into #guidedModalBody with
+    insertAdjacentHTML("beforeend"), and nothing removed the previous
+    click's copy -- so a second Validate produced two
+    id="guidedModelSelect" nodes and two projectChoice radio pairs.
+    getElementById then read the stale FIRST select, so the model the
+    operator picked in the visible one was silently discarded on Apply
+    (confirmed live with Playwright: picked gemini-pro-latest, the request
+    body carried the first select's value instead)."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'id="guidedModalExtra"' in body
+    assert 'document.getElementById("guidedModalExtra").innerHTML = extra;' in body
+    assert 'insertAdjacentHTML("beforeend", extra)' not in body
+    assert "function resetGuidedValidation" in body
+
+
+async def test_guided_modal_never_applies_an_empty_model():
+    """A credential that validates OK but reports no models leaves the model
+    <select> with zero options, so `.value` is "" -- Apply then posted
+    model:"" and Render rejects an empty env-var value, so only the
+    credential var landed and VERTEX_MODEL silently failed (reproduced live:
+    `applied: GCP_SERVICE_ACCOUNT_KEY_1; failed: VERTEX_MODEL`). Validate
+    must refuse to enable Apply in that state."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'if (family !== "github_app" && (result.models || []).length === 0)' in body
+    assert 't("env_guided_no_models")' in body
+
+
+async def test_guided_apply_reports_its_outcome_outside_the_dialog():
+    """The applied/failed line used to be written into #guidedModalResult,
+    which lives INSIDE <dialog id="guidedModal"> -- close() on the next line
+    hid it immediately, so a partial apply was never visible and the
+    refreshed var table (one added row) was the operator's only feedback.
+    It must report into #renderSaveResult, which sits outside the dialog."""
+    client = await _client()
+    body = (await client.get("/")).text
+    apply_start = body.index('document.getElementById("guidedApplyBtn").addEventListener')
+    handler = body[apply_start : body.index('document.getElementById("guidedCancelBtn")')]
+    assert 'document.getElementById("renderSaveResult").textContent' in handler
+    assert 'document.getElementById("guidedModalResult").textContent' not in handler
+
+
+async def test_guided_modal_resets_its_family_select_on_any_close():
+    """Escape-dismissing a <dialog> does not run the Cancel button's
+    handler, so resetting guidedSetupSelect there left it stuck on the
+    chosen family -- and re-picking that same option fires no `change`
+    event, making guided setup unreopenable for it. The reset belongs on the
+    dialog's own `close` event, which covers Cancel, Apply and Escape."""
+    client = await _client()
+    body = (await client.get("/")).text
+    close_listener = 'document.getElementById("guidedModal").addEventListener("close"'
+    assert close_listener in body
+    cancel_start = body.index('document.getElementById("guidedCancelBtn").addEventListener')
+    cancel = body[cancel_start : body.index(close_listener)]
+    assert 'guidedSetupSelect").value = ""' not in cancel
+
+
+async def test_guided_modal_invalidates_validation_when_the_credential_changes():
+    """Swapping the uploaded file / API key / App ID after a successful
+    Validate used to leave guidedValidatedPayload (and the enabled Apply
+    button) pointing at the PREVIOUSLY validated credential -- confirmed
+    live: file B was in the picker, file A's bytes were written to Render.
+    The key-slot select must stay exempt so changing it doesn't force
+    another live provider call."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'document.getElementById("guidedModalBody").addEventListener("input"' in body
+    assert 'if (event.target.id === "guidedSlotSelect") return;' in body
+
+
+async def test_guided_validate_guards_missing_inputs_before_calling_out():
+    """files[0] is undefined with nothing picked and FormData appends the
+    string "undefined" -- the backend 422s with no `error` field, which
+    rendered as a bare "✗ invalid: undefined". Guard locally instead, which
+    also avoids a pointless live provider call."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 't("env_guided_missing_input")' in body
+    assert 'formData.append("credential_file", document.getElementById' not in body
+
+
+async def test_guided_validate_and_apply_disable_themselves_while_in_flight():
+    """Neither button was disabled while its own fetch was in flight, so a
+    fast double-click on Validate could fire two live provider-validation
+    calls, and a fast double-click on Apply could push the same
+    credential/model twice and trigger two Render deploys. Both handlers
+    must disable themselves for the whole request and only re-enable Apply
+    when guidedValidatedPayload is still set (mirroring
+    resetGuidedValidation's own invariant), not unconditionally."""
+    client = await _client()
+    body = (await client.get("/")).text
+    validate_start = body.index('document.getElementById("guidedValidateBtn").addEventListener')
+    apply_start = body.index('document.getElementById("guidedApplyBtn").addEventListener')
+    validate_handler = body[validate_start:apply_start]
+    apply_handler = body[apply_start : body.index('document.getElementById("guidedCancelBtn")')]
+
+    assert "validateBtn.disabled = true;" in validate_handler
+    assert "applyBtn.disabled = !guidedValidatedPayload;" in validate_handler
+
+    assert "validateBtn.disabled = true;" in apply_handler
+    assert "applyBtn.disabled = true;" in apply_handler
+    assert "applyBtn.disabled = !guidedValidatedPayload;" in apply_handler
+
+
+async def test_guided_setup_strings_exist_in_both_languages():
+    client = await _client()
+    body = (await client.get("/")).text
+    for key in ("env_guided_no_models", "env_guided_missing_input"):
+        assert body.count(f"{key}:") == 2, key
