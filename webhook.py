@@ -139,6 +139,16 @@ async def _handle_pull_request_payload(payload: dict) -> None:
                 )
         return
 
+    # Best-effort, immediate "we saw your push" ack -- mirrors CodeRabbit's
+    # own eyes-reaction. The actual review is dispatched separately and can
+    # take a while (queue depth, provider backoff), so this is the fast
+    # signal a human watches for; a failure here must never block the
+    # durable enqueue below, which is the part that actually matters.
+    try:
+        await asyncio.to_thread(github_app.react_eyes_to_pr, repo_full_name, pr_number)
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to react to %s#%s", repo_full_name, pr_number)
+
     head_sha = (pull_request.get("head") or {}).get("sha")
     logger.info(
         "Enqueuing review ticket for %s#%s (head_sha=%s, provider=%s)",

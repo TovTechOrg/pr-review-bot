@@ -435,6 +435,23 @@ def fetch_pr_diff(repo_full_name: str, pr_number: int) -> PrDiff:
     return PrDiff(text="\n".join(chunks), repo_full_name=repo.full_name, draft=pr.draft)
 
 
+def react_eyes_to_pr(repo_full_name: str, pr_number: int) -> None:
+    """React to the PR itself with 👀, mirroring CodeRabbit's "I've seen your
+    push" ack -- immediate feedback that the webhook registered, well before
+    the actual review (dispatched separately, possibly much later) posts.
+
+    A PR is exposed via the Issues API for reactions (there is no PR-level
+    reactions endpoint), hence ``as_issue()``. GitHub's reactions API is
+    idempotent per (actor, content) pair, so a repeat call for the same PR
+    (e.g. a second ``synchronize`` before the first review lands) just
+    no-ops rather than stacking duplicate reactions.
+    """
+    gh = get_installation_client()
+    repo = gh.get_repo(repo_full_name)
+    pr = repo.get_pull(pr_number)
+    pr.as_issue().create_reaction("eyes")
+
+
 def upsert_comment(
     repo_full_name: str, pr_number: int, body: str, comment_id: int | None = None
 ) -> IssueComment:

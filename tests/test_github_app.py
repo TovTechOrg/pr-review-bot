@@ -189,6 +189,42 @@ def test_upsert_comment_does_not_pay_pygithubs_real_rate_limit_sleep(fake_transp
     )
 
 
+def test_react_eyes_to_pr_posts_an_eyes_reaction_to_the_issues_endpoint(fake_transport):
+    """A PR has no PR-level reactions endpoint -- reactions go through the
+    Issues API (as_issue()), which is why the POST target is /issues/{n}/
+    reactions, not /pulls/{n}/reactions.
+
+    as_issue() constructs a non-lazy Issue, whose __init__ immediately fires
+    a GET to complete its attributes -- unmocked, that GET falls through to
+    the (substring-matching) repo route below and comes back with the
+    repo's own "url" field, silently overwriting the Issue's url and
+    misdirecting the reaction POST at the repo instead of the issue. This
+    route is what that completing GET actually needs.
+    """
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}", _repo_json())
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}/pulls/{PR_NUMBER}", _pull_json())
+    fake_transport.route(
+        "GET",
+        f"/repos/{REPO_FULL_NAME}/issues/{PR_NUMBER}",
+        {"id": 1, "number": PR_NUMBER, "url": ISSUE_API_URL},
+    )
+    fake_transport.route(
+        "POST",
+        f"/repos/{REPO_FULL_NAME}/issues/{PR_NUMBER}/reactions",
+        {"id": 1, "content": "eyes"},
+        201,
+    )
+
+    github_app.react_eyes_to_pr(REPO_FULL_NAME, PR_NUMBER)
+
+    posted = [
+        r for r in fake_transport.requests
+        if r.method == "POST" and r.url.endswith(f"/issues/{PR_NUMBER}/reactions")
+    ]
+    assert len(posted) == 1
+    assert json.loads(posted[0].body) == {"content": "eyes"}
+
+
 def test_fetch_pr_diff_concatenates_file_patches(fake_transport):
     fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}", _repo_json())
     fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}/pulls/{PR_NUMBER}", _pull_json())

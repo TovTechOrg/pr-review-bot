@@ -6,6 +6,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from config import settings
+import github_app
 from main import app
 import webhook
 from review_queue import store
@@ -23,6 +24,12 @@ def _isolate(db, monkeypatch):
     monkeypatch.setattr(settings, "github_webhook_secret", TEST_SECRET)
     monkeypatch.setattr(settings, "llm_provider", "groq")
     monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
+    # Default no-op: every enqueue-path test below goes through this call
+    # now, and without a mock it would attempt a real GitHub API call (no
+    # real App credentials in this test environment) instead of just being
+    # irrelevant to whatever that test is actually checking. Tests that
+    # care about this call specifically override it themselves.
+    monkeypatch.setattr(github_app, "react_eyes_to_pr", lambda repo_full_name, pr_number: None)
     webhook.reset_dedup_cache()
     yield
     webhook.reset_dedup_cache()
@@ -134,6 +141,99 @@ async def test_opened_action_enqueues_ticket():
     assert ticket.repo_full_name == "owner/repo"
     assert ticket.pr_number == 7
     assert ticket.head_sha == "abc123"
+
+
+async def test_opened_action_reacts_with_eyes(monkeypatch):
+    """Mirrors CodeRabbit's own immediate-ack reaction -- fires for the same
+    actions that trigger a review, before the (possibly much later) actual
+    review is dispatched."""
+    reacted = []
+    monkeypatch.setattr(
+        github_app, "react_eyes_to_pr",
+        lambda repo_full_name, pr_number: reacted.append((repo_full_name, pr_number)),
+    )
+    payload = {
+        "action": "opened",
+        "repository": {"full_name": "owner/repo"},
+        "pull_request": {"number": 7, "head": {"sha": "abc123"}},
+    }
+    body = json.dumps(payload).encode()
+    headers = {
+        "X-Hub-Signature-256": _sign(body),
+        "X-GitHub-Delivery": "66666666-6666-6666-6666-666666666666",
+    }
+    async with await _client() as c:
+        response = await c.post("/webhook", content=body, headers=headers)
+
+    assert response.status_code == 202
+    assert reacted == [("owner/repo", 7)]
+
+
+async def test_react_eyes_failure_does_not_block_enqueue(monkeypatch):
+    """Best-effort: a broken/rate-limited reaction call must never prevent
+    the durable enqueue, which is the part that actually matters."""
+
+    def _boom(repo_full_name, pr_number):
+        raise RuntimeError("reactions API unavailable")
+
+    monkeypatch.setattr(github_app, "react_eyes_to_pr", _boom)
+    payload = {
+        "action": "opened",
+        "repository": {"full_name": "owner/repo"},
+        "pull_request": {"number": 8, "head": {"sha": "def456"}},
+    }
+    body = json.dumps(payload).encode()
+    headers = {
+        "X-Hub-Signature-256": _sign(body),
+        "X-GitHub-Delivery": "77777777-7777-7777-7777-777777777777",
+    }
+    async with await _client() as c:
+        response = await c.post("/webhook", content=body, headers=headers)
+
+    assert response.status_code == 202
+    ticket = store.claim_next_due(now="2026-01-01T12:00:00+00:00")
+    assert ticket is not None
+    assert ticket.pr_number == 8
+
+
+async def test_closed_action_does_not_react_with_eyes(monkeypatch, db_query):
+    """The reaction is only for review-triggering actions -- a cancel must
+    not react, since nothing new is actually being reviewed."""
+    reacted = []
+    monkeypatch.setattr(
+        github_app, "react_eyes_to_pr",
+        lambda repo_full_name, pr_number: reacted.append((repo_full_name, pr_number)),
+    )
+    opened_payload = {
+        "action": "opened",
+        "repository": {"full_name": "owner/repo"},
+        "pull_request": {"number": 9, "head": {"sha": "abc123"}},
+    }
+    closed_payload = {
+        "action": "closed",
+        "repository": {"full_name": "owner/repo"},
+        "pull_request": {"number": 9, "head": {"sha": "abc123"}},
+    }
+    async with await _client() as c:
+        await c.post(
+            "/webhook",
+            content=json.dumps(opened_payload).encode(),
+            headers={
+                "X-Hub-Signature-256": _sign(json.dumps(opened_payload).encode()),
+                "X-GitHub-Delivery": "88888888-8888-8888-8888-888888888888",
+            },
+        )
+        reacted.clear()
+        await c.post(
+            "/webhook",
+            content=json.dumps(closed_payload).encode(),
+            headers={
+                "X-Hub-Signature-256": _sign(json.dumps(closed_payload).encode()),
+                "X-GitHub-Delivery": "99999999-9999-9999-9999-999999999999",
+            },
+        )
+
+    assert reacted == []
 
 
 async def test_ready_for_review_action_enqueues_ticket():
