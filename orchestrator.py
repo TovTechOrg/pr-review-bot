@@ -40,13 +40,23 @@ _SPECIALIST_NAMES = ("Security", "Performance", "Code Quality")
 
 
 def _active_model() -> str:
-    """The model name for whichever provider is actually active.
+    """The model name for whichever (provider, slot) is actually active.
 
     Delegates to providers/active_model.py, the single resolver shared with
     factory.get_provider() -- so the model reported in the PR comment is
-    always the model the call actually used.
+    always the model the call actually used. Only ever called after at least
+    one specialist has already run against this same (provider, slot) via
+    get_provider() (which raises if unconfigured), so a None here would mean
+    the cache was reset between that call and this one -- treated as the
+    same class of real, visible failure as the original get_provider() raise
+    would have been, not silently swallowed.
     """
-    return active_model(active_provider())
+    provider = active_provider()
+    index = active_key_index(provider)
+    model = active_model(provider, index)
+    if model is None:
+        raise ValueError(f"no model configured for provider={provider!r} slot={index}")
+    return model
 
 
 @dataclass

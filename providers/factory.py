@@ -20,10 +20,15 @@ trivial memory cost, no explicit teardown needed.
 
 from __future__ import annotations
 
-from config import settings
-from providers import credentials, key_index, registry, vertex_credentials
+from providers import (
+    active_model,
+    active_vertex_slot,
+    credentials,
+    key_index,
+    registry,
+    vertex_credentials,
+)
 from providers.active import active_provider
-from providers.active_model import active_model
 from providers.base import LLMProvider
 
 _instances: dict[tuple[str, int, str], LLMProvider] = {}
@@ -37,9 +42,7 @@ def _build(provider: str, index: int, model: str) -> LLMProvider:
     # resolving first would raise the wrong exception type before ever
     # reaching the check below.
     if provider not in registry.PROVIDERS:
-        raise ValueError(
-            f"Unknown provider: {provider!r} (expected 'gemini', 'groq', or 'vertex')"
-        )
+        raise ValueError(f"Unknown provider: {provider!r} (expected 'gemini', 'groq', or 'vertex')")
     if provider == "vertex":
         # Deliberately ahead of the generic empty-credential fast-fail below:
         # for vertex an empty resolved credential is legitimate (it means
@@ -51,12 +54,17 @@ def _build(provider: str, index: int, model: str) -> LLMProvider:
         # var, reading a file -- so this is still a no-network fast-fail, just
         # performed after credential resolution instead of before it.
         info = vertex_credentials.resolve_service_account_info(index)
-        project = settings.vertex_gcp_project or (info or {}).get("project_id", "")
+        project = active_vertex_slot.active_vertex_project(index) or (info or {}).get(
+            "project_id", ""
+        )
+        location = active_vertex_slot.active_vertex_location(index)
         if not project:
             raise ValueError(
-                "no credential configured for provider='vertex': VERTEX_GCP_PROJECT not set "
-                "and no service-account key found to derive it from"
+                "no credential configured for provider='vertex': no project configured for "
+                f"slot={index} and no service-account key found to derive it from"
             )
+        if not location:
+            raise ValueError(f"no location configured for provider='vertex' slot={index}")
         # Deferred: google.genai is a large SDK (~4.2s import cost, measured
         # via -X importtime) that every test/request path through
         # specialists/base.py's factory import used to pay eagerly, even
@@ -66,7 +74,7 @@ def _build(provider: str, index: int, model: str) -> LLMProvider:
 
         return VertexProvider(
             project=project,
-            location=settings.vertex_gcp_location,
+            location=location,
             service_account_info=info,
             model=model,
         )
@@ -80,8 +88,7 @@ def _build(provider: str, index: int, model: str) -> LLMProvider:
     # returns a non-empty value here and this check never fires for it.
     if not api_key:
         raise ValueError(
-            f"no credential configured for provider={provider!r} index={index} "
-            f"({env_name} not set)"
+            f"no credential configured for provider={provider!r} index={index} ({env_name} not set)"
         )
     if provider == "gemini":
         # Deferred for the same reason as VertexProvider above -- gemini and
@@ -107,7 +114,9 @@ def get_provider() -> LLMProvider:
     # while the PR comment reported the new model. Same mechanism this cache
     # already relies on for a key swap -- a changed value is simply a miss on a
     # new tuple.
-    model = active_model(provider)
+    model = active_model.active_model(provider, index)
+    if model is None:
+        raise ValueError(f"no model configured for provider={provider!r} slot={index}")
     cache_key = (provider, index, model)
     if cache_key not in _instances:
         _instances[cache_key] = _build(provider, index, model)

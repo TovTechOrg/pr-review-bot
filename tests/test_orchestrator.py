@@ -9,8 +9,25 @@ from types import SimpleNamespace
 import pytest
 
 from config import settings
+from providers import active_model
 from review_queue import dispatcher_tuning_config
 from specialists.schemas import SpecialistResult
+
+
+@pytest.fixture(autouse=True)
+def _default_active_model():
+    """orchestrator._active_model() (via get_provider()/_active_model at the
+    end of attempt_review) is DB-only, no env fallback (Task 7) -- seeded
+    here to slot 0 for all three providers so tests not specifically
+    exercising model resolution don't need their own setup. A test that
+    cares about a specific model overrides this via active_model.set_override_cache."""
+    active_model.set_override_cache({
+        ("groq", 0): "llama-3.3-70b-versatile",
+        ("gemini", 0): "gemini-flash-latest",
+        ("vertex", 0): "gemini-2.5-flash",
+    })
+    yield
+    active_model.reset_override_cache()
 
 
 @pytest.fixture(autouse=True)
@@ -526,14 +543,15 @@ async def test_attempt_review_still_migrates_a_rename_on_an_empty_diff(monkeypat
     assert migrated == {"old": "owner/old-name", "new": "owner/renamed"}
 
 
-def test_active_model_resolves_per_provider_through_the_registry(monkeypatch):
+def test_active_model_resolves_per_provider_through_the_registry():
     import orchestrator
-    from config import settings
     from providers import active
 
-    monkeypatch.setattr(settings, "gemini_model", "model-gemini")
-    monkeypatch.setattr(settings, "groq_model", "model-groq")
-    monkeypatch.setattr(settings, "vertex_model", "model-vertex")
+    active_model.set_override_cache({
+        ("gemini", 0): "model-gemini",
+        ("groq", 0): "model-groq",
+        ("vertex", 0): "model-vertex",
+    })
     for provider, expected in (
         ("gemini", "model-gemini"),
         ("groq", "model-groq"),

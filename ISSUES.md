@@ -166,6 +166,12 @@ siblings) an explicit bypass fixture
 (`tests/test_deploy_script.py::_real_db_target`) rather than have them
 accidentally exercise the refusal path instead of the real one._
 
+### `scripts/set_override.py --model`/`--clear-model` writes to a column the dispatcher no longer reads
+- **Found during:** 2026-09-08 slotted-config-and-db-delegation implementation, Task 10 (factory.py wiring to per-slot `slot_config`)
+- **What:** `set_override.py`'s `--model`/`--clear-model` flags still call `store.set_model_override`/`store.get_model_override` (the old flat, non-slotted `runtime_config.{provider}_model` columns). Since Task 9 switched `dispatcher.py`'s refresh to `store.get_all_slot_configs()` (the new per-`(provider, slot_index)` `slot_config` table), a write via this CLI no longer has any effect on what `providers/factory.py` actually resolves -- the flag silently no-ops in production. The script's own tests (`tests/test_set_override_script.py`) still pass because they assert against `store.get_model_override()` directly, the same flat column the CLI still writes -- they don't exercise the dispatcher's actual read path, so the regression isn't caught there.
+- **Why parked:** not in this plan's (docs/superpowers/specs/2026-09-08-slotted-config-and-db-delegation-design.md) file list for any task -- fixing it properly means redesigning the CLI's `--model` flag to be slot-aware (does it target the currently-active slot for that provider, or take an explicit `--index`?), which is a real CLI-UX decision this plan never made, not a mechanical follow-through.
+- **Follow-up:** decide the CLI shape (most likely: `--model` targets `--index`'s slot if given, else the provider's currently-active slot) and switch the write/read to `store.set_slot_config`/`store.get_slot_config`, mirroring how `dashboard/environment.py`'s guided-setup apply flow (this plan's Task 12) already writes slot_config.
+
 _Everything closed as of 2026-09-06 (the standalone-repo restructure's doc/
 cosmetic gaps, every onboarding-frame parked item — all mooted by the
 2026-09-05 removal of `onboarding/` into its own repo, the dashboard

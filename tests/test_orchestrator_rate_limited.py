@@ -9,6 +9,7 @@ import pytest
 from types import SimpleNamespace
 
 from config import settings
+from providers import active_model
 from providers.base import RateLimited
 from review_queue import dispatcher_tuning_config
 from specialists.schemas import SpecialistResult
@@ -23,6 +24,14 @@ def _ok(name):
 @pytest.fixture(autouse=True)
 def _provider(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "groq")
+
+
+@pytest.fixture(autouse=True)
+def _default_active_model():
+    """See tests/test_orchestrator.py's identical fixture docstring."""
+    active_model.set_override_cache({("groq", 0): "llama-3.3-70b-versatile"})
+    yield
+    active_model.reset_override_cache()
 
 
 @pytest.fixture(autouse=True)

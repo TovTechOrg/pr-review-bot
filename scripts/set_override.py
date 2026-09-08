@@ -186,13 +186,15 @@ def _print_inventory() -> int:
         render_note = "(no RENDER_API_KEY; local slots only)"
 
     index_overrides: dict[str, int] = {}
-    model_overrides: dict[str, str] = {}
+    slot_configs: dict[tuple[str, int], dict] = {}
     if settings.database_url:
         try:
             store.init_pool()
             index_overrides = store.get_all_key_index_overrides()
-            model_overrides = store.get_all_model_overrides()
-            active_model.set_override_cache(model_overrides)
+            slot_configs = store.get_all_slot_configs()
+            active_model.set_override_cache(
+                {key: config["model"] for key, config in slot_configs.items() if config["model"]}
+            )
         # deliberate: the DB being unreachable degrades to "env values", never a failure
         except Exception as exc:  # noqa: BLE001
             render_note = f"{render_note} (DB unreachable: {type(exc).__name__})".strip()
@@ -213,8 +215,11 @@ def _print_inventory() -> int:
             for key in render_keys
             if (match := slot_pattern.match(key))
         )
+        active_index = index_overrides.get(provider, 0)
         index_source = "override" if provider in index_overrides else "default"
-        model_source = "override" if provider in model_overrides else "env"
+        model_source = (
+            "override" if (provider, active_index) in slot_configs else "unconfigured"
+        )
         # vertex-only caveat: "local slots" above only reflects
         # VERTEX_GCP_SERVICE_ACCOUNT_KEY (and numbered siblings), never implicit ADC
         # -- also valid per vertex_credentials.py -- so "local slots -" here
@@ -227,8 +232,8 @@ def _print_inventory() -> int:
         print(
             f"{provider}: local slots {list(local) or '-'}, "
             f"render slots {hosted or '-'}, "
-            f"active index {index_overrides.get(provider, 0)} ({index_source}), "
-            f"model {active_model.active_model(provider)} ({model_source})"
+            f"active index {active_index} ({index_source}), "
+            f"model {active_model.active_model(provider, active_index)} ({model_source})"
             f"{vertex_note}"
         )
         for index in sorted(set(local) | set(hosted)):

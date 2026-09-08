@@ -379,7 +379,11 @@ def test_list_reports_slots_and_active_state(capsys, monkeypatch):
     from scripts import _override
 
     monkeypatch.setattr(settings, "groq_api_key", "sentinel-groq")
-    monkeypatch.setattr(settings, "groq_model", "llama-3.3-70b-versatile")
+    store.set_slot_config(
+        "groq", 0,
+        model="llama-3.3-70b-versatile", vertex_gcp_project=None, vertex_gcp_location=None,
+        now="2026-09-08T00:00:00+00:00",
+    )
     monkeypatch.setattr(
         _override, "local_slot_indices",
         lambda base, env_path=".env": (1,) if base == "GROQ_API_KEY" else (),
