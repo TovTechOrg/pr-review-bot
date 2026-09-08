@@ -1131,6 +1131,33 @@ def get_all_slot_configs() -> dict[tuple[str, int], dict]:
     }
 
 
+def get_dispatcher_tuning_config() -> dict:
+    """The 9 tuning-knob values in force. All 9 keys always present; a value
+    is None only if the singleton row itself doesn't exist yet (should never
+    happen once _seed_runtime_config_defaults has run) -- see
+    review_queue/dispatcher_tuning_config.py for the no-fallback policy this
+    feeds."""
+    with _require_pool().connection() as conn:
+        row = conn.execute(
+            "SELECT llm_request_timeout_seconds, dispatcher_default_retry_after_seconds,"
+            "    dispatcher_failure_base_backoff_seconds, dispatcher_failure_max_backoff_seconds,"
+            "    dispatcher_max_failure_attempts, dispatcher_max_notice_post_attempts,"
+            "    dispatcher_min_retry_after_seconds, dispatcher_backoff_jitter_seconds,"
+            "    dispatcher_notice_sweep_batch_size "
+            "FROM runtime_config WHERE id = 1"
+        ).fetchone()
+    keys = (
+        "llm_request_timeout_seconds", "dispatcher_default_retry_after_seconds",
+        "dispatcher_failure_base_backoff_seconds", "dispatcher_failure_max_backoff_seconds",
+        "dispatcher_max_failure_attempts", "dispatcher_max_notice_post_attempts",
+        "dispatcher_min_retry_after_seconds", "dispatcher_backoff_jitter_seconds",
+        "dispatcher_notice_sweep_batch_size",
+    )
+    if row is None:
+        return {k: None for k in keys}
+    return {k: row[k] for k in keys}
+
+
 def get_usage_cap_overrides() -> tuple[int | None, str | None]:
     """(token cap, reset time) overrides, or Nones when unset.
 

@@ -86,7 +86,7 @@ def db(db_url, monkeypatch):
     monkeypatch.setattr(settings, "database_url", db_url)
     store.init_pool()
     with store._require_pool().connection() as conn:
-        conn.execute("TRUNCATE tickets, runtime_config, reviews RESTART IDENTITY")
+        conn.execute("TRUNCATE tickets, runtime_config, slot_config, reviews RESTART IDENTITY")
     yield
 
 
