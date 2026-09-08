@@ -635,7 +635,12 @@ def test_init_pool_seeds_runtime_config_defaults_on_a_fresh_table(db_query):
     store.init_pool()
     row = db_query(
         "SELECT cooldown_base_seconds, cooldown_max_seconds, cooldown_factor, "
-        "key_usage_token_cap, key_usage_reset_time_utc, review_draft_prs "
+        "key_usage_token_cap, key_usage_reset_time_utc, review_draft_prs, "
+        "llm_request_timeout_seconds, dispatcher_default_retry_after_seconds, "
+        "dispatcher_failure_base_backoff_seconds, dispatcher_failure_max_backoff_seconds, "
+        "dispatcher_max_failure_attempts, dispatcher_max_notice_post_attempts, "
+        "dispatcher_min_retry_after_seconds, dispatcher_backoff_jitter_seconds, "
+        "dispatcher_notice_sweep_batch_size, dispatcher_idle_sleep_seconds "
         "FROM runtime_config WHERE id = 1"
     )
     assert row == [
@@ -646,6 +651,16 @@ def test_init_pool_seeds_runtime_config_defaults_on_a_fresh_table(db_query):
             settings.key_usage_token_cap,
             settings.key_usage_reset_time_utc.isoformat(),
             settings.review_draft_prs,
+            settings.llm_request_timeout_seconds,
+            settings.dispatcher_default_retry_after_seconds,
+            settings.dispatcher_failure_base_backoff_seconds,
+            settings.dispatcher_failure_max_backoff_seconds,
+            settings.dispatcher_max_failure_attempts,
+            settings.dispatcher_max_notice_post_attempts,
+            settings.dispatcher_min_retry_after_seconds,
+            settings.dispatcher_backoff_jitter_seconds,
+            settings.dispatcher_notice_sweep_batch_size,
+            settings.dispatcher_idle_sleep_seconds,
         )
     ]
 

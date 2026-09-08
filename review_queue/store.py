@@ -253,13 +253,26 @@ def _seed_runtime_config_defaults(conn) -> None:
     provider/key/model without a redeploy"), not env-mirrored config with a
     meaningful default to seed -- NULL is their correct steady state, not a
     placeholder for one.
+
+    The 9 dispatcher/timeout tuning knobs (llm_request_timeout_seconds
+    through dispatcher_idle_sleep_seconds) follow the exact same contract as
+    the 6 columns above: seeded from Settings on first boot, then DB-only --
+    Settings is never read for them again at runtime (see
+    docs/superpowers/specs/2026-09-08-slotted-config-and-db-delegation-
+    design.md section 5).
     """
     conn.execute(
         "INSERT INTO runtime_config ("
         "    id, updated_at, cooldown_base_seconds, cooldown_max_seconds,"
         "    cooldown_factor, key_usage_token_cap, key_usage_reset_time_utc,"
-        "    review_draft_prs"
-        ") VALUES (1, %s, %s, %s, %s, %s, %s, %s) "
+        "    review_draft_prs, llm_request_timeout_seconds,"
+        "    dispatcher_default_retry_after_seconds,"
+        "    dispatcher_failure_base_backoff_seconds,"
+        "    dispatcher_failure_max_backoff_seconds, dispatcher_max_failure_attempts,"
+        "    dispatcher_max_notice_post_attempts, dispatcher_min_retry_after_seconds,"
+        "    dispatcher_backoff_jitter_seconds, dispatcher_notice_sweep_batch_size,"
+        "    dispatcher_idle_sleep_seconds"
+        ") VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
         "ON CONFLICT (id) DO NOTHING",
         (
             datetime.now(timezone.utc).isoformat(),
@@ -269,6 +282,16 @@ def _seed_runtime_config_defaults(conn) -> None:
             settings.key_usage_token_cap,
             settings.key_usage_reset_time_utc.isoformat(),
             settings.review_draft_prs,
+            settings.llm_request_timeout_seconds,
+            settings.dispatcher_default_retry_after_seconds,
+            settings.dispatcher_failure_base_backoff_seconds,
+            settings.dispatcher_failure_max_backoff_seconds,
+            settings.dispatcher_max_failure_attempts,
+            settings.dispatcher_max_notice_post_attempts,
+            settings.dispatcher_min_retry_after_seconds,
+            settings.dispatcher_backoff_jitter_seconds,
+            settings.dispatcher_notice_sweep_batch_size,
+            settings.dispatcher_idle_sleep_seconds,
         ),
     )
 
