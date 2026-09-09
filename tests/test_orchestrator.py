@@ -106,7 +106,6 @@ async def test_run_review_runs_all_three_specialists_and_posts_comment(monkeypat
 
     assert posted["repo"] == "owner/repo"
     assert posted["pr"] == 99
-    assert "PR #99" in posted["body"]
     assert posted["comment_id_in"] is None   # run_review never threads a comment_id
 
 
@@ -155,7 +154,8 @@ async def test_run_review_survives_one_specialist_raising(monkeypatch):
     assert by_name["Performance"].status == "failed"
     assert "boom" in by_name["Performance"].error
 
-    assert "❌ Performance check failed" in posted["body"]
+    assert "| Performance | ❌ check failed |" in posted["body"]
+    assert "boom" in posted["body"]
     assert "Security" in posted["body"]
     assert "Code Quality" in posted["body"]
     assert posted["comment_id_in"] is None   # run_review never threads a comment_id

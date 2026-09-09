@@ -84,7 +84,6 @@ def test_format_comment_renders_findings_table():
     )
     body = format_comment(result)
 
-    assert "PR #42" in body
     assert "groq" in body
     assert "llama-3.3-70b-versatile" in body
     assert "Security" in body
@@ -92,6 +91,100 @@ def test_format_comment_renders_findings_table():
     assert "Hardcoded API key" in body
     assert "Move to env var" in body
     assert "critical" in body
+
+
+def test_format_comment_header_has_no_robot_emoji_or_pr_number():
+    result = ReviewResult(
+        pr_number=42,
+        provider="groq",
+        model="llama-3.3-70b-versatile",
+        results=[SpecialistResult(name="Security", status="ok", findings=[], elapsed_ms=100)],
+        total_elapsed_ms=100,
+        total_tokens_in=10,
+        total_tokens_out=5,
+        est_cost_usd=0.0001,
+    )
+    body = format_comment(result)
+    assert "## Automated Code Review\n" in body
+    assert "🤖" not in body
+    assert "PR #" not in body
+
+
+def test_format_comment_section_headers_have_no_emoji_or_finding_count():
+    result = ReviewResult(
+        pr_number=1,
+        provider="groq",
+        model="llama-3.3-70b-versatile",
+        results=[
+            SpecialistResult(
+                name="Security",
+                status="ok",
+                findings=[
+                    {
+                        "severity": "critical",
+                        "file": "app.py",
+                        "line": 14,
+                        "description": "Hardcoded API key",
+                        "fix": "Move to env var",
+                    }
+                ],
+                elapsed_ms=100,
+            )
+        ],
+        total_elapsed_ms=100,
+        total_tokens_in=1,
+        total_tokens_out=1,
+        est_cost_usd=0.0,
+    )
+    body = format_comment(result)
+    assert "### Security\n" in body
+    assert "🔒" not in body
+    assert "finding" not in body.split("### Security\n", 1)[1].split("\n", 1)[0]
+
+
+def test_format_comment_summary_table_lists_each_specialists_result():
+    result = ReviewResult(
+        pr_number=1,
+        provider="groq",
+        model="llama-3.3-70b-versatile",
+        results=[
+            SpecialistResult(
+                name="Security",
+                status="ok",
+                findings=[
+                    {
+                        "severity": "critical",
+                        "file": "app.py",
+                        "line": 14,
+                        "description": "Hardcoded API key",
+                        "fix": "Move to env var",
+                    },
+                    {
+                        "severity": "high",
+                        "file": "db.py",
+                        "line": 44,
+                        "description": "SQL via f-string",
+                        "fix": "Parameterize",
+                    },
+                ],
+                elapsed_ms=100,
+            ),
+            SpecialistResult(name="Performance", status="ok", findings=[], elapsed_ms=50),
+            SpecialistResult(
+                name="Code Quality", status="failed", findings=[], error="boom", elapsed_ms=10
+            ),
+        ],
+        total_elapsed_ms=160,
+        total_tokens_in=1,
+        total_tokens_out=1,
+        est_cost_usd=0.0,
+    )
+    body = format_comment(result)
+    summary = body.split("### Security", 1)[0]
+    assert "| Specialist | Result |" in summary
+    assert "| Security | ❌ 2 findings |" in summary
+    assert "| Performance | ✅ no findings |" in summary
+    assert "| Code Quality | ❌ check failed |" in summary
 
 
 def test_format_comment_renders_no_findings():

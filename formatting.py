@@ -30,11 +30,10 @@ _SEVERITY_EMOJI = {"critical": "🔴", "high": "🟠", "medium": "🟡"}
 
 PLACEHOLDER_DAILY_THRESHOLD_SECONDS = 300
 
-# Per-specialist section rendering config: emoji/title + table columns.
+# Per-specialist section rendering config: table columns.
 # Each column is (dict-key-in-finding, header-label, optional formatter).
 _SECTION_CONFIG: dict[str, dict] = {
     "Security": {
-        "emoji": "🔒",
         "columns": [
             ("severity", "Severity", lambda v: f"{_SEVERITY_EMOJI.get(v, '')} {v}".strip()),
             ("_file_line", "Line", None),
@@ -43,7 +42,6 @@ _SECTION_CONFIG: dict[str, dict] = {
         ],
     },
     "Performance": {
-        "emoji": "⚡",
         "columns": [
             ("estimated_impact", "Impact", lambda v: f"{_SEVERITY_EMOJI.get(v, '')} {v}".strip()),
             ("_file_line", "Line", None),
@@ -52,7 +50,6 @@ _SECTION_CONFIG: dict[str, dict] = {
         ],
     },
     "Code Quality": {
-        "emoji": "🧹",
         "columns": [
             ("category", "Category", None),
             ("_file_line", "Line", None),
@@ -73,23 +70,36 @@ def _file_line(finding: dict) -> str:
     return f"`{_escape_cell(finding.get('file', '?'))}:{finding.get('line', '?')}`"
 
 
+def _summary_row(spec: SpecialistResult) -> str:
+    if spec.status == "failed":
+        result = "❌ check failed"
+    elif not spec.findings:
+        result = "✅ no findings"
+    else:
+        plural = "s" if len(spec.findings) != 1 else ""
+        result = f"❌ {len(spec.findings)} finding{plural}"
+    return f"| {spec.name} | {result} |"
+
+
+def _render_summary_table(results: list[SpecialistResult]) -> str:
+    rows = "\n".join(_summary_row(spec) for spec in results)
+    return f"| Specialist | Result |\n| --- | --- |\n{rows}\n"
+
+
 def _render_section(spec: SpecialistResult) -> str:
-    config = _SECTION_CONFIG.get(spec.name, {"emoji": "", "columns": []})
-    emoji = config["emoji"]
+    config = _SECTION_CONFIG.get(spec.name, {"columns": []})
 
     if spec.status == "failed":
         return (
-            f"### ❌ {spec.name} check failed\n"
+            f"### {spec.name}\n"
+            f"❌ check failed\n"
             f"> `{_escape_cell(spec.error)}` — other checks completed normally.\n"
         )
 
     if not spec.findings:
-        return f"### {emoji} {spec.name} — ✅ no findings\n"
+        return f"### {spec.name}\n✅ no findings\n"
 
-    header = (
-        f"### {emoji} {spec.name} — {len(spec.findings)} finding"
-        f"{'s' if len(spec.findings) != 1 else ''}\n"
-    )
+    header = f"### {spec.name}\n"
     columns = config["columns"]
     col_headers = " | ".join(label for _, label, _ in columns)
     col_sep = " | ".join("---" for _ in columns)
@@ -120,7 +130,7 @@ def format_comment(result: ReviewResult) -> str:
     )
 
     header = (
-        f"## 🤖 Automated Code Review — PR #{result.pr_number}\n"
+        f"## Automated Code Review\n"
         f"_{n} {plural} · {result.model} ({result.provider}) · {runtime_s:.1f}s{cost_str}_\n"
     )
     if result.diff_truncated:
@@ -129,6 +139,7 @@ def format_comment(result: ReviewResult) -> str:
             "truncated — some changes may not have been reviewed.\n"
         )
 
+    summary = _render_summary_table(result.results)
     sections = "\n".join(_render_section(spec) for spec in result.results)
 
     footer = (
@@ -138,7 +149,7 @@ def format_comment(result: ReviewResult) -> str:
         f"provider: {result.provider}</sub>\n"
     )
 
-    body = f"{header}\n{sections}{footer}"
+    body = f"{header}\n{summary}\n{sections}{footer}"
     return f"{COMMENT_MARKER}\n{body}"
 
 
@@ -165,7 +176,7 @@ def format_placeholder(
       (review_queue/dispatcher_tuning_config.py). Names the cause plainly so
       an operator doesn't mistake a stuck queue for a provider outage.
     """
-    header = f"## 🤖 Automated Code Review — PR #{pr_number}\n"
+    header = "## Automated Code Review\n"
     eta = (now + timedelta(seconds=retry_after)).strftime("%H:%M UTC")
     if reason == "config":
         note = (
@@ -193,7 +204,7 @@ def format_failure(pr_number: int, attempts: int) -> str:
     """Marker-prefixed comment shown when a review is abandoned after repeated
     hard failures AND no prior good review exists to preserve. Shows only the
     attempt count — never raw exception text (secrets hygiene)."""
-    header = f"## 🤖 Automated Code Review — PR #{pr_number}\n"
+    header = "## Automated Code Review\n"
     plural = "attempt" if attempts == 1 else "attempts"
     note = (
         f"❌ Automated review could not be completed after {attempts} {plural} "

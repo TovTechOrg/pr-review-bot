@@ -112,7 +112,6 @@ async def test_attempt_review_completes_and_posts_when_ok(monkeypatch):
 
     assert isinstance(outcome, orchestrator.ReviewCompleted)
     assert outcome.review.pr_number == 2
-    assert "PR #2" in posted["body"]
     assert posted["comment_id_in"] == 555   # incoming id threaded to the post
     assert outcome.comment_id == 222         # posted comment's id captured
 

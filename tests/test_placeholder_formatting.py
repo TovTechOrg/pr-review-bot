@@ -11,7 +11,9 @@ NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 def test_short_wait_is_rate_limit_wording_and_has_marker():
     body = format_placeholder(pr_number=42, retry_after=30.0, now=NOW)
     assert COMMENT_MARKER in body
-    assert "PR #42" in body
+    assert "## Automated Code Review\n" in body
+    assert "PR #" not in body
+    assert "🤖" not in body
     assert "rate limit" in body.lower()
 
 
@@ -28,7 +30,8 @@ def test_format_failure_has_marker_pr_and_attempts_no_error_text():
 
     body = format_failure(pr_number=42, attempts=5)
     assert COMMENT_MARKER in body
-    assert "PR #42" in body
+    assert "## Automated Code Review\n" in body
+    assert "PR #" not in body
     assert "5" in body                       # attempt count surfaced
     assert "traceback" not in body.lower()   # no raw error/exception text
 
@@ -59,7 +62,7 @@ def test_usage_cap_placeholder_is_distinct_from_a_provider_rate_limit():
     operator debugging a stalled review needs to know which limit hit."""
     body = format_placeholder(pr_number=42, retry_after=6 * 3600, now=NOW, reason="usage_cap")
     assert COMMENT_MARKER in body
-    assert "PR #42" in body
+    assert "## Automated Code Review\n" in body
     assert "usage limit" in body.lower()
     assert "not a provider rate limit" in body.lower()
     assert "18:00 UTC" in body                      # ETA still computed from now+retry_after
@@ -74,9 +77,9 @@ def test_usage_cap_placeholder_wording_ignores_the_wait_magnitude():
     assert "12:00 UTC" in short                     # now + 30s still rounds to 12:00
 
 
-def test_placeholder_default_reason_is_byte_identical_to_the_old_output():
-    """Every existing call site passes no `reason` -- their output must not
-    shift by a single character (design doc §4.1)."""
+def test_placeholder_default_reason_is_byte_identical_to_explicit_provider():
+    """Every existing call site passes no `reason` -- it must render
+    byte-identically to passing reason="provider" explicitly."""
     for retry_after in (30.0, 6 * 3600):
         assert format_placeholder(42, retry_after, NOW) == format_placeholder(
             42, retry_after, NOW, reason="provider"
