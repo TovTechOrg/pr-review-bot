@@ -1,4 +1,4 @@
-# Step 5: Create the Supabase project
+# Step 4: Create the Supabase project
 
 The durable queue lives in Supabase Postgres. `store.py` is psycopg3-only,
 so a real reachable Postgres is a hard requirement.
@@ -8,11 +8,11 @@ so a real reachable Postgres is a hard requirement.
 1. Create a project at <https://supabase.com>.
 2. **Wait until the dashboard reports the project ready** (~2 minutes).
 
-!!! warning "Wait for ready before deploying"
+!!! warning "Wait for ready before continuing"
     A connection attempt against a still-provisioning project fails, and
     Render does **not** retry a failed deploy — see Step 7's troubleshooting
     note. Confirm the dashboard shows the project ready before moving on to
-    Step 6.
+    Step 5, which needs a live `DATABASE_URL` to configure the LLM provider.
 
 ## Copy the connection string
 
@@ -44,4 +44,4 @@ not enforce this.
 
 ## Next
 
-Continue to [Step 6: create the Render service](06-render.md).
+Continue to [Step 5: configure an LLM provider](05-llm-provider.md).

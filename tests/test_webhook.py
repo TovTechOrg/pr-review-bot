@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 from config import settings
 import github_app
 from main import app
+from providers import active
 import webhook
 from review_queue import store
 
@@ -22,7 +23,7 @@ def _sign(body: bytes, secret: str = TEST_SECRET) -> str:
 @pytest.fixture(autouse=True)
 def _isolate(db, monkeypatch):
     monkeypatch.setattr(settings, "github_webhook_secret", TEST_SECRET)
-    monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(active, "_override", "groq")
     monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
     # Default no-op: every enqueue-path test below goes through this call
     # now, and without a mock it would attempt a real GitHub API call (no

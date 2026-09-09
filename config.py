@@ -17,7 +17,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # unlisted key is found in .env.config.
 OPERATIONAL_KEYS = frozenset(
     {
-        "LLM_PROVIDER",
         "GEMINI_MODEL",
         "GROQ_MODEL",
         "VERTEX_MODEL",
@@ -94,14 +93,6 @@ class Settings(BaseSettings):
     dashboard_password: str = ""
     dashboard_session_secret: str = ""
 
-    # No implicit default: guessing a provider means silently running (and
-    # billing) against one the operator never chose. Validated in
-    # main.py's lifespan rather than as a pydantic required field -- a
-    # required field would raise the moment anything first reads `settings`
-    # (see the lazy `__getattr__` below), breaking pytest and
-    # scripts/doctor.py before either could report the problem (design spec
-    # 2026-08-18 section 6e).
-    llm_provider: str = ""
     # ``gemini_model`` is consumed by the gemini provider only. Groq is a
     # different model family (Llama, via a different vendor), so it
     # gets its own var — a single shared GEMINI_MODEL became ambiguous the moment
@@ -118,7 +109,7 @@ class Settings(BaseSettings):
     # there, which is exactly why these two no longer share a var.
     vertex_model: str = "gemini-2.5-flash"
 
-    # --- Vertex AI (LLM_PROVIDER=vertex). Unlike gemini/groq, the credential
+    # --- Vertex AI (runtime_config.provider='vertex'). Unlike gemini/groq, the credential
     # is a GCP service-account identity rather than an API-key string:
     # VERTEX_GCP_SERVICE_ACCOUNT_KEY (hosted, always base64) -> implicit ADC. See
     # providers/vertex_credentials.py for the resolution order.

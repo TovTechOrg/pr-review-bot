@@ -55,7 +55,6 @@ def test_no_probe_output_contains_any_sentinel(seeded, capsys):
         "present": sorted(_probes.present_secrets()),
         "lengths": _probes.secret_lengths(),
         "pem_ok": _probes.private_key_decodes(),
-        "provider": _probes.llm_provider_state(),
     }
     surfaces = [repr(payload), json.dumps(payload), capsys.readouterr().out]
     for surface in surfaces:
@@ -82,14 +81,3 @@ def test_private_key_decodes_recognises_a_real_pem(monkeypatch):
         settings, "github_app_private_key", base64.b64encode(pem).decode(), raising=False
     )
     assert _probes.private_key_decodes() is True
-
-
-def test_llm_provider_state_reports_name_and_credential_presence(monkeypatch):
-    monkeypatch.setattr(settings, "llm_provider", "groq")
-    monkeypatch.setattr(settings, "groq_api_key", "gsk_" + SENTINEL, raising=False)
-    provider, has_credential = _probes.llm_provider_state()
-    assert provider == "groq"
-    assert has_credential is True
-
-    monkeypatch.setattr(settings, "llm_provider", "")
-    assert _probes.llm_provider_state() == ("", False)

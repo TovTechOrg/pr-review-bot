@@ -7,7 +7,7 @@ scripts/create_github_app.py (design spec 2026-08-18 section 4d).
 It COMPOSES scripts/deploy.py's checks rather than reimplementing them --
 two check implementations that could drift is the thing most worth avoiding
 here -- and adds only the backwards-looking probes deploy.py has no reason to
-own (is .env populated, does the PEM decode, is LLM_PROVIDER set).
+own (is .env populated, does the PEM decode).
 """
 
 from __future__ import annotations
@@ -52,13 +52,13 @@ _STEPS: tuple[Step, ...] = (
          "key into .env yourself"),
     Step(3, "Install the App on your repo(s)", "app_installed",
          "open https://github.com/settings/apps -> your app -> Install App"),
-    Step(4, "Configure an LLM provider", "llm_ready",
-         "set LLM_PROVIDER in .env.config and its API key in .env yourself, or, if "
-         "you're driving setup through Claude Code, hand off "
-         "`uv run python -m scripts.init_env` instead"),
-    Step(5, "Create the Supabase project", "database",
+    Step(4, "Create the Supabase project", "database",
          "create it at https://supabase.com, then set DATABASE_URL to the "
          "Session-mode pooler string (port 5432, NOT 6543)"),
+    Step(5, "Configure an LLM provider", "llm_ready",
+         "set the provider's API key in .env, then run "
+         "`uv run python -m scripts.set_override <provider> --model <name>` "
+         "against your now-live DATABASE_URL"),
     Step(6, "Create the Render service", "public_url",
          "Render dashboard -> New + -> Blueprint -> point it at a repo with "
          "render.yaml (the upstream repo's URL works too) -- leave every var "
@@ -154,29 +154,6 @@ def check_local_config() -> deploy.CheckResult:
     if problems:
         return deploy.CheckResult("local-config", "FAIL", "\n".join(problems))
     return deploy.CheckResult("local-config", "PASS", "")
-
-
-def check_llm_provider() -> deploy.CheckResult:
-    """LLM_PROVIDER is set and its credential is present -- LOCALLY.
-
-    Deliberately NOT deploy.check_provider, which resolves the DB override and
-    therefore SKIPs without DATABASE_URL. Gating step 4 on that would leave an
-    operator who has configured a provider but not yet a database stuck on
-    step 4 forever, which is precisely the kind of dead end doctor exists to
-    prevent. deploy.check_provider still runs as its own row, for the override
-    resolution this cannot see.
-    """
-    provider, has_credential = _probes.llm_provider_state()
-    if not provider:
-        return deploy.CheckResult(
-            "llm-provider", "FAIL",
-            "LLM_PROVIDER is unset (there is no default) -- set it in .env.config",
-        )
-    if not has_credential:
-        return deploy.CheckResult(
-            "llm-provider", "FAIL", f"LLM_PROVIDER={provider} but its credential is not set"
-        )
-    return deploy.CheckResult("llm-provider", "PASS", f"provider={provider}")
 
 
 def check_app_permissions() -> deploy.CheckResult:
@@ -405,7 +382,6 @@ def build_state(base: str) -> tuple[State, list[deploy.CheckResult]]:
         deploy._safe("prereqs", check_prereqs),
         deploy._safe("test-db", check_test_database),
         deploy._safe("local-config", check_local_config),
-        deploy._safe("llm-provider", check_llm_provider),
         deploy._safe("config", deploy.check_config),
         deploy._safe("pricing", deploy.check_pricing),
         deploy._safe("app-permissions", check_app_permissions),
@@ -435,7 +411,7 @@ def build_state(base: str) -> tuple[State, list[deploy.CheckResult]]:
         prereqs=ok("prereqs"),
         app_credentials=ok("local-config"),
         app_installed=ok("github-install"),
-        llm_ready=ok("llm-provider"),
+        llm_ready=ok("provider"),
         database=ok("database"),
         public_url=ok("health"),
         webhook=ok("webhook"),

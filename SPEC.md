@@ -92,7 +92,7 @@ providers/
   groq.py                     OpenAI-compatible client, constrained-decoding structured output
   vertex_credentials.py        resolves Vertex's GCP service-account credential (numbered slots,
                              base64, implicit ADC)
-  factory.py                  select provider by LLM_PROVIDER env; caches clients by (provider, key slot)
+  factory.py                  select provider via runtime_config.provider (DB-only, no env); caches clients by (provider, key slot)
   active.py / active_model.py  DB-backed provider/model override, with an in-memory fail-safe cache
   key_index.py                 which numbered API-key slot is active per provider
   credentials.py               resolves the actual env var backing a provider's active credential
@@ -179,7 +179,7 @@ class SpecialistResult(BaseModel):
 
 class ReviewResult(BaseModel):
     pr_number: int
-    provider: str                      # active LLM_PROVIDER
+    provider: str                      # active runtime_config.provider
     model: str
     results: list[SpecialistResult]
     total_elapsed_ms: int
@@ -208,7 +208,8 @@ class LLMProvider(Protocol):
 - **`groq`**: OpenAI-compatible client; structured outputs via constrained decoding.
   Different vendor + model (Llama) → demonstrates true provider-agnosticism.
 
-`factory.py` selects by `LLM_PROVIDER`. `validate.py` sits above all providers:
+`factory.py` selects by `runtime_config.provider` (DB-only, no env fallback).
+`validate.py` sits above all providers:
 validate returned JSON against the schema; on failure, one repair retry ("return
 ONLY valid JSON matching this schema"); if still bad, return a typed empty result
 and mark the specialist failed. This handles the "malformed/off-schema model
@@ -316,8 +317,9 @@ Stack: `pytest`, `pytest-asyncio`, `httpx.AsyncClient` + `ASGITransport`, `respx
 - **Secrets/env**: `DATABASE_URL` (Supabase pooler connection string),
   `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` (base64-encoded PEM, verbatim only),
   `GITHUB_TARGET_REPO` (required, comma-separated allowlist — `*` tracks every
-  repo the App installation covers), `LLM_PROVIDER`, plus provider creds
-  (`GROQ_API_KEY`, etc.).
+  repo the App installation covers), plus provider creds
+  (`GROQ_API_KEY`, etc.). The active provider itself is DB-only
+  (`runtime_config.provider`, no env var) — see `scripts/set_override.py`.
 - **Cost**: see `cost.md`. Documented production total ≈ $8–10/mo at brief scale;
   the demo runs at $0 on free tiers + the $300 GCP trial credit.
 
@@ -363,7 +365,8 @@ Stack: `pytest`, `pytest-asyncio`, `httpx.AsyncClient` + `ASGITransport`, `respx
 - **Live rehearsal**: `uv run python -m scripts.seed_demo_pr` opens a PR with the three
   planted issues; the bot comment appears within 15s naming the hardcoded credential,
   the N+1 query, and the magic number; footer shows runtime + cost; provider swap
-  (`LLM_PROVIDER=groq`) still produces a valid comment.
+  (`uv run python -m scripts.set_override groq --model ...`, no restart) still
+  produces a valid comment.
 
 ## 12. Review queue (RPM + daily-quota handling)
 

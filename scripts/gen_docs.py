@@ -155,7 +155,7 @@ def render_sync_env() -> str:
             "## Always pushed\n",
             *bullets(always),
             "",
-            "Plus `LLM_PROVIDER`, and `GITHUB_APP_INSTALLATION_ID` once it is set "
+            "Plus `GITHUB_APP_INSTALLATION_ID` once it is set "
             "locally (it is optional, so an empty value is not an error).\n",
             "## Never pushed: per-slot model, project, and location\n",
             *bullets(model_seeds),

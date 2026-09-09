@@ -71,16 +71,3 @@ def private_key_decodes() -> bool:
     except (binascii.Error, ValueError):
         return False
     return decoded.lstrip().startswith(b"-----BEGIN")
-
-
-def llm_provider_state() -> tuple[str, bool]:
-    """(configured provider name or '', whether its credential is present).
-
-    The provider name is NOT a secret and is deliberately reported -- naming it
-    is how doctor can say which credential is missing.
-    """
-    provider = _raw("LLM_PROVIDER")
-    entry = registry.PROVIDERS.get(provider)
-    if entry is None:
-        return (provider, False)
-    return (provider, bool(_raw(entry[0])))

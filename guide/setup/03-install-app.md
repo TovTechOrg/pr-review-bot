@@ -101,4 +101,4 @@ track-all mode.
 
 ## Next
 
-Continue to [Step 4: configure an LLM provider](04-llm-provider.md).
+Continue to [Step 4: create the Supabase project](04-supabase.md).

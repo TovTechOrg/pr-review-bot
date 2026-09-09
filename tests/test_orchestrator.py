@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from config import settings
-from providers import active_model
+from providers import active, active_model
 from review_queue import dispatcher_tuning_config
 from specialists.schemas import SpecialistResult
 
@@ -94,7 +94,7 @@ async def test_run_review_runs_all_three_specialists_and_posts_comment(monkeypat
     monkeypatch.setattr(orchestrator, "run_security_specialist", fake_security)
     monkeypatch.setattr(orchestrator, "run_performance_specialist", fake_performance)
     monkeypatch.setattr(orchestrator, "run_quality_specialist", fake_quality)
-    monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(active, "_override", "groq")
 
     result = await orchestrator.run_review("owner/repo", 99)
 
@@ -144,7 +144,7 @@ async def test_run_review_survives_one_specialist_raising(monkeypatch):
     monkeypatch.setattr(orchestrator, "run_security_specialist", fake_security)
     monkeypatch.setattr(orchestrator, "run_performance_specialist", fake_performance)
     monkeypatch.setattr(orchestrator, "run_quality_specialist", fake_quality)
-    monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(active, "_override", "groq")
 
     result = await orchestrator.run_review("owner/repo", 1)
 
@@ -194,7 +194,7 @@ async def test_attempt_review_raises_when_every_specialist_fails(monkeypatch):
     monkeypatch.setattr(orchestrator, "run_security_specialist", fake_security)
     monkeypatch.setattr(orchestrator, "run_performance_specialist", fake_performance)
     monkeypatch.setattr(orchestrator, "run_quality_specialist", fake_quality)
-    monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(active, "_override", "groq")
 
     try:
         await orchestrator.attempt_review("owner/repo", 1)
@@ -227,12 +227,12 @@ async def test_run_review_reflects_active_model_per_provider(monkeypatch):
     monkeypatch.setattr(orchestrator, "run_performance_specialist", await ok("Performance"))
     monkeypatch.setattr(orchestrator, "run_quality_specialist", await ok("Code Quality"))
 
-    monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(active, "_override", "groq")
     monkeypatch.setattr(settings, "groq_model", "llama-3.3-70b-versatile")
     result = await orchestrator.run_review("owner/repo", 1)
     assert result.model == "llama-3.3-70b-versatile"
 
-    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    monkeypatch.setattr(active, "_override", "gemini")
     monkeypatch.setattr(settings, "gemini_model", "gemini-flash-latest")
     result = await orchestrator.run_review("owner/repo", 1)
     assert result.model == "gemini-flash-latest"
@@ -262,7 +262,7 @@ async def test_run_review_records_the_completed_review(monkeypatch):
     monkeypatch.setattr(orchestrator, "run_security_specialist", fake_security)
     monkeypatch.setattr(orchestrator, "run_performance_specialist", fake_performance)
     monkeypatch.setattr(orchestrator, "run_quality_specialist", fake_quality)
-    monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(active, "_override", "groq")
 
     recorded = {}
 
@@ -312,7 +312,7 @@ async def test_run_review_survives_record_review_raising(monkeypatch):
     monkeypatch.setattr(orchestrator, "run_security_specialist", fake_security)
     monkeypatch.setattr(orchestrator, "run_performance_specialist", fake_performance)
     monkeypatch.setattr(orchestrator, "run_quality_specialist", fake_quality)
-    monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(active, "_override", "groq")
 
     def boom(*args, **kwargs):
         raise RuntimeError("db unavailable")
@@ -345,7 +345,7 @@ async def test_attempt_review_migrates_a_renamed_repo(monkeypatch):
     monkeypatch.setattr(orchestrator, "run_security_specialist", ok)
     monkeypatch.setattr(orchestrator, "run_performance_specialist", ok)
     monkeypatch.setattr(orchestrator, "run_quality_specialist", ok)
-    monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(active, "_override", "groq")
 
     migrated = {}
 
@@ -378,7 +378,7 @@ async def test_attempt_review_does_not_migrate_when_name_is_unchanged(monkeypatc
     monkeypatch.setattr(orchestrator, "run_security_specialist", ok)
     monkeypatch.setattr(orchestrator, "run_performance_specialist", ok)
     monkeypatch.setattr(orchestrator, "run_quality_specialist", ok)
-    monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(active, "_override", "groq")
 
     def boom(*a, **k):
         raise AssertionError("must not migrate when the name didn't change")
@@ -408,7 +408,7 @@ async def test_attempt_review_survives_migrate_repo_rename_raising(monkeypatch):
     monkeypatch.setattr(orchestrator, "run_security_specialist", ok)
     monkeypatch.setattr(orchestrator, "run_performance_specialist", ok)
     monkeypatch.setattr(orchestrator, "run_quality_specialist", ok)
-    monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(active, "_override", "groq")
 
     def boom(*a, **k):
         raise RuntimeError("db unavailable")
@@ -493,7 +493,7 @@ async def test_attempt_review_reviews_a_draft_pr_when_the_override_allows_it(mon
     monkeypatch.setattr(orchestrator, "run_security_specialist", ok)
     monkeypatch.setattr(orchestrator, "run_performance_specialist", ok)
     monkeypatch.setattr(orchestrator, "run_quality_specialist", ok)
-    monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(active, "_override", "groq")
 
     outcome = await orchestrator.attempt_review("owner/repo", 1)
 

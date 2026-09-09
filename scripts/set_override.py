@@ -111,7 +111,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--clear",
         action="store_true",
-        help="clear the provider override (must be used alone)",
+        help="clear runtime_config.provider (must be used alone) -- there is no "
+        "env fallback, so this leaves the service unable to boot until a new "
+        "provider is set",
     )
     parser.add_argument(
         "--force",
@@ -277,7 +279,10 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         store.init_pool()
         store.set_provider_override(None, datetime.now(timezone.utc).isoformat())
-        print("provider override cleared; falling back to LLM_PROVIDER")
+        print(
+            "provider cleared -- there is no env fallback, so the service will "
+            "refuse to boot until a new provider is set"
+        )
         return 0
 
     if not args.provider:

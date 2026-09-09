@@ -53,7 +53,7 @@ class SpecialistResult(BaseModel):
 
 class ReviewResult(BaseModel):
     pr_number: int
-    provider: str  # active LLM_PROVIDER
+    provider: str  # active runtime_config.provider
     model: str
     results: list[SpecialistResult]
     total_elapsed_ms: int

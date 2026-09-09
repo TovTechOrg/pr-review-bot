@@ -72,7 +72,7 @@ onward, not by the test harness).
     `ALLOW_REMOTE_TEST_DB=1`, but **don't reach for it here**: setting it
     would let every future test run truncate whatever real database
     `DATABASE_URL` points at — a real problem once that's also the Supabase
-    project you point the app at for real in Step 5. If you don't want
+    project you point the app at for real in Step 4. If you don't want
     Docker, install Postgres natively instead (see below) rather than
     pointing this at a hosted service.
 

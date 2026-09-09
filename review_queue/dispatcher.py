@@ -331,16 +331,16 @@ async def process_next_due(now: datetime) -> StepResult:
         ticket.attempts,
     )
 
-    # Refresh the provider override once per claimed ticket, not once per idle
-    # tick. A failure here must never abort a review: active_provider() falls
-    # back to settings.llm_provider whenever the cache is empty or stale.
+    # Refresh the active provider once per claimed ticket, same cadence and
+    # fail-safe shape as _refresh_slot_config: provider is DB-only now (no
+    # env fallback), so a failed refresh degrades to no configured provider,
+    # same as a failed slot_config refresh degrades to no configured slots.
     try:
-        override = await asyncio.to_thread(store.get_provider_override)
-        active.set_override_cache(override)
-    # deliberate: degrade to the env provider rather than keep a stale cache
+        provider = await asyncio.to_thread(store.get_provider_override)
+        active.set_override_cache(provider)
     except Exception:  # noqa: BLE001
-        logger.exception("failed to refresh the provider override; using LLM_PROVIDER")
-        active.set_override_cache(None)
+        logger.exception("failed to refresh the active provider; degrading to unconfigured")
+        active.reset_override_cache()
 
     # Refresh the cooldown override once per claimed ticket, same cadence and
     # fail-safe shape as the provider-override refresh above -- but UNLIKE

@@ -58,7 +58,7 @@ that hand-copying into a web form is easiest to get wrong, like
 
 Click **Deploy**. With every var left blank, the container starts and
 immediately exits: `main.py`'s startup refuses to run with no
-`LLM_PROVIDER` set, no `GITHUB_WEBHOOK_SECRET`, and so on — deliberately, so
+`GITHUB_WEBHOOK_SECRET`, no `DATABASE_URL`, and so on — deliberately, so
 a missing credential fails loudly rather than silently limping along. Render
 will show this deploy as failed, and may show it retrying and failing again.
 Leave it — there's nothing to fix here, it's expected with every var still

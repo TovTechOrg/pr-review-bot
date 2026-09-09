@@ -37,12 +37,6 @@ logging.basicConfig(level=logging.INFO, force=True)
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    if settings.llm_provider not in registry.PROVIDERS:
-        raise RuntimeError(
-            f"LLM_PROVIDER={settings.llm_provider!r} is not a supported provider "
-            f"-- refusing to start. Set it in .env.config to one of: "
-            f"{', '.join(sorted(registry.PROVIDERS))}."
-        )
     if not settings.github_webhook_secret:
         raise RuntimeError(
             "GITHUB_WEBHOOK_SECRET is unset -- refusing to start "
@@ -101,6 +95,31 @@ async def lifespan(app: FastAPI):
         github_app.discover_and_verify_installation_id, settings.github_app_installation_id
     )
     store.init_pool()
+    # provider/key_index are DB-only now, no env fallback (see
+    # docs/superpowers/specs/2026-09-09-provider-key-index-db-only-design.md)
+    # -- checked here, after init_pool(), rather than against an env var at
+    # the top of this function, since the fact being validated now lives in
+    # the database.
+    _provider = store.get_provider_override()
+    if _provider not in registry.PROVIDERS:
+        raise RuntimeError(
+            f"runtime_config.provider={_provider!r} is not a supported provider "
+            f"-- refusing to start. Set it with "
+            f"`uv run python -m scripts.set_override <provider>` to one of: "
+            f"{', '.join(sorted(registry.PROVIDERS))}."
+        )
+    # Read the override directly from the store, not through
+    # providers.key_index's cache: that cache is populated by the
+    # dispatcher's per-ticket refresh loop, which hasn't run yet this early
+    # in boot -- reading it here would validate slot 0 even when the DB
+    # itself already points at a different index.
+    _index = store.get_key_index_override(_provider) or 0
+    if store.get_slot_config(_provider, _index) is None:
+        raise RuntimeError(
+            f"no slot_config row for provider={_provider!r} index={_index} "
+            f"-- refusing to start. Configure a model with "
+            f"`uv run python -m scripts.set_override {_provider} --model <name>`."
+        )
     store.recover_on_startup(datetime.now(timezone.utc).isoformat())
     task = asyncio.create_task(dispatcher.run_forever())
     try:

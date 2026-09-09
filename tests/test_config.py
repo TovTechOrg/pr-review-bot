@@ -186,33 +186,33 @@ def test_env_config_wins_over_env(tmp_path):
     """.env.config is the designated home for operational config, so it must
     win if a key somehow appears in both files."""
     env = tmp_path / ".env"
-    env.write_text("LLM_PROVIDER=from_secrets_file\n")
+    env.write_text("GEMINI_MODEL=from_secrets_file\n")
     config = tmp_path / ".env.config"
-    config.write_text("LLM_PROVIDER=from_config_file\n")
+    config.write_text("GEMINI_MODEL=from_config_file\n")
     settings = Settings(_env_file=(str(env), str(config)))
-    assert settings.llm_provider == "from_config_file"
+    assert settings.gemini_model == "from_config_file"
 
 
 def test_both_files_merge(tmp_path):
     env = tmp_path / ".env"
     env.write_text("GEMINI_API_KEY=sentinel-key\n")
     config = tmp_path / ".env.config"
-    config.write_text("LLM_PROVIDER=groq\n")
+    config.write_text("GEMINI_MODEL=groq\n")
     settings = Settings(_env_file=(str(env), str(config)))
     assert settings.gemini_api_key == "sentinel-key"
-    assert settings.llm_provider == "groq"
+    assert settings.gemini_model == "groq"
 
 
 def test_process_env_beats_both_files(tmp_path, monkeypatch):
     """This is what makes Render unaffected by the split: neither file exists
     in the container, and injected env vars outrank both anyway."""
     env = tmp_path / ".env"
-    env.write_text("LLM_PROVIDER=from_secrets_file\n")
+    env.write_text("GEMINI_MODEL=from_secrets_file\n")
     config = tmp_path / ".env.config"
-    config.write_text("LLM_PROVIDER=from_config_file\n")
-    monkeypatch.setenv("LLM_PROVIDER", "from_process_env")
+    config.write_text("GEMINI_MODEL=from_config_file\n")
+    monkeypatch.setenv("GEMINI_MODEL", "from_process_env")
     settings = Settings(_env_file=(str(env), str(config)))
-    assert settings.llm_provider == "from_process_env"
+    assert settings.gemini_model == "from_process_env"
 
 
 def test_every_operational_key_is_a_real_settings_field():
@@ -362,35 +362,6 @@ def test_cost_cap_is_gone_entirely():
     open -- worse than no cap (design spec 2026-08-18 section 6c)."""
     assert "KEY_USAGE_COST_CAP_USD" not in OPERATIONAL_KEYS
     assert not hasattr(Settings(_env_file=None), "key_usage_cost_cap_usd")
-
-
-def test_llm_provider_has_no_implicit_default(monkeypatch):
-    monkeypatch.delenv("LLM_PROVIDER", raising=False)
-    assert Settings(_env_file=None).llm_provider == ""
-
-
-def test_importing_config_with_llm_provider_unset_does_not_raise(tmp_path):
-    """A pydantic *required* field would raise the moment anything first
-    reads `settings` -- LLM_PROVIDER has no implicit default specifically so
-    this can't happen (design spec 2026-08-18 section 6e).
-
-    Runs in a real subprocess, in true isolation: config's `settings`
-    singleton is now lazy (see its module-level __getattr__) and caches on
-    first access for the life of a process, so an in-process
-    importlib.reload can't reliably exercise a fresh construction once some
-    earlier test in this same pytest run has already triggered that cache --
-    reload re-executes the module body, but there is no longer an
-    unconditional `settings = Settings()` statement in it to rebind the
-    already-cached attribute.
-    """
-    env = {**os.environ, "PYTHONPATH": str(_REPO_ROOT)}
-    env.pop("LLM_PROVIDER", None)
-    result = subprocess.run(
-        [sys.executable, "-c", "import config; config.settings; print('ok')"],
-        cwd=tmp_path, env=env, capture_output=True, text=True,
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "ok"
 
 
 def test_importing_config_with_a_malformed_value_does_not_raise(tmp_path):

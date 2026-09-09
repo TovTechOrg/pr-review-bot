@@ -9,8 +9,8 @@ Getting from a fresh clone to a first posted review comment is eight steps.
    comments.
 3. **Install the App on your repo(s)** — a browser-only step; GitHub does not
    let an App install itself.
-4. **Configure an LLM provider** — pick a provider, get a key, set it.
-5. **Create the Supabase project** — the durable queue Postgres.
+4. **Create the Supabase project** — the durable queue Postgres.
+5. **Configure an LLM provider** — pick a provider, get a key, set it.
 6. **Create the Render service** — where the bot actually runs.
 7. **Sync config and verify** — push everything to Render in one command,
    deploy, and confirm it's live.

@@ -1,5 +1,5 @@
-"""Provider selection by ``LLM_PROVIDER`` (or its DB override), resolved
-against the active API-key-slot index (also DB-overridable) per provider.
+"""Provider selection by ``runtime_config.provider`` (no env fallback),
+resolved against the active API-key-slot index (also DB-only) per provider.
 
 Narrow on purpose: this module knows which class to instantiate and which
 credential to hand it -- nothing about provider internals beyond that. The

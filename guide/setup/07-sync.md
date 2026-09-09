@@ -46,7 +46,7 @@ Before considering this step done:
 
 If it fails with `error connecting in 'pool-1'` or a `RuntimeError` about the
 connection not opening, the usual cause is a Supabase project that was not
-ready yet, or a mistyped pooler string (Step 5). Fix the value locally (in
+ready yet, or a mistyped pooler string (Step 4). Fix the value locally (in
 `.env`) and re-run `--sync-env` — it pushes the corrected value and triggers
 a fresh deploy the same way.
 

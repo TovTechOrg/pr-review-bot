@@ -98,8 +98,8 @@ def test_setup_pages_match_doctors_step_titles():
         1: "01-prerequisites.md",
         2: "02-github-app.md",
         3: "03-install-app.md",
-        4: "04-llm-provider.md",
-        5: "05-supabase.md",
+        4: "04-supabase.md",
+        5: "05-llm-provider.md",
         6: "06-render.md",
         7: "07-sync.md",
         8: "08-pinger.md",
@@ -171,19 +171,21 @@ def test_install_app_page_uses_doctor_not_bare_deploy_for_installation_id():
     assert "```bash\nuv run python -m scripts.deploy\n```" not in text
 
 
-def test_llm_provider_page_edits_the_files_directly_instead_of_running_init_env():
-    """init_env.py stays in the repo but unwired from the guide: the two
-    config files are already `cp`'d into existence by Step 2, so Step 4
-    just has the operator edit LLM_PROVIDER/the credential by hand and
-    verify with doctor -- one fewer script in the documented path, and one
-    fewer place a malformed answer can reach config.py before doctor
-    ever gets a chance to report it structurally."""
+def test_llm_provider_page_uses_set_override_not_init_env():
+    """init_env.py stays in the repo but unwired from the guide. provider/
+    key_index are DB-only now (no env fallback), so Step 5 has the operator
+    set the credential in .env by hand and activate it with
+    scripts.set_override against a live DATABASE_URL, then verify with
+    doctor -- one fewer script in the documented path, and one fewer place a
+    malformed answer can reach config.py before doctor ever gets a chance to
+    report it structurally."""
     step2 = (_SETUP / "02-github-app.md").read_text(encoding="utf-8")
     assert "cp .env.config.example .env.config" in step2
 
-    step4 = (_SETUP / "04-llm-provider.md").read_text(encoding="utf-8")
-    assert "scripts.init_env" not in step4
-    assert "uv run python -m scripts.doctor" in step4
+    step5 = (_SETUP / "05-llm-provider.md").read_text(encoding="utf-8")
+    assert "scripts.init_env" not in step5
+    assert "scripts.set_override" in step5
+    assert "uv run python -m scripts.doctor" in step5
 
 
 def test_setup_index_names_all_eight_steps():
@@ -198,7 +200,7 @@ def test_setup_index_names_all_eight_steps():
 
 
 def test_supabase_page_pins_the_session_pooler_port():
-    text = (_SETUP / "05-supabase.md").read_text(encoding="utf-8")
+    text = (_SETUP / "04-supabase.md").read_text(encoding="utf-8")
     assert "5432" in text and "6543" in text, "both ports named, so the wrong one is unmistakable"
 
 
@@ -206,7 +208,7 @@ def test_render_page_leaves_env_vars_blank_for_sync_env_to_push():
     """Regression: this page used to tell the reader to hand-type exactly
     four env vars into Render's dashboard to get the service booting -- but
     main.py's lifespan also requires GITHUB_APP_INSTALLATION_ID and a
-    valid LLM_PROVIDER, so that first deploy always crash-looped. Since
+    valid runtime_config.provider, so that first deploy always crash-looped. Since
     --sync-env (Step 7) doesn't actually need the service already booted,
     just already created, this page now has the reader leave every var
     blank and get RENDER_API_KEY here instead, deferring all of it to

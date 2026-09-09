@@ -32,23 +32,25 @@ def bare(monkeypatch):
     """A freshly-cloned checkout: nothing configured at all."""
     for field in (
         "github_app_id", "github_app_private_key", "github_webhook_secret",
-        "database_url", "llm_provider", "groq_api_key", "gemini_api_key",
+        "database_url", "groq_api_key", "gemini_api_key",
         "vertex_gcp_service_account_key", "public_base_url", "render_api_key",
         "uptimerobot_api_key", "github_target_repo",
     ):
         monkeypatch.setattr(settings, field, type(getattr(settings, field))(), raising=False)
 
 
-def test_llm_provider_row_does_not_depend_on_a_database(bare, monkeypatch):
-    """Step 4 must clear on local config alone. Gating it on
-    deploy.check_provider (which SKIPs with no DATABASE_URL) would strand an
-    operator who has a provider configured but no database yet."""
+def test_llm_provider_row_requires_a_database(bare, monkeypatch):
+    """provider/key_index are DB-only now, no env fallback (see
+    docs/superpowers/specs/2026-09-09-provider-key-index-db-only-design.md)
+    -- Step 5 (LLM provider) genuinely cannot clear before Step 4
+    (Supabase/database) has, since there is no local-config-only state left
+    to probe. deploy.check_provider SKIPs without DATABASE_URL, and that
+    SKIP correctly makes llm_ready False."""
     monkeypatch.setattr(settings, "database_url", "")
-    monkeypatch.setattr(settings, "llm_provider", "groq")
-    monkeypatch.setattr(settings, "groq_api_key", "gsk_x", raising=False)
-    assert doctor.check_llm_provider().status == "PASS"
-    state, _results = doctor.build_state("")
-    assert state.llm_ready is True
+    state, results = doctor.build_state("")
+    by_name = {r.name: r for r in results}
+    assert by_name["provider"].status == "SKIPPED"
+    assert state.llm_ready is False
 
 
 def test_a_bare_checkout_reports_step_two_not_a_crash(bare, monkeypatch):

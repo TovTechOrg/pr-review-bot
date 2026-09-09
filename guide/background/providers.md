@@ -3,8 +3,8 @@
 This is the journal of what actually happened while wiring up and rehearsing
 the three real LLM providers (`gemini`, `groq`, `vertex`), plus a fourth that
 was live for a while and one that was researched and rejected. None of this
-is required reading to set the project up — for that, see [Step 4: Configure
-an LLM provider](../setup/04-llm-provider.md) and [Switching providers and
+is required reading to set the project up — for that, see [Step 5: Configure
+an LLM provider](../setup/05-llm-provider.md) and [Switching providers and
 API keys](../operations/overrides.md). It is kept and published because it is
 real evidence of what was tried, what broke, and what it cost — not a
 theoretical description.

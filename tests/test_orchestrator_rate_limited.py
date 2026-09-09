@@ -8,8 +8,7 @@ from __future__ import annotations
 import pytest
 from types import SimpleNamespace
 
-from config import settings
-from providers import active_model
+from providers import active, active_model
 from providers.base import RateLimited
 from review_queue import dispatcher_tuning_config
 from specialists.schemas import SpecialistResult
@@ -23,7 +22,7 @@ def _ok(name):
 
 @pytest.fixture(autouse=True)
 def _provider(monkeypatch):
-    monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(active, "_override", "groq")
 
 
 @pytest.fixture(autouse=True)

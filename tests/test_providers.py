@@ -339,9 +339,9 @@ def test_factory_selects_gemini(monkeypatch):
     # google-genai's Client raises immediately on an empty api_key, so a
     # fresh checkout with no real .env (e.g. CI) needs a dummy non-empty
     # value here — this test must not depend on real credentials existing.
-    from providers import active_model
+    from providers import active, active_model
 
-    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    active.set_override_cache("gemini")
     monkeypatch.setattr(settings, "gemini_api_key", "dummy-key-for-construction-only")
     active_model.set_override_cache({("gemini", 0): "gemini-flash-latest"})
     assert isinstance(get_provider(), GeminiProvider)
@@ -352,18 +352,20 @@ def test_factory_selects_groq(monkeypatch):
     # before construction, so this test needs a non-empty value — previously an
     # empty string reached GroqProvider.__init__ successfully, since Groq's SDK
     # only rejects api_key=None, not an empty string.
-    from providers import active_model
+    from providers import active, active_model
     from providers.groq import GroqProvider
 
-    monkeypatch.setattr(settings, "llm_provider", "groq")
+    active.set_override_cache("groq")
     monkeypatch.setattr(settings, "groq_api_key", "dummy-key-for-construction-only")
     active_model.set_override_cache({("groq", 0): "llama-3.3-70b-versatile"})
 
     assert isinstance(get_provider(), GroqProvider)
 
 
-def test_factory_raises_for_unknown_provider(monkeypatch):
-    monkeypatch.setattr(settings, "llm_provider", "bogus")
+def test_factory_raises_for_unknown_provider():
+    from providers import active
+
+    active.set_override_cache("bogus")
     with pytest.raises(ValueError):
         get_provider()
 
@@ -374,10 +376,10 @@ def test_factory_raises_a_clear_error_for_an_unprovisioned_key_index(monkeypatch
     dead-but-configured provider (a real credential for a vendor that's down
     or retired), which must NOT be affected by this check -- that case has a
     real, non-empty credential and fails at the live call, unchanged."""
-    from providers import active_model, key_index
+    from providers import active, active_model, key_index
     from providers.factory import reset_provider_cache
 
-    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    active.set_override_cache("gemini")
     monkeypatch.setattr(settings, "gemini_api_key", "gk_index_0")
     monkeypatch.delenv("GEMINI_API_KEY_1", raising=False)
     reset_provider_cache()
@@ -397,9 +399,9 @@ def test_factory_raises_a_clear_error_for_an_unprovisioned_key_index(monkeypatch
 def test_factory_unaffected_by_a_dead_but_configured_provider(monkeypatch):
     """A real, non-empty credential must still reach client construction --
     this check only catches an EMPTY resolved value, nothing else."""
-    from providers import active_model
+    from providers import active, active_model
 
-    monkeypatch.setattr(settings, "llm_provider", "groq")
+    active.set_override_cache("groq")
     monkeypatch.setattr(settings, "groq_api_key", "gsk_real_but_dead")
     active_model.set_override_cache({("groq", 0): "llama-3.3-70b-versatile"})
     from providers.groq import GroqProvider
@@ -408,10 +410,10 @@ def test_factory_unaffected_by_a_dead_but_configured_provider(monkeypatch):
 
 
 def test_factory_returns_the_same_instance_on_repeated_calls(monkeypatch):
-    from providers import active_model
+    from providers import active, active_model
     from providers.factory import reset_provider_cache
 
-    monkeypatch.setattr(settings, "llm_provider", "groq")
+    active.set_override_cache("groq")
     # _build()'s empty-credential check requires a non-empty api_key.
     monkeypatch.setattr(settings, "groq_api_key", "dummy-key-for-construction-only")
     active_model.set_override_cache({("groq", 0): "llama-3.3-70b-versatile"})
@@ -423,10 +425,10 @@ def test_factory_returns_the_same_instance_on_repeated_calls(monkeypatch):
 
 
 def test_factory_rebuilds_the_client_when_the_key_index_changes(monkeypatch):
-    from providers import active_model, key_index
+    from providers import active, active_model, key_index
     from providers.factory import reset_provider_cache
 
-    monkeypatch.setattr(settings, "llm_provider", "groq")
+    active.set_override_cache("groq")
     monkeypatch.setattr(settings, "groq_api_key", "gsk_index_0")
     monkeypatch.setenv("GROQ_API_KEY_1", "gsk_index_1")
     active_model.set_override_cache(
@@ -445,10 +447,10 @@ def test_factory_rebuilds_the_client_when_the_key_index_changes(monkeypatch):
 
 
 def test_factory_returns_to_the_original_cached_instance_after_switching_back(monkeypatch):
-    from providers import active_model, key_index
+    from providers import active, active_model, key_index
     from providers.factory import reset_provider_cache
 
-    monkeypatch.setattr(settings, "llm_provider", "groq")
+    active.set_override_cache("groq")
     monkeypatch.setattr(settings, "groq_api_key", "gsk_index_0")
     monkeypatch.setenv("GROQ_API_KEY_1", "gsk_index_1")
     active_model.set_override_cache(
@@ -485,12 +487,12 @@ def test_factory_selects_vertex_and_derives_the_project_from_the_key(monkeypatch
     """No project configured in slot_config is the COMMON case: an operator
     handed nothing but a service-account JSON key gets the project from the
     key's own project_id."""
-    from providers import active_model, active_vertex_slot
+    from providers import active, active_model, active_vertex_slot
     from providers.google_genai import VertexProvider
 
     captured: dict = {}
     _mock_vertex_client(monkeypatch, captured)
-    monkeypatch.setattr(settings, "llm_provider", "vertex")
+    active.set_override_cache("vertex")
     active_model.set_override_cache({("vertex", 0): "gemini-2.5-flash"})
     active_vertex_slot.set_override_cache({0: (None, "us-central1")})
     monkeypatch.setattr(
@@ -510,11 +512,11 @@ def test_factory_selects_vertex_and_derives_the_project_from_the_key(monkeypatch
 def test_factory_prefers_an_explicit_gcp_project_over_the_keys_own(monkeypatch):
     """An explicit slot_config project still overrides -- for pointing a key
     at a different project than the one it was minted in."""
-    from providers import active_model, active_vertex_slot
+    from providers import active, active_model, active_vertex_slot
 
     captured: dict = {}
     _mock_vertex_client(monkeypatch, captured)
-    monkeypatch.setattr(settings, "llm_provider", "vertex")
+    active.set_override_cache("vertex")
     active_model.set_override_cache({("vertex", 0): "gemini-2.5-flash"})
     active_vertex_slot.set_override_cache({0: ("proj-explicit", "us-central1")})
     monkeypatch.setattr(
@@ -535,11 +537,11 @@ def test_factory_builds_vertex_from_implicit_adc_when_a_project_is_set(monkeypat
     EMPTY resolved credential is not an error for vertex. _build must not
     raise -- any failure then comes from the SDK/google-auth relying on
     implicit ADC, which is a live-call concern, not a config one."""
-    from providers import active_model, active_vertex_slot
+    from providers import active, active_model, active_vertex_slot
     from providers.google_genai import VertexProvider
 
     _mock_vertex_client(monkeypatch)
-    monkeypatch.setattr(settings, "llm_provider", "vertex")
+    active.set_override_cache("vertex")
     active_model.set_override_cache({("vertex", 0): "gemini-2.5-flash"})
     active_vertex_slot.set_override_cache({0: ("proj-explicit", "us-central1")})
     monkeypatch.setattr(
@@ -554,10 +556,10 @@ def test_factory_raises_when_vertex_has_neither_a_project_nor_a_credential(monke
     """Pure implicit-ADC with no key to derive a project from: locally
     detectable, so it must fast-fail before any network call rather than let
     three specialists each discover the same problem the expensive way."""
-    from providers import active_model
+    from providers import active, active_model
 
     _mock_vertex_client(monkeypatch)
-    monkeypatch.setattr(settings, "llm_provider", "vertex")
+    active.set_override_cache("vertex")
     active_model.set_override_cache({("vertex", 0): "gemini-2.5-flash"})
     monkeypatch.setattr(
         "providers.factory.vertex_credentials.resolve_service_account_info",
@@ -574,12 +576,12 @@ def test_factory_passes_the_active_key_index_to_vertex_credentials(monkeypatch):
     """vertex rides the same key-index override as gemini/groq -- the index
     must reach the credential resolver, or a slot swap would be a silent
     no-op for this provider alone."""
-    from providers import active_model, active_vertex_slot, key_index
+    from providers import active, active_model, active_vertex_slot, key_index
     from providers.factory import reset_provider_cache
 
     _mock_vertex_client(monkeypatch)
     seen: list[int] = []
-    monkeypatch.setattr(settings, "llm_provider", "vertex")
+    active.set_override_cache("vertex")
     active_model.set_override_cache({("vertex", 2): "gemini-2.5-flash"})
     active_vertex_slot.set_override_cache({2: ("proj-explicit", "us-central1")})
     monkeypatch.setattr(
@@ -792,10 +794,10 @@ def test_gemini_provider_uses_the_db_override_not_settings_gemini_model(monkeypa
     proves the constructor argument is what actually populates self._model --
     the single most important correctness property this branch adds (the model
     reported in the PR comment must equal the model actually sent)."""
-    from providers import active_model, factory
+    from providers import active, active_model, factory
 
     factory.reset_provider_cache()
-    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    active.set_override_cache("gemini")
     monkeypatch.setattr(settings, "gemini_api_key", "dummy-key-for-construction-only")
     monkeypatch.setattr(settings, "gemini_model", "settings-model-must-not-be-used")
     active_model.set_override_cache({("gemini", 0): "sentinel-gemini-model"})
@@ -812,11 +814,11 @@ def test_vertex_provider_uses_the_db_override_not_settings_vertex_model(monkeypa
     regression to reading settings.vertex_model internally would go uncaught
     by the existing vertex tests, which all pass settings.gemini_model/whatever
     the ambient value is on both sides of their assertions."""
-    from providers import active_model, active_vertex_slot, factory
+    from providers import active, active_model, active_vertex_slot, factory
 
     factory.reset_provider_cache()
     _mock_vertex_client(monkeypatch)
-    monkeypatch.setattr(settings, "llm_provider", "vertex")
+    active.set_override_cache("vertex")
     monkeypatch.setattr(settings, "vertex_model", "settings-model-must-not-be-used")
     active_vertex_slot.set_override_cache({0: ("proj-explicit", "us-central1")})
     monkeypatch.setattr(

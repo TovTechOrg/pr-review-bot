@@ -17,7 +17,6 @@ from __future__ import annotations
 import psycopg
 import pytest
 
-from config import settings
 from providers import active
 from review_queue import store
 from scripts.deploy import _resolved_provider
@@ -114,19 +113,12 @@ def _clean_cache():
     active.reset_override_cache()
 
 
-def test_active_provider_falls_back_to_the_env_value(monkeypatch):
-    monkeypatch.setattr(settings, "llm_provider", "gemini")
-    assert active.active_provider() == "gemini"
-
-
-def test_active_provider_prefers_the_cached_override(monkeypatch):
-    monkeypatch.setattr(settings, "llm_provider", "gemini")
+def test_active_provider_reflects_the_cached_value():
     active.set_override_cache("groq")
     assert active.active_provider() == "groq"
 
 
-def test_clearing_the_cache_returns_to_the_env_value(monkeypatch):
-    monkeypatch.setattr(settings, "llm_provider", "gemini")
+def test_clearing_the_cache_returns_to_unconfigured():
     active.set_override_cache("groq")
     active.set_override_cache(None)
-    assert active.active_provider() == "gemini"
+    assert active.active_provider() == ""

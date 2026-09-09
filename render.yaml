@@ -35,8 +35,6 @@ services:
         sync: false
       - key: GITHUB_APP_INSTALLATION_ID
         sync: false
-      - key: LLM_PROVIDER
-        sync: false
       - key: GEMINI_API_KEY
         sync: false
       - key: GROQ_API_KEY

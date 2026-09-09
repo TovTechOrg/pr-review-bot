@@ -39,7 +39,13 @@ CAP_RESET_AT = datetime(2026, 1, 2, 4, 0, 0, tzinfo=timezone.utc)
 
 @pytest.fixture(autouse=True)
 def _env(db, monkeypatch):
-    monkeypatch.setattr(settings, "llm_provider", "groq")
+    # Written to the real runtime_config row, not just the in-memory cache:
+    # process_next_due's own per-claimed-ticket refresh reads
+    # store.get_provider_override() for real against this DB fixture and
+    # overwrites whatever the cache held moments earlier -- provider is
+    # DB-only now (no env fallback), so a cache-only monkeypatch here would
+    # get clobbered by that refresh before attempt_review ever runs.
+    store.set_provider_override("groq", NOW.isoformat())
     # A hard-failure path now reactively re-verifies the installation id
     # (ISSUES.md 2026-08-21) -- default to "still matches" so tests not
     # specifically exercising that check aren't tripped by a real GitHub
@@ -647,14 +653,14 @@ async def test_push_during_running_then_deferred_run_does_not_survive_to_next_su
     assert store.get_ticket(tid).status == "done"   # NOT "deferred" for a bogus re-review
 
 
-async def test_blocked_gate_uses_current_settings_provider_not_stale_ticket_provider(monkeypatch):
+async def test_blocked_gate_uses_current_active_provider_not_stale_ticket_provider(monkeypatch):
     """The ticket was enqueued under provider 'groq' (see _enqueue), but the
-    _blocked_until gate must key off settings.llm_provider (the CURRENT
+    _blocked_until gate must key off active_provider() (the CURRENT
     provider actually used by attempt_review), which here we set to a
-    different name to simulate LLM_PROVIDER having changed with a ticket
-    still in flight."""
+    different name to simulate the active provider having changed with a
+    ticket still in flight."""
     posted = _stub_comments(monkeypatch)
-    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    store.set_provider_override("gemini", NOW.isoformat())
     _enqueue(pr=7)  # ticket.provider == "groq" (stale, from _enqueue helper)
     dispatcher._blocked_until["gemini"] = NOW + timedelta(seconds=120)
 
@@ -1333,7 +1339,6 @@ async def test_claimed_ticket_runs_against_the_db_override(monkeypatch):
     """The behavioral guarantee: a mid-session override changes which provider
     actually runs, with no restart and no redeploy."""
     _stub_comments(monkeypatch)
-    monkeypatch.setattr(settings, "llm_provider", "gemini")
     store.set_provider_override("groq", NOW.isoformat())
     seen = []
 
@@ -1348,15 +1353,16 @@ async def test_claimed_ticket_runs_against_the_db_override(monkeypatch):
     assert seen == ["groq"]
 
 
-async def test_claim_falls_back_to_env_when_the_override_read_fails(monkeypatch):
-    """Fail-safe: an unreachable override must degrade to the configured
-    provider, never abort the review, and never keep serving a stale cached
-    override from a previous successful refresh."""
+async def test_claim_degrades_to_unconfigured_when_the_override_read_fails(monkeypatch):
+    """Fail-safe: an unreachable DB read must never abort the review, and
+    must never keep serving a stale cached provider from a previous
+    successful refresh -- provider is DB-only now (no env fallback), so
+    "degrade" means reset to unconfigured, same as a failed slot_config
+    refresh degrades to no configured slots."""
     _stub_comments(monkeypatch)
-    monkeypatch.setattr(settings, "llm_provider", "gemini")
-    # A prior successful refresh cached a DIFFERENT provider. If the failure
-    # handler merely logged and left the cache alone, active_provider() would
-    # keep returning "groq" forever -- this is what catches that.
+    # A prior successful refresh cached a provider. If the failure handler
+    # merely logged and left the cache alone, active_provider() would keep
+    # returning "groq" forever -- this is what catches that.
     active.set_override_cache("groq")
 
     def boom():
@@ -1373,7 +1379,7 @@ async def test_claim_falls_back_to_env_when_the_override_read_fails(monkeypatch)
     monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
     _enqueue(1)
     result = await dispatcher.process_next_due(NOW)
-    assert seen == ["gemini"]
+    assert seen == [""]
     assert result.action == "ran"
 
 

@@ -171,7 +171,8 @@ by a free external pinger — see `cost.md` for the alternatives that were weigh
   formatting. Knows nothing about provider internals.
 - **Specialists** are uniform (`run()`), differing only by **system prompt** +
   **Pydantic schema**. Each records its own timing + token usage. Know nothing about GitHub.
-- **Providers** are swappable via `LLM_PROVIDER`; a shared validate-repair layer
+- **Providers** are swappable via `runtime_config.provider` (DB-only, no env
+  fallback — `scripts/set_override.py`); a shared validate-repair layer
   guarantees structured output regardless of provider.
 - **Formatting** turns a `ReviewResult` into Markdown. Knows nothing about LLMs.
 

@@ -47,14 +47,14 @@ def test_example_keys_reads_the_committed_examples():
     secrets_keys = init_env.example_keys(_REPO_ROOT / ".env.example")
     config_keys = init_env.example_keys(_REPO_ROOT / ".env.config.example")
     assert "GITHUB_WEBHOOK_SECRET" in secrets_keys
-    assert "LLM_PROVIDER" in config_keys
+    assert "GEMINI_MODEL" in config_keys
 
 
 def test_split_keys_routes_by_operational_keys():
-    secret, operational = init_env.split_keys(("GROQ_API_KEY", "LLM_PROVIDER"))
+    secret, operational = init_env.split_keys(("GROQ_API_KEY", "GEMINI_MODEL"))
     assert secret == ("GROQ_API_KEY",)
-    assert operational == ("LLM_PROVIDER",)
-    assert "LLM_PROVIDER" in OPERATIONAL_KEYS
+    assert operational == ("GEMINI_MODEL",)
+    assert "GEMINI_MODEL" in OPERATIONAL_KEYS
 
 
 def test_render_env_emits_one_key_per_line_with_lf(tmp_path):

@@ -26,11 +26,17 @@ def _env(db, monkeypatch):
     # every test that isn't specifically exercising that check needs a
     # non-empty stand-in.
     monkeypatch.setattr(settings, "github_webhook_secret", "test-webhook-secret")
-    # Same reasoning for LLM_PROVIDER, which lost its implicit "gemini"
-    # default (design spec 2026-08-18 section 6e) -- lifespan now refuses to
-    # start with an empty/unsupported provider too, so every test that isn't
-    # specifically exercising that check needs a valid stand-in.
-    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    # provider/key_index are DB-only now, no env fallback (see
+    # docs/superpowers/specs/2026-09-09-provider-key-index-db-only-design.md)
+    # -- lifespan now refuses to start without a valid runtime_config.provider
+    # AND a matching slot_config row, so every test that isn't specifically
+    # exercising that check needs both seeded.
+    now = "2026-01-01T00:00:00+00:00"
+    store.set_provider_override("gemini", now)
+    store.set_slot_config(
+        "gemini", 0, model="gemini-2.5-flash",
+        vertex_gcp_project=None, vertex_gcp_location=None, now=now,
+    )
     # Same reasoning again for GITHUB_TARGET_REPO, which lost its implicit
     # "act on every repo" meaning for an empty value -- "*" is now the
     # explicit spelling of that, and lifespan refuses to start with a plain
@@ -183,21 +189,37 @@ async def test_lifespan_refuses_to_start_without_target_repo(monkeypatch):
             pass
 
 
-async def test_lifespan_refuses_to_start_without_llm_provider(monkeypatch):
-    """LLM_PROVIDER lost its implicit "gemini" default (design spec
-    2026-08-18 section 6e) -- guessing a provider would mean silently
-    running (and billing) against one the operator never chose. Checked
-    before the webhook-secret check, so a non-empty secret alone isn't
-    enough to reach it."""
-    monkeypatch.setattr(settings, "llm_provider", "")
-    monkeypatch.setattr(settings, "github_webhook_secret", "s3cret")
+async def test_lifespan_refuses_to_start_without_provider(monkeypatch):
+    """runtime_config.provider has no implicit default -- guessing a
+    provider would mean silently running (and billing) against one the
+    operator never chose. Checked after init_pool() (it's a DB fact now,
+    not an env var), which is why the installation-id/webhook-secret checks
+    ahead of it in the function still need real stand-ins to reach it."""
+    monkeypatch.setattr(settings, "github_app_installation_id", 12345)
+    monkeypatch.setattr(main.github_app, "discover_installation_id_for_app", lambda: 12345)
+    store.set_provider_override(None, "2026-01-01T00:00:00+00:00")
     with pytest.raises(RuntimeError) as exc:
         async with main.lifespan(main.app):
             pass
     message = str(exc.value)
-    assert "LLM_PROVIDER" in message
+    assert "runtime_config.provider" in message
     for provider in ("gemini", "groq", "vertex"):
         assert provider in message
+
+
+async def test_lifespan_refuses_to_start_without_a_slot_config_row(monkeypatch):
+    """A recognized provider with no slot_config row for its active index
+    (e.g. runtime_config.provider set but the model was never configured)
+    is exactly as fatal as an unset provider -- there is nothing for the
+    factory to build."""
+    monkeypatch.setattr(settings, "github_app_installation_id", 12345)
+    monkeypatch.setattr(main.github_app, "discover_installation_id_for_app", lambda: 12345)
+    now = "2026-01-01T00:00:00+00:00"
+    store.set_provider_override("groq", now)
+    store.delete_slot_config("groq", 0)
+    with pytest.raises(RuntimeError, match="no slot_config row"):
+        async with main.lifespan(main.app):
+            pass
 
 
 async def test_lifespan_fails_loudly_when_webhook_secret_is_empty(monkeypatch):

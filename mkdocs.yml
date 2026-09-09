@@ -29,8 +29,8 @@ nav:
       - 1. Prerequisites: setup/01-prerequisites.md
       - 2. Create the GitHub App: setup/02-github-app.md
       - 3. Install the App: setup/03-install-app.md
-      - 4. Configure an LLM provider: setup/04-llm-provider.md
-      - 5. Create the Supabase project: setup/05-supabase.md
+      - 4. Create the Supabase project: setup/04-supabase.md
+      - 5. Configure an LLM provider: setup/05-llm-provider.md
       - 6. Create the Render service: setup/06-render.md
       - 7. Sync config and verify: setup/07-sync.md
       - 8. Add the keep-warm pinger: setup/08-pinger.md

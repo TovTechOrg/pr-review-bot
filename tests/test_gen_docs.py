@@ -69,11 +69,11 @@ def test_gen_docs_module_does_not_import_the_settings_instance():
 def test_config_table_marks_where_each_key_belongs():
     table = gen_docs.render_config()
     for line in table.splitlines():
-        if line.startswith("| `LLM_PROVIDER`"):
+        if line.startswith("| `GEMINI_MODEL`"):
             assert ".env.config" in line
         if line.startswith("| `GROQ_API_KEY`"):
             assert ".env" in line and ".env.config" not in line
-    assert "LLM_PROVIDER" in OPERATIONAL_KEYS
+    assert "GEMINI_MODEL" in OPERATIONAL_KEYS
 
 
 def test_generated_output_carries_the_do_not_edit_header():
