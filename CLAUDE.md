@@ -209,10 +209,12 @@ by a free external pinger — see `cost.md` for the alternatives that were weigh
   ruff (`uv run ruff check .`), and fix whatever either finds.** Never push
   with a red suite or an unresolved lint error, and never skip either check
   because a change "looks" too small to affect them.
-- **After merging to `main` locally, always invoke the `deploy-verify`
-  skill before pushing/deploying** — a green `pytest`/`ruff` run does not
-  substitute for this (see the skill for why, and the incident it
-  generalizes from).
+- **Before any push to `main`, always invoke the `deploy-verify` skill** —
+  whether the commit reaching `main` arrived via a merge or was made
+  directly, the risk this catches (a deploy image that builds/boots
+  differently than the local dev venv) is the same either way. A green
+  `pytest`/`ruff` run does not substitute for this (see the skill for why,
+  and the incident it generalizes from).
 - **When designing or changing a web page's UI (`dashboard/static/`), invoke
   the `ui-visual-review` skill before calling the work done** — reading
   HTML/CSS and reasoning about layout is not a substitute for actually
