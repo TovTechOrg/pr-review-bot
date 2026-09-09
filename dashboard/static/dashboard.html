@@ -1052,10 +1052,11 @@
         env_guided_validate: "Validate",
         env_guided_apply: "Apply",
         env_guided_cancel: "Cancel",
-        env_guided_project_conflict: "VERTEX_GCP_PROJECT is set to {current}, this key belongs to {new}.",
-        env_guided_keep_project: "Keep VERTEX_GCP_PROJECT",
-        env_guided_clear_project: "Clear VERTEX_GCP_PROJECT (use key's project)",
         env_guided_installation_label: "Installation ID (auto-discovered)",
+        env_guided_use_keys_own_project: "(use key's own project)",
+        env_guided_needs_revalidate: "Project or location changed — validate again before applying.",
+        env_config_validate: "Validate",
+        env_config_needs_revalidate: "Changed — click Validate before Save.",
         env_guided_no_models: "This credential is valid but reports no usable models — nothing to apply.",
         env_guided_missing_input: "Fill in every field before validating.",
         env_guided_api_key_placeholder: "API key",
@@ -1174,10 +1175,11 @@
         env_guided_validate: "אמת",
         env_guided_apply: "החל",
         env_guided_cancel: "ביטול",
-        env_guided_project_conflict: "VERTEX_GCP_PROJECT מוגדר ל-{current}, המפתח הזה שייך ל-{new}.",
-        env_guided_keep_project: "השאר VERTEX_GCP_PROJECT",
-        env_guided_clear_project: "נקה VERTEX_GCP_PROJECT (השתמש בפרויקט של המפתח)",
         env_guided_installation_label: "מזהה התקנה (זוהה אוטומטית)",
+        env_guided_use_keys_own_project: "(השתמש בפרויקט של המפתח)",
+        env_guided_needs_revalidate: "הפרויקט או המיקום השתנו — יש לאמת מחדש לפני ההחלה.",
+        env_config_validate: "אמת",
+        env_config_needs_revalidate: "השתנה — יש ללחוץ על אמת לפני שמירה.",
         env_guided_no_models: "האישור תקין אך לא מדווח על מודלים שמישים — אין מה להחיל.",
         env_guided_missing_input: "מלא את כל השדות לפני האימות.",
         env_guided_api_key_placeholder: "מפתח API",
@@ -1984,6 +1986,23 @@
     }
 
     let guidedValidatedPayload = null;
+    // The vertex projects dropdown options from the last FULL validate (no
+    // project/location override yet) -- a re-validate after the operator
+    // changes a dropdown gets `projects: null` back (the backend skips
+    // repeating the projects-listing call), so the dropdown is rebuilt from
+    // this cache instead of the response. Locations aren't cached here at
+    // all -- they're a static reference list fetched once into
+    // `vertexLocations` (see fetchVertexLocations), independent of any
+    // credential.
+    let guidedVertexProjects = null;
+    let vertexLocations = [];
+
+    async function fetchVertexLocations() {
+      if (vertexLocations.length > 0) return;
+      const resp = await fetch("/api/environment/vertex-locations");
+      if (!resp.ok) return;
+      vertexLocations = (await resp.json()).locations;
+    }
 
     function arrayBufferToBase64(buffer) {
       // btoa() only accepts Latin1 -- a service-account JSON or PEM could in
@@ -2028,16 +2047,27 @@
     // Validate attempt and whenever the inputs it was derived FROM change,
     // so no repeat interaction can leave a second copy of the block behind
     // or let Apply act on a credential that is no longer the one on screen.
-    function resetGuidedValidation() {
+    //
+    // `keepExtra`: a vertex re-validate (the operator changed the project or
+    // location dropdown) must NOT wipe those dropdowns out from under them
+    // -- especially on a failed re-check ("no usable models" / unauthorized
+    // for that pair), where losing the controls would leave no way to
+    // correct the choice. Only a genuinely new credential/family selection
+    // (every other caller) should clear the block and the cached catalog.
+    function resetGuidedValidation(keepExtra) {
       guidedValidatedPayload = null;
       document.getElementById("guidedApplyBtn").disabled = true;
       document.getElementById("guidedModalResult").textContent = "";
-      document.getElementById("guidedModalExtra").innerHTML = "";
+      if (!keepExtra) {
+        document.getElementById("guidedModalExtra").innerHTML = "";
+        guidedVertexProjects = null;
+      }
     }
 
     document.getElementById("guidedSetupSelect").addEventListener("change", (event) => {
       const family = event.target.value;
       if (!family) return;
+      if (family === "vertex") fetchVertexLocations();
       resetGuidedValidation();
       document.getElementById("guidedModalBody").innerHTML = guidedModalBodyFor(family);
       document.getElementById("guidedModal").dataset.family = family;
@@ -2054,12 +2084,41 @@
       resetGuidedValidation();
     });
 
+    // Shared by the guided-setup modal and the config panel's per-row
+    // editor -- both build the same "use the key's own project" blank
+    // option plus the accessible-projects list, and the same static
+    // locations list, so this is the one place either markup is defined.
+    function vertexProjectOptionsHtml(projects, selectedProject) {
+      return `<option value="" ${!selectedProject ? "selected" : ""}>${esc(t("env_guided_use_keys_own_project"))}</option>` +
+        projects.map((p) => `<option value="${esc(p)}" ${p === selectedProject ? "selected" : ""}>${esc(p)}</option>`).join("");
+    }
+
+    function vertexLocationOptionsHtml(locations, selectedLocation) {
+      return locations
+        .map((l) => `<option value="${esc(l)}" ${l === selectedLocation ? "selected" : ""}>${esc(l)}</option>`).join("");
+    }
+
+    function vertexDropdownOptionsHtml(projects, selectedProject, locations, selectedLocation) {
+      return `
+        <label>${t("env_config_vertex_project")}</label><select id="guidedVertexProject">${vertexProjectOptionsHtml(projects, selectedProject)}</select>
+        <label>${t("env_config_vertex_location")}</label><select id="guidedVertexLocation">${vertexLocationOptionsHtml(locations, selectedLocation)}</select>
+      `;
+    }
+
     document.getElementById("guidedValidateBtn").addEventListener("click", async () => {
       const family = document.getElementById("guidedModal").dataset.family;
       const resultEl = document.getElementById("guidedModalResult");
       const validateBtn = document.getElementById("guidedValidateBtn");
       const applyBtn = document.getElementById("guidedApplyBtn");
-      resetGuidedValidation();
+      // Read any current vertex dropdown selections BEFORE resetting -- a
+      // re-validate (the operator changed one of them) must resend that
+      // choice, not silently fall back to the file's own project/the
+      // default location.
+      const priorProjectSelect = document.getElementById("guidedVertexProject");
+      const priorLocationSelect = document.getElementById("guidedVertexLocation");
+      const projectOverride = priorProjectSelect ? priorProjectSelect.value : null;
+      const locationOverride = priorLocationSelect ? priorLocationSelect.value : null;
+      resetGuidedValidation(family === "vertex");
       // Disabled for the whole request, not just while awaiting fetch: a
       // second click before the first response lands would fire a second
       // live provider-validation call, and could race the first response's
@@ -2079,6 +2138,8 @@
           const file = document.getElementById("guidedCredentialFile").files[0];
           if (!file) { resultEl.textContent = t("env_guided_missing_input"); return; }
           formData.append("credential_file", file);
+          if (priorProjectSelect) formData.append("project_override", projectOverride);
+          if (priorLocationSelect) formData.append("location_override", locationOverride);
         } else {
           const appId = document.getElementById("guidedAppId").value;
           const file = document.getElementById("guidedCredentialFile").files[0];
@@ -2110,18 +2171,40 @@
             .map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join("");
           extra += `<label>${t("env_config_model")}</label><select id="guidedModelSelect">${options}</select>`;
         }
-        if (result.conflicts && result.conflicts.length > 0) {
-          const c = result.conflicts[0];
-          extra += `<p>${t("env_guided_project_conflict").replace("{current}", esc(c.current)).replace("{new}", esc(c.new))}</p>`;
-          extra += `
-            <label><input type="radio" name="projectChoice" value="keep" checked> ${t("env_guided_keep_project")}</label>
-            <label><input type="radio" name="projectChoice" value="clear"> ${t("env_guided_clear_project")}</label>
-          `;
+        if (family === "vertex") {
+          // Usually already resolved by the time Validate is clicked (fired
+          // when the family was picked), but awaited again here as a
+          // correctness net rather than relying on that timing.
+          await fetchVertexLocations();
+          // result.projects is only ever populated on the FIRST validate of
+          // a freshly-uploaded file (no overrides yet) -- a re-validate
+          // skips the projects-listing call, so fall back to the cache from
+          // that first call.
+          if (result.projects !== null) {
+            guidedVertexProjects = result.projects;
+          }
+          const projects = guidedVertexProjects || [];
+          const selectedProject = result.projects !== null ? result.default_project : projectOverride;
+          const selectedLocation = result.projects !== null
+            ? result.default_location
+            : (locationOverride || vertexLocations[0]);
+          extra += vertexDropdownOptionsHtml(projects, selectedProject, vertexLocations, selectedLocation);
         }
         if (family === "github_app") {
           extra += `<label>${t("env_guided_installation_label")}</label><span>${result.installation_id}</span>`;
         }
         document.getElementById("guidedModalExtra").innerHTML = extra;
+        if (family === "vertex") {
+          // Changing either dropdown re-arms the "needs another Validate"
+          // gate -- the pair just picked has never been confirmed live, so
+          // Apply must not act on it yet.
+          const onVertexDropdownChange = () => {
+            applyBtn.disabled = true;
+            resultEl.textContent = t("env_guided_needs_revalidate");
+          };
+          document.getElementById("guidedVertexProject").addEventListener("change", onVertexDropdownChange);
+          document.getElementById("guidedVertexLocation").addEventListener("change", onVertexDropdownChange);
+        }
         resultEl.textContent = t("env_valid");
       } finally {
         validateBtn.disabled = false;
@@ -2155,18 +2238,25 @@
           const model = document.getElementById("guidedModelSelect").value;
           const slot = parseInt(document.getElementById("guidedSlotSelect").value, 10);
           let credential;
+          let vertexGcpProject = null;
+          let vertexGcpLocation = null;
           if (family === "vertex") {
             const fileBuffer = await guidedValidatedPayload.raw.get("credential_file").arrayBuffer();
             credential = { service_account_b64: arrayBufferToBase64(fileBuffer) };
+            // Both dropdowns are always authoritative -- an empty project
+            // value is the "use the key's own project" option, sent as an
+            // explicit null (never omitted: the backend requires the field).
+            vertexGcpProject = document.getElementById("guidedVertexProject").value || null;
+            vertexGcpLocation = document.getElementById("guidedVertexLocation").value;
           } else {
             credential = { api_key: guidedValidatedPayload.raw.get("api_key") };
           }
-          const clearChoice = document.querySelector('input[name="projectChoice"]:checked');
           body = {
             slot,
             credential,
             model,
-            clear_vertex_gcp_project: Boolean(clearChoice && clearChoice.value === "clear"),
+            vertex_gcp_project: vertexGcpProject,
+            vertex_gcp_location: vertexGcpLocation,
           };
         }
         const resp = await fetch(`/api/environment/credential/${family}/apply`, {
@@ -2292,6 +2382,25 @@
       return ((slotConfigs && slotConfigs[provider]) || []).find((e) => e.slot === slot) || {};
     }
 
+    // A vertex row's accessible-projects list, once fetched by its own
+    // "Validate" click -- keyed "provider-slot". Cached rather than
+    // re-fetched on every re-validate, same discipline as the guided-setup
+    // modal's own project cache.
+    const rowVertexProjectCache = new Map();
+    // Which rows have been live-confirmed for their CURRENTLY selected
+    // project+location pair THIS PAGE LOAD -- but a row's stored value is
+    // already known-good (it passed this same check when it was saved), so
+    // Save's disabled state (below) doesn't key off this alone. This only
+    // grows via a live "Validate" success and shrinks via a dropdown change
+    // to something other than the stored baseline (see rowVertexBaseline).
+    const rowVertexValidated = new Set();
+    // Each vertex row's project/location AS LAST SAVED -- lets a dropdown
+    // change re-enable Save without another live call when the operator
+    // picks the pair right back to what's already on file, and disable it
+    // for anything else. Repopulated on every render from the fetched
+    // slot_config, so it always reflects the server's current state.
+    const rowVertexBaseline = new Map();
+
     function renderSlotConfigRows(slotConfigs) {
       const container = document.getElementById("slotConfigRows");
       const rows = LLM_PROVIDERS.flatMap((provider) => {
@@ -2299,22 +2408,47 @@
         return slots.map((slot) => {
           const entry = slotConfigEntry(slotConfigs, provider, slot);
           const rowId = `slotCfg-${provider}-${slot}`;
+          const rowKey = `${provider}-${slot}`;
           const modelOptions = `<option value=""></option>${modelOptionsHtml(provider, entry.model || "")}`;
-          const vertexFields = provider === "vertex"
-            ? `
+          let vertexFields = "";
+          if (provider === "vertex") {
+            const currentProject = entry.vertex_gcp_project || "";
+            const currentLocation = entry.vertex_gcp_location || vertexLocations[0] || "";
+            rowVertexBaseline.set(rowKey, { project: currentProject, location: currentLocation });
+            // Never fetched (or a page reload since) -- show only the
+            // stored value until the operator clicks Validate to pull the
+            // full accessible-projects list.
+            const cachedProjects = rowVertexProjectCache.get(rowKey)
+              || (currentProject ? [currentProject] : []);
+            vertexFields = `
               <label>${t("env_config_vertex_project")}</label>
-              <input id="${rowId}-project" type="text" value="${esc(entry.vertex_gcp_project || "")}">
+              <select id="${rowId}-project" data-provider="${esc(provider)}" data-slot="${slot}">
+                ${vertexProjectOptionsHtml(cachedProjects, currentProject)}
+              </select>
               <label>${t("env_config_vertex_location")}</label>
-              <input id="${rowId}-location" type="text" value="${esc(entry.vertex_gcp_location || "")}">
-            `
-            : "";
+              <select id="${rowId}-location" data-provider="${esc(provider)}" data-slot="${slot}">
+                ${vertexLocationOptionsHtml(vertexLocations, currentLocation)}
+              </select>
+              <button type="button" class="control slot-config-validate" data-provider="${esc(provider)}" data-slot="${slot}">${t("env_config_validate")}</button>
+            `;
+          }
+          // A row with a stored location already passed this same check
+          // when it was saved -- only a genuinely unconfigured row (no
+          // location on file yet) needs a live Validate before its first
+          // Save. Requiring one on every page load, even to change an
+          // unrelated field like the model, would be needless friction for
+          // an already-working row.
+          const saveDisabled = provider === "vertex"
+            && !entry.vertex_gcp_location
+            && !rowVertexValidated.has(rowKey)
+            ? "disabled" : "";
           return `
             <div class="provider-model-row" data-provider="${provider}">
               <span class="provider-name">${esc(provider)} (${t("env_config_key_slot")} ${slot})</span>
               <label>${t("env_config_model")}</label>
               <select id="${rowId}-model">${modelOptions}</select>
               ${vertexFields}
-              <button type="button" class="control slot-config-save" data-provider="${esc(provider)}" data-slot="${slot}">${t("env_save")}</button>
+              <button type="button" class="control slot-config-save" data-provider="${esc(provider)}" data-slot="${slot}" ${saveDisabled}>${t("env_save")}</button>
               <span class="field-hint" data-slot-result="${provider}-${slot}"></span>
             </div>
           `;
@@ -2328,6 +2462,82 @@
           btn.getAttribute("data-provider"), parseInt(btn.getAttribute("data-slot"), 10)
         ));
       });
+      container.querySelectorAll(".slot-config-validate").forEach((btn) => {
+        btn.addEventListener("click", () => validateSlotConfigRow(
+          btn.getAttribute("data-provider"), parseInt(btn.getAttribute("data-slot"), 10)
+        ));
+      });
+      // Changing either vertex dropdown re-arms the "needs another
+      // Validate" gate for anything other than the ALREADY-SAVED pair --
+      // picking a genuinely new pair has never been confirmed live, so Save
+      // must not act on it yet. Picking the dropdowns right back to the
+      // stored baseline needs no re-validate: that pair is already known
+      // good on the server.
+      container.querySelectorAll('select[id$="-project"], select[id$="-location"]').forEach((select) => {
+        select.addEventListener("change", () => {
+          const provider = select.getAttribute("data-provider");
+          const slot = select.getAttribute("data-slot");
+          const rowKey = `${provider}-${slot}`;
+          const rowId = `slotCfg-${provider}-${slot}`;
+          const saveBtn = container.querySelector(`.slot-config-save[data-provider="${provider}"][data-slot="${slot}"]`);
+          const hint = document.querySelector(`[data-slot-result="${provider}-${slot}"]`);
+          const baseline = rowVertexBaseline.get(rowKey) || {};
+          const currentProject = document.getElementById(`${rowId}-project`).value;
+          const currentLocation = document.getElementById(`${rowId}-location`).value;
+          const matchesBaseline = currentProject === (baseline.project || "")
+            && currentLocation === (baseline.location || "");
+          if (matchesBaseline) {
+            if (saveBtn) saveBtn.disabled = false;
+            if (hint) hint.textContent = "";
+            return;
+          }
+          rowVertexValidated.delete(rowKey);
+          if (saveBtn) saveBtn.disabled = true;
+          if (hint) hint.textContent = t("env_config_needs_revalidate");
+        });
+      });
+    }
+
+    async function validateSlotConfigRow(provider, slot) {
+      const rowId = `slotCfg-${provider}-${slot}`;
+      const rowKey = `${provider}-${slot}`;
+      const hint = document.querySelector(`[data-slot-result="${provider}-${slot}"]`);
+      const saveBtn = document.querySelector(`.slot-config-save[data-provider="${provider}"][data-slot="${slot}"]`);
+      const validateBtn = document.querySelector(`.slot-config-validate[data-provider="${provider}"][data-slot="${slot}"]`);
+      const projectSelect = document.getElementById(`${rowId}-project`);
+      const locationSelect = document.getElementById(`${rowId}-location`);
+      const projectOverride = projectSelect.value;
+      const locationOverride = locationSelect.value;
+      // Only ask for the accessible-projects listing once per row -- a
+      // re-validate after a dropdown change re-checks the pair without
+      // repeating that live call.
+      const includeProjects = !rowVertexProjectCache.has(rowKey);
+      validateBtn.disabled = true;
+      try {
+        const params = new URLSearchParams({
+          slot: String(slot),
+          project_override: projectOverride,
+          location_override: locationOverride,
+          include_projects: String(includeProjects),
+        });
+        const resp = await fetch(`/api/environment/credential/${provider}/models?${params}`);
+        const result = await resp.json();
+        if (result.projects !== null) {
+          rowVertexProjectCache.set(rowKey, result.projects);
+          projectSelect.innerHTML = vertexProjectOptionsHtml(result.projects, projectOverride);
+        }
+        if (result.ok) {
+          rowVertexValidated.add(rowKey);
+          if (saveBtn) saveBtn.disabled = false;
+          if (hint) hint.textContent = t("env_valid");
+        } else {
+          rowVertexValidated.delete(rowKey);
+          if (saveBtn) saveBtn.disabled = true;
+          if (hint) hint.textContent = `${t("env_invalid")}: ${result.error}`;
+        }
+      } finally {
+        validateBtn.disabled = false;
+      }
     }
 
     async function saveSlotConfig(provider, slot) {
@@ -2475,6 +2685,7 @@
         // operator, a script), so a stale in-memory copy from an earlier
         // visit to this tab shouldn't linger for the rest of the session.
         if (targetId === "environmentPanel" && !alreadyActive) {
+          await fetchVertexLocations(); // static reference list -- fetched once, never re-fetched
           await fetchEnvironmentRender();
           await fetchEnvironmentConfig();
           await loadAllModelCatalogs();

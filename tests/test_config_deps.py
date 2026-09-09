@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from config_deps import (
-    conflicts_for,
     credential_slot_vars,
     dependents_of,
     slot_index_for_var,
@@ -89,25 +88,6 @@ def test_dependents_of_flags_provider_when_deleting_the_actually_active_slot():
     )
     assert dependents.key_index_override is True
     assert dependents.provider_override is True
-
-
-def test_conflicts_for_flags_project_mismatch():
-    conflicts = conflicts_for("vertex", "new-project", "old-project")
-    assert conflicts == [
-        {"var": "VERTEX_GCP_PROJECT", "current": "old-project", "new": "new-project"}
-    ]
-
-
-def test_conflicts_for_no_conflict_when_projects_match():
-    assert conflicts_for("vertex", "same", "same") == []
-
-
-def test_conflicts_for_empty_when_no_current_value_set():
-    assert conflicts_for("vertex", "new-project", None) == []
-
-
-def test_conflicts_for_empty_for_non_vertex_family():
-    assert conflicts_for("gemini", "x", "y") == []
 
 
 def test_dependents_of_flags_slot_config_for_an_inactive_spare_slot():

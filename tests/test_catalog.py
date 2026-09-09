@@ -201,3 +201,90 @@ class TestClassifyExceptionPrecedence:
         exc.code = 429
 
         assert catalog._classify_exception(exc) == "rate_limited"
+
+    def test_falls_back_to_response_status_code(self):
+        exc = Exception()
+        exc.response = MagicMock(status_code=403)
+
+        assert catalog._classify_exception(exc) == "forbidden"
+
+
+class TestVertexCatalogLocations:
+    def test_includes_the_default_location(self):
+        assert catalog.DEFAULT_VERTEX_LOCATION in catalog.VERTEX_CATALOG_LOCATIONS
+
+    def test_has_no_duplicates(self):
+        assert len(catalog.VERTEX_CATALOG_LOCATIONS) == len(set(catalog.VERTEX_CATALOG_LOCATIONS))
+
+
+class TestListAccessibleProjects:
+    def test_no_service_account_info_is_invalid_service_account_json(self):
+        result = catalog.list_accessible_projects(None)
+
+        assert result.ok is False
+        assert result.error == "invalid_service_account_json"
+
+    @patch("providers.catalog.service_account.Credentials.from_service_account_info")
+    def test_bad_service_account_info_is_invalid_service_account_json(self, mock_from_info):
+        mock_from_info.side_effect = ValueError("malformed")
+
+        result = catalog.list_accessible_projects({"project_id": "proj-a"})
+
+        assert result.ok is False
+        assert result.error == "invalid_service_account_json"
+
+    @patch("providers.catalog.AuthorizedSession")
+    @patch("providers.catalog.service_account.Credentials.from_service_account_info")
+    def test_success_returns_sorted_deduped_project_ids(self, mock_from_info, mock_session_cls):
+        mock_from_info.return_value = MagicMock()
+        session = MagicMock()
+        session.get.return_value.json.return_value = {
+            "projects": [
+                {"projectId": "proj-b"},
+                {"projectId": "proj-a"},
+                {"projectId": "proj-a"},
+                {},
+            ]
+        }
+        mock_session_cls.return_value = session
+
+        result = catalog.list_accessible_projects({"project_id": "proj-a"})
+
+        assert result.ok is True
+        assert result.models == ["proj-a", "proj-b"]
+        session.get.assert_called_once_with(
+            catalog._RESOURCE_MANAGER_SEARCH_URL, timeout=catalog._LIST_TIMEOUT_MS / 1000
+        )
+
+    @patch("providers.catalog.AuthorizedSession")
+    @patch("providers.catalog.service_account.Credentials.from_service_account_info")
+    def test_forbidden_response_maps_to_structural_error(self, mock_from_info, mock_session_cls):
+        import requests
+
+        mock_from_info.return_value = MagicMock()
+        session = MagicMock()
+        error_response = MagicMock(status_code=403)
+        session.get.return_value.raise_for_status.side_effect = requests.exceptions.HTTPError(
+            response=error_response
+        )
+        mock_session_cls.return_value = session
+
+        result = catalog.list_accessible_projects({"project_id": "proj-a"})
+
+        assert result.ok is False
+        assert result.error == "forbidden"
+
+    @patch("providers.catalog.AuthorizedSession")
+    @patch("providers.catalog.service_account.Credentials.from_service_account_info")
+    def test_refresh_error_is_unauthorized(self, mock_from_info, mock_session_cls):
+        from google.auth.exceptions import RefreshError
+
+        mock_from_info.return_value = MagicMock()
+        session = MagicMock()
+        session.get.side_effect = RefreshError("invalid_grant: account disabled")
+        mock_session_cls.return_value = session
+
+        result = catalog.list_accessible_projects({"project_id": "proj-a"})
+
+        assert result.ok is False
+        assert result.error == "unauthorized"

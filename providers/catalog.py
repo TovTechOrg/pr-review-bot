@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 from google import genai
 from google.auth import exceptions as google_auth_exceptions
+from google.auth.transport.requests import AuthorizedSession
 from google.genai import types
 from google.oauth2 import service_account
 from groq import Groq
@@ -48,10 +49,16 @@ def _classify_exception(exc: Exception) -> str:
     # (Stainless-based ones, e.g. openai-python's APIError) set a STRING
     # error code on `.code` (e.g. "invalid_api_key") that would otherwise
     # short-circuit an `or` chain and silently misclassify a real 401/429 as
-    # provider_unreachable.
+    # provider_unreachable. Falls back to exc.response.status_code last --
+    # requests.exceptions.HTTPError (raised by list_accessible_projects'
+    # raise_for_status()) carries its status there instead of on the
+    # exception itself.
     status = getattr(exc, "status_code", None)
     if status is None:
         status = getattr(exc, "code", None)
+    if not isinstance(status, int):
+        response = getattr(exc, "response", None)
+        status = getattr(response, "status_code", None) if response is not None else None
     if not isinstance(status, int):
         status = None
     return _classify_status(status)
@@ -107,7 +114,7 @@ def list_groq_models(api_key: str) -> CatalogResult:
     return CatalogResult(ok=True, models=[m.id for m in response.data], error=None)
 
 
-_DEFAULT_CATALOG_LOCATION = "us-central1"
+DEFAULT_VERTEX_LOCATION = "us-central1"
 
 
 def list_vertex_models(
@@ -115,7 +122,7 @@ def list_vertex_models(
     project_override: str | None = None,
     location_override: str | None = None,
 ) -> CatalogResult:
-    """`location_override` unset falls back to _DEFAULT_CATALOG_LOCATION -- a
+    """`location_override` unset falls back to DEFAULT_VERTEX_LOCATION -- a
     LITERAL, not a Settings read. settings.vertex_gcp_location is no longer
     authoritative (it's only a seed value for slot_config -- see
     docs/superpowers/specs/2026-09-08-slotted-config-and-db-delegation-
@@ -127,7 +134,7 @@ def list_vertex_models(
     project = project_override or (service_account_info or {}).get("project_id", "")
     if not project:
         return CatalogResult(ok=False, models=None, error="invalid_service_account_json")
-    location = location_override or _DEFAULT_CATALOG_LOCATION
+    location = location_override or DEFAULT_VERTEX_LOCATION
 
     creds = None
     if service_account_info is not None:
@@ -151,3 +158,81 @@ def list_vertex_models(
         error = _classify_vertex_auth_exception(exc) or _classify_exception(exc)
         return CatalogResult(ok=False, models=None, error=error)
     return CatalogResult(ok=True, models=models, error=None)
+
+
+# Vertex AI's generative-model regions -- unlike the project dropdown, this
+# does NOT come from a live listing call: there is no API that enumerates
+# "locations with generative models enabled" keyed by project, and region
+# availability is essentially the same across projects (only quota/org
+# policy varies per project-location pair, which the guided-setup/config-
+# panel flows already re-check live via list_vertex_models before Save/
+# Apply). This is a curated reference list, not a guarantee -- if it drifts
+# from Google's actual supported-region list, the worst case is a dropdown
+# entry that fails that live re-check, never a silently-accepted bad value.
+VERTEX_CATALOG_LOCATIONS = [
+    "us-central1",
+    "us-east1",
+    "us-east4",
+    "us-east5",
+    "us-south1",
+    "us-west1",
+    "us-west4",
+    "northamerica-northeast1",
+    "southamerica-east1",
+    "europe-west1",
+    "europe-west2",
+    "europe-west3",
+    "europe-west4",
+    "europe-west8",
+    "europe-west9",
+    "europe-southwest1",
+    "europe-central2",
+    "europe-north1",
+    "asia-east1",
+    "asia-northeast1",
+    "asia-northeast3",
+    "asia-south1",
+    "asia-southeast1",
+    "australia-southeast1",
+    "global",
+]
+
+_RESOURCE_MANAGER_SEARCH_URL = "https://cloudresourcemanager.googleapis.com/v3/projects:search"
+
+
+def list_accessible_projects(service_account_info: dict | None) -> CatalogResult:
+    """Every GCP project this credential's own IAM bindings let it act
+    against, via Cloud Resource Manager's `projects:search`.
+
+    This is a real listing call, not a value derivable from the key itself:
+    a service account's `project_id` field names only its "home" project,
+    but the same account can hold IAM roles (and therefore be usable by
+    providers/factory.py's `vertex_gcp_project`) on other projects too --
+    see providers/factory.py's `project=` passthrough, which is never
+    validated against the key's own project_id. One deliberate live call,
+    same discipline as list_vertex_models/list_gemini_models/
+    list_groq_models."""
+    if not service_account_info:
+        return CatalogResult(ok=False, models=None, error="invalid_service_account_json")
+    try:
+        creds = service_account.Credentials.from_service_account_info(
+            service_account_info, scopes=_VERTEX_SCOPES
+        )
+    except Exception:  # noqa: BLE001 -- malformed key content, not an HTTP failure
+        return CatalogResult(ok=False, models=None, error="invalid_service_account_json")
+
+    try:
+        session = AuthorizedSession(creds)
+        response = session.get(_RESOURCE_MANAGER_SEARCH_URL, timeout=_LIST_TIMEOUT_MS / 1000)
+        response.raise_for_status()
+        projects = sorted(
+            {
+                p["projectId"]
+                for p in response.json().get("projects", [])
+                if p.get("projectId")
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        error = _classify_vertex_auth_exception(exc) or _classify_exception(exc)
+        return CatalogResult(ok=False, models=None, error=error)
+    return CatalogResult(ok=True, models=projects, error=None)

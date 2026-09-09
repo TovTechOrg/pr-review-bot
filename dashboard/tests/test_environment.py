@@ -461,7 +461,6 @@ async def test_guided_gemini_validate_success(monkeypatch):
     body = resp.json()
     assert body["ok"] is True
     assert body["models"] == ["gemini-flash-latest"]
-    assert body["conflicts"] == []
 
 
 async def test_guided_gemini_validate_failure_is_structural(monkeypatch):
@@ -479,10 +478,16 @@ async def test_guided_gemini_validate_failure_is_structural(monkeypatch):
     assert body["error"] == "unauthorized"
 
 
-async def test_guided_vertex_validate_uploads_file_and_flags_project_conflict(monkeypatch, db):
-    """current_project comes from slot_config, not Render: VERTEX_GCP_PROJECT
-    has been DB-only since the 2026-09-08 slotted-config work, so it no
-    longer exists as a Render env var at all."""
+async def test_guided_vertex_validate_first_call_populates_project_and_location_pickers(
+    monkeypatch, db
+):
+    """The first validate of a freshly-uploaded file (no project/location
+    overrides yet) must return enough for the guided-setup modal to build
+    its dropdowns: the accessible-projects listing, the static locations
+    list, and sane pre-selected defaults. current_project comes from
+    slot_config, not Render: VERTEX_GCP_PROJECT has been DB-only since the
+    2026-09-08 slotted-config work, so it no longer exists as a Render env
+    var at all."""
     store.set_slot_config(
         "vertex", 0,
         model="m", vertex_gcp_project="old-proj", vertex_gcp_location="us-east1",
@@ -499,6 +504,10 @@ async def test_guided_vertex_validate_uploads_file_and_flags_project_conflict(mo
         return catalog.CatalogResult(ok=True, models=["gemini-2.5-flash"], error=None)
 
     monkeypatch.setattr(catalog, "list_vertex_models", _list_vertex)
+    monkeypatch.setattr(
+        catalog, "list_accessible_projects",
+        lambda info: catalog.CatalogResult(ok=True, models=["new-proj", "third-proj"], error=None),
+    )
 
     def _boom(*a, **kw):
         raise AssertionError("must not call render_client.env_vars -- slot_config is authoritative")
@@ -513,17 +522,17 @@ async def test_guided_vertex_validate_uploads_file_and_flags_project_conflict(mo
     body = resp.json()
     assert body["ok"] is True
     assert body["project_id"] == "new-proj"
-    assert body["conflicts"] == [
-        {"var": "VERTEX_GCP_PROJECT", "current": "old-proj", "new": "new-proj"}
-    ]
+    # The slot's existing project is pre-selected (a credential rotation
+    # keeps the current project by default), not the uploaded key's own --
+    # matching the retired conflict-radio's "keep" default.
+    assert body["default_project"] == "old-proj"
+    assert body["projects"] == ["new-proj", "old-proj", "third-proj"]
+    assert body["default_location"] == "us-east1"
 
 
-async def test_guided_vertex_validate_reports_no_conflict_for_a_different_slot(monkeypatch, db):
-    store.set_slot_config(
-        "vertex", 0,
-        model="m", vertex_gcp_project="old-proj", vertex_gcp_location="us-east1",
-        now="2026-09-08T00:00:00+00:00",
-    )
+async def test_guided_vertex_validate_defaults_to_the_keys_own_project_for_a_fresh_slot(
+    monkeypatch, db
+):
     key_json = b'{"project_id": "new-proj", "token_uri": "https://oauth2.googleapis.com/token"}'
     monkeypatch.setattr(
         catalog, "list_vertex_models",
@@ -531,13 +540,56 @@ async def test_guided_vertex_validate_reports_no_conflict_for_a_different_slot(m
             ok=True, models=["gemini-2.5-flash"], error=None
         ),
     )
+    monkeypatch.setattr(
+        catalog, "list_accessible_projects",
+        lambda info: catalog.CatalogResult(ok=True, models=[], error=None),
+    )
     client = await _client()
     resp = await client.post(
         "/api/environment/credential/vertex/validate",
-        data={"slot": "1"},  # slot 1 has no existing row -- no conflict possible
+        data={"slot": "1"},  # slot 1 has no existing row
         files={"credential_file": ("key.json", io.BytesIO(key_json), "application/json")},
     )
-    assert resp.json()["conflicts"] == []
+    body = resp.json()
+    assert body["default_project"] == "new-proj"
+    assert body["default_location"] == catalog.DEFAULT_VERTEX_LOCATION
+
+
+async def test_guided_vertex_revalidate_with_overrides_skips_the_projects_listing_call(
+    monkeypatch, db
+):
+    """A re-validate after the operator changes a dropdown must not repeat
+    the accessible-projects listing call -- only the model re-check for the
+    newly-chosen pair."""
+    key_json = b'{"project_id": "new-proj", "token_uri": "https://oauth2.googleapis.com/token"}'
+
+    def _list_vertex(info, project_override=None, location_override=None):
+        assert project_override == "chosen-proj"
+        assert location_override == "europe-west4"
+        return catalog.CatalogResult(ok=True, models=["gemini-2.5-flash"], error=None)
+
+    monkeypatch.setattr(catalog, "list_vertex_models", _list_vertex)
+
+    def _boom(*a, **kw):
+        raise AssertionError("re-validate must not repeat the projects listing call")
+
+    monkeypatch.setattr(catalog, "list_accessible_projects", _boom)
+    client = await _client()
+    resp = await client.post(
+        "/api/environment/credential/vertex/validate",
+        data={"slot": "0", "project_override": "chosen-proj", "location_override": "europe-west4"},
+        files={"credential_file": ("key.json", io.BytesIO(key_json), "application/json")},
+    )
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["projects"] is None
+
+
+async def test_get_vertex_locations_returns_the_static_reference_list():
+    client = await _client()
+    resp = await client.get("/api/environment/vertex-locations")
+    assert resp.status_code == 200
+    assert resp.json() == {"locations": catalog.VERTEX_CATALOG_LOCATIONS}
 
 
 async def test_vertex_validate_rejects_an_out_of_range_slot():
@@ -602,7 +654,13 @@ async def test_guided_gemini_apply_writes_credential_only_to_render(monkeypatch,
     client = await _client()
     resp = await client.post(
         "/api/environment/credential/gemini/apply",
-        json={"slot": 0, "credential": {"api_key": "the-key"}, "model": "gemini-flash-latest"},
+        json={
+            "slot": 0,
+            "credential": {"api_key": "the-key"},
+            "model": "gemini-flash-latest",
+            "vertex_gcp_project": None,
+            "vertex_gcp_location": None,
+        },
     )
     assert resp.status_code == 200
     result = resp.json()
@@ -617,7 +675,13 @@ async def test_apply_writes_model_to_slot_config(monkeypatch, db):
     client = await _client()
     await client.post(
         "/api/environment/credential/groq/apply",
-        json={"slot": 2, "credential": {"api_key": "real-key"}, "model": "gemma2-9b-it"},
+        json={
+            "slot": 2,
+            "credential": {"api_key": "real-key"},
+            "model": "gemma2-9b-it",
+            "vertex_gcp_project": None,
+            "vertex_gcp_location": None,
+        },
     )
     row = store.get_slot_config("groq", 2)
     assert row["model"] == "gemma2-9b-it"
@@ -660,27 +724,43 @@ async def test_apply_reports_slot_config_write_failure_as_a_named_failed_entry(m
     client = await _client()
     resp = await client.post(
         "/api/environment/credential/groq/apply",
-        json={"slot": 0, "credential": {"api_key": "real-key"}, "model": "llama-3.3-70b-versatile"},
+        json={
+            "slot": 0,
+            "credential": {"api_key": "real-key"},
+            "model": "llama-3.3-70b-versatile",
+            "vertex_gcp_project": None,
+            "vertex_gcp_location": None,
+        },
     )
     body = resp.json()
     assert "GROQ_API_KEY" in body["applied"]
     assert any(f["key"] == "slot_config.groq.0" for f in body["failed"])
 
 
-async def test_apply_preserves_existing_vertex_project_and_location_when_omitted(monkeypatch, db):
-    """Regression test: a guided credential rotation that omits project/
-    location (the common case -- rotating a key, not moving GCP regions)
-    must not null out the slot's existing values. Before the fix, this was a
-    blind overwrite that broke every subsequent review on the slot with 'no
-    location configured'."""
-    store.set_slot_config(
-        "vertex", 0,
-        model="old-model", vertex_gcp_project="proj-a", vertex_gcp_location="us-east1",
-        now="2026-09-08T00:00:00+00:00",
-    )
+async def test_apply_requires_the_vertex_project_and_location_fields_explicitly(monkeypatch, db):
+    """The guided-setup dropdowns are now always authoritative (mirroring
+    `model`, which was never merge-with-existing either) -- a request that
+    omits the fields entirely is rejected at the pydantic layer rather than
+    silently merged with whatever the slot already had. This replaces the
+    old omission-merges-with-existing contract: before the project/location
+    dropdowns existed, the guided flow had no way to send real values at
+    all, so omission had to fall back to the existing row: see this
+    session's investigation of `slot_config.vertex.0
+    (vertex_gcp_location_required)`."""
     monkeypatch.setattr(render_client, "push_env_var", lambda *a: None)
     monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
-    monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
+    client = await _client()
+    resp = await client.post(
+        "/api/environment/credential/vertex/apply",
+        json={"slot": 0, "credential": {"service_account_b64": "..."}, "model": "gemini-2.5-flash"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_apply_refuses_a_vertex_slot_with_a_null_location(monkeypatch, db):
+    pushed = []
+    monkeypatch.setattr(render_client, "push_env_var", lambda *a: pushed.append(a))
+    monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
     client = await _client()
     resp = await client.post(
         "/api/environment/credential/vertex/apply",
@@ -688,25 +768,9 @@ async def test_apply_preserves_existing_vertex_project_and_location_when_omitted
             "slot": 0,
             "credential": {"service_account_b64": "..."},
             "model": "gemini-2.5-flash",
+            "vertex_gcp_project": None,
+            "vertex_gcp_location": None,
         },
-    )
-    assert resp.status_code == 200
-    row = store.get_slot_config("vertex", 0)
-    assert row == {
-        "model": "gemini-2.5-flash",
-        "vertex_gcp_project": "proj-a",
-        "vertex_gcp_location": "us-east1",
-    }
-
-
-async def test_apply_refuses_a_vertex_slot_with_no_resolvable_location(monkeypatch, db):
-    pushed = []
-    monkeypatch.setattr(render_client, "push_env_var", lambda *a: pushed.append(a))
-    monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
-    client = await _client()
-    resp = await client.post(
-        "/api/environment/credential/vertex/apply",
-        json={"slot": 0, "credential": {"service_account_b64": "..."}, "model": "gemini-2.5-flash"},
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -715,7 +779,11 @@ async def test_apply_refuses_a_vertex_slot_with_no_resolvable_location(monkeypat
     assert pushed == []  # refused BEFORE the Render credential push
 
 
-async def test_apply_clear_vertex_project_writes_null_but_keeps_location(monkeypatch, db):
+async def test_apply_writes_an_explicit_null_project_as_use_the_keys_own(monkeypatch, db):
+    """The project dropdown's blank option ("use the key's own project")
+    sends an explicit null -- distinct from omitting the field, which is now
+    rejected outright (see test_apply_requires_the_vertex_project_and_location
+    _fields_explicitly)."""
     store.set_slot_config(
         "vertex", 0,
         model="old-model", vertex_gcp_project="proj-a", vertex_gcp_location="us-east1",
@@ -731,7 +799,8 @@ async def test_apply_clear_vertex_project_writes_null_but_keeps_location(monkeyp
             "slot": 0,
             "credential": {"service_account_b64": "..."},
             "model": "gemini-2.5-flash",
-            "clear_vertex_gcp_project": True,
+            "vertex_gcp_project": None,
+            "vertex_gcp_location": "us-east1",
         },
     )
     row = store.get_slot_config("vertex", 0)
@@ -751,6 +820,7 @@ async def test_apply_never_writes_vertex_columns_for_a_groq_family(monkeypatch, 
             "credential": {"api_key": "real-key"},
             "model": "llama-3.3-70b-versatile",
             "vertex_gcp_project": "should-be-ignored",
+            "vertex_gcp_location": "should-be-ignored",
         },
     )
     row = store.get_slot_config("groq", 0)
@@ -829,7 +899,9 @@ async def test_credential_models_refresh_resolves_current_slot(monkeypatch):
     client = await _client()
     resp = await client.get("/api/environment/credential/gemini/models")
     assert resp.status_code == 200
-    assert resp.json() == {"ok": True, "models": ["gemini-flash-latest"], "error": None}
+    assert resp.json() == {
+        "ok": True, "models": ["gemini-flash-latest"], "error": None, "projects": None,
+    }
 
 
 async def test_credential_models_refresh_explicit_slot_overrides_current(monkeypatch):
@@ -856,7 +928,9 @@ async def test_credential_models_refresh_no_credential_configured(monkeypatch):
     client = await _client()
     resp = await client.get("/api/environment/credential/gemini/models")
     assert resp.status_code == 200
-    assert resp.json() == {"ok": False, "models": None, "error": "no_credential_configured"}
+    assert resp.json() == {
+        "ok": False, "models": None, "error": "no_credential_configured", "projects": None,
+    }
 
 
 async def test_credential_models_refresh_rejects_github_app_family():
@@ -922,6 +996,108 @@ async def test_vertex_model_fetch_falls_back_when_the_slot_has_no_config(monkeyp
     assert resp.status_code == 200
     assert seen["project_override"] is None
     assert seen["location_override"] is None
+
+
+async def test_vertex_model_fetch_query_overrides_win_over_the_stored_row(monkeypatch, db):
+    """The config panel's per-row 'Validate' click passes the CURRENTLY
+    SELECTED (possibly unsaved) dropdown values -- these must win over
+    whatever slot_config still has on file, exactly like the guided-setup
+    validate endpoint's overrides."""
+    store.set_slot_config(
+        "vertex", 1, model="m", vertex_gcp_project="stored-proj", vertex_gcp_location="us-east1",
+        now="2026-09-08T00:00:00+00:00",
+    )
+    monkeypatch.setattr(
+        vertex_credentials, "resolve_service_account_info", lambda index: {"project_id": "proj-a"}
+    )
+    seen = {}
+
+    def _list_vertex(info, project_override=None, location_override=None):
+        seen["project_override"] = project_override
+        seen["location_override"] = location_override
+        return catalog.CatalogResult(ok=True, models=["gemini-2.5-flash"], error=None)
+
+    monkeypatch.setattr(catalog, "list_vertex_models", _list_vertex)
+    client = await _client()
+    resp = await client.get(
+        "/api/environment/credential/vertex/models",
+        params={"slot": 1, "project_override": "chosen-proj", "location_override": "europe-west4"},
+    )
+    assert resp.status_code == 200
+    assert seen["project_override"] == "chosen-proj"
+    assert seen["location_override"] == "europe-west4"
+
+
+async def test_vertex_model_fetch_blank_project_override_means_use_the_keys_own(monkeypatch, db):
+    """An explicit empty-string override (the dropdown's blank 'use the
+    key's own project' option) must reach list_vertex_models as None, not
+    silently fall back to the stored row's project -- distinct from the
+    query param being absent entirely."""
+    store.set_slot_config(
+        "vertex", 1, model="m", vertex_gcp_project="stored-proj", vertex_gcp_location="us-east1",
+        now="2026-09-08T00:00:00+00:00",
+    )
+    monkeypatch.setattr(
+        vertex_credentials, "resolve_service_account_info", lambda index: {"project_id": "proj-a"}
+    )
+    seen = {}
+
+    def _list_vertex(info, project_override=None, location_override=None):
+        seen["project_override"] = project_override
+        return catalog.CatalogResult(ok=True, models=["gemini-2.5-flash"], error=None)
+
+    monkeypatch.setattr(catalog, "list_vertex_models", _list_vertex)
+    client = await _client()
+    resp = await client.get(
+        "/api/environment/credential/vertex/models",
+        params={"slot": 1, "project_override": ""},
+    )
+    assert resp.status_code == 200
+    assert seen["project_override"] is None
+
+
+async def test_vertex_model_fetch_include_projects_populates_the_dropdown(monkeypatch, db):
+    monkeypatch.setattr(
+        vertex_credentials, "resolve_service_account_info", lambda index: {"project_id": "proj-a"}
+    )
+    monkeypatch.setattr(
+        catalog, "list_vertex_models",
+        lambda info, project_override=None, location_override=None: catalog.CatalogResult(
+            ok=True, models=["gemini-2.5-flash"], error=None
+        ),
+    )
+    monkeypatch.setattr(
+        catalog, "list_accessible_projects",
+        lambda info: catalog.CatalogResult(ok=True, models=["proj-b"], error=None),
+    )
+    client = await _client()
+    resp = await client.get(
+        "/api/environment/credential/vertex/models",
+        params={"slot": 0, "include_projects": True},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["projects"] == ["proj-a", "proj-b"]
+
+
+async def test_vertex_model_fetch_omits_projects_by_default(monkeypatch, db):
+    monkeypatch.setattr(
+        vertex_credentials, "resolve_service_account_info", lambda index: {"project_id": "proj-a"}
+    )
+    monkeypatch.setattr(
+        catalog, "list_vertex_models",
+        lambda info, project_override=None, location_override=None: catalog.CatalogResult(
+            ok=True, models=["gemini-2.5-flash"], error=None
+        ),
+    )
+
+    def _boom(info):
+        raise AssertionError("must not list accessible projects unless include_projects=true")
+
+    monkeypatch.setattr(catalog, "list_accessible_projects", _boom)
+    client = await _client()
+    resp = await client.get("/api/environment/credential/vertex/models?slot=0")
+    assert resp.status_code == 200
+    assert resp.json()["projects"] is None
 
 
 async def test_validate_model_var_ok_when_in_catalog(monkeypatch):
@@ -1274,7 +1450,13 @@ async def test_guided_gemini_apply_also_sets_slot_config_model(monkeypatch, db):
     client = await _client()
     resp = await client.post(
         "/api/environment/credential/gemini/apply",
-        json={"slot": 0, "credential": {"api_key": "the-key"}, "model": "gemini-flash-latest"},
+        json={
+            "slot": 0,
+            "credential": {"api_key": "the-key"},
+            "model": "gemini-flash-latest",
+            "vertex_gcp_project": None,
+            "vertex_gcp_location": None,
+        },
     )
     assert resp.status_code == 200
     assert store.get_slot_config("gemini", 0)["model"] == "gemini-flash-latest"
@@ -1351,7 +1533,9 @@ async def test_credential_models_refresh_vertex_corrupt_credential_is_structural
     client = await _client()
     resp = await client.get("/api/environment/credential/vertex/models")
     assert resp.status_code == 200
-    assert resp.json() == {"ok": False, "models": None, "error": "invalid_service_account_json"}
+    assert resp.json() == {
+        "ok": False, "models": None, "error": "invalid_service_account_json", "projects": None,
+    }
 
 
 async def test_patch_render_survives_a_raising_validator_instead_of_500ing(monkeypatch):

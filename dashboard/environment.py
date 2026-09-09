@@ -174,48 +174,91 @@ def _validate_llm_credential(family: str, api_key: str) -> dict:
         "models": result.models,
         "project_id": None,
         "installation_id": None,
-        "conflicts": [],
     }
 
 
-def _validate_vertex_credential(raw_bytes: bytes, slot: int) -> dict:
+_EMPTY_VERTEX_VALIDATE_RESULT = {
+    "ok": False,
+    "error": "invalid_service_account_json",
+    "models": None,
+    "project_id": None,
+    "installation_id": None,
+    "projects": None,
+    "default_project": None,
+    "default_location": None,
+}
+
+
+def _validate_vertex_credential(
+    raw_bytes: bytes,
+    slot: int,
+    project_override: str | None = None,
+    location_override: str | None = None,
+) -> dict:
+    """Validate an uploaded vertex service-account key against a specific
+    (project, location) pair.
+
+    `project_override`/`location_override` both None means "first validate
+    of a freshly-uploaded file" -- the caller has no dropdown selections
+    yet, so this also runs the one-time `list_accessible_projects` listing
+    call and returns `projects`/`default_project`/`default_location` to
+    populate the guided-setup modal's dropdowns. The location OPTIONS list
+    itself is not returned here at all -- see GET /api/environment/vertex-
+    locations, a static reference the frontend fetches once, independent of
+    any credential (unlike projects, region availability isn't specific to
+    a credential). Either override set means "re-validate after the
+    operator changed a dropdown" -- only the live list_vertex_models
+    re-check for that exact pair is needed; repeating the projects listing
+    call on every dropdown change would be a live call per keystroke, not
+    the one-deliberate-call discipline root CLAUDE.md requires.
+    """
     try:
         info = json.loads(raw_bytes.decode())
     except (json.JSONDecodeError, UnicodeDecodeError):
-        return {
-            "ok": False,
-            "error": "invalid_service_account_json",
-            "models": None,
-            "project_id": None,
-            "installation_id": None,
-            "conflicts": [],
-        }
-    project_id = info.get("project_id") if isinstance(info, dict) else None
-    # Validate the uploaded key against ITS OWN project, not whatever the
-    # slot's current vertex_gcp_project happens to be -- a replacement key
-    # for a different (but perfectly valid) project must not be rejected just
-    # because the slot's existing project hasn't been updated yet. The
-    # mismatch itself is surfaced separately below, as a conflict prompt
-    # rather than a validation failure.
-    result = catalog.list_vertex_models(info, project_override=project_id)
-    conflicts: list[dict] = []
-    if result.ok and project_id:
-        # slot_config, not Render: VERTEX_GCP_PROJECT has been DB-only since
-        # the 2026-09-08 slotted-config work, so reading it off the Render
-        # service always returned None -- and this conflict prompt, the whole
-        # reason config_deps.conflicts_for exists, could never fire.
-        current_project = (store.get_slot_config("vertex", slot) or {}).get(
-            "vertex_gcp_project"
-        )
-        conflicts = config_deps.conflicts_for("vertex", project_id, current_project)
-    return {
+        return _EMPTY_VERTEX_VALIDATE_RESULT
+    if not isinstance(info, dict):
+        return _EMPTY_VERTEX_VALIDATE_RESULT
+    project_id = info.get("project_id")
+    result = catalog.list_vertex_models(
+        info,
+        project_override=project_override or project_id,
+        location_override=location_override,
+    )
+    response = {
         "ok": result.ok,
         "error": result.error,
         "models": result.models,
         "project_id": project_id if result.ok else None,
         "installation_id": None,
-        "conflicts": conflicts,
+        "projects": None,
+        "default_project": None,
+        "default_location": None,
     }
+    if project_override is None and location_override is None:
+        existing = store.get_slot_config("vertex", slot) or {}
+        projects_result = catalog.list_accessible_projects(info)
+        projects = set(projects_result.models or [])
+        default_project = existing.get("vertex_gcp_project") or project_id
+        # Guarantee the pre-selected value, and the key's own home project,
+        # are always real options -- even if projects:search omitted either
+        # (e.g. a fresh key whose IAM binding hasn't propagated yet).
+        projects.update(p for p in (default_project, project_id if result.ok else None) if p)
+        response["projects"] = sorted(projects)
+        response["default_project"] = default_project
+        response["default_location"] = (
+            existing.get("vertex_gcp_location") or catalog.DEFAULT_VERTEX_LOCATION
+        )
+    return response
+
+
+@router.get("/api/environment/vertex-locations")
+async def get_vertex_locations() -> JSONResponse:
+    """A static reference list, not a live call -- see
+    catalog.VERTEX_CATALOG_LOCATIONS's own docstring for why this doesn't
+    need to be per-credential or per-project. Fetched once by the dashboard
+    (not on every guided-setup/config-panel interaction) to populate the
+    location dropdowns without a round trip per keystroke."""
+    return JSONResponse({"locations": catalog.VERTEX_CATALOG_LOCATIONS})
 
 
 _GITHUB_STATUS_RE = re.compile(r"failed with (\d+)")
@@ -240,7 +283,6 @@ def _validate_github_app_credential(app_id: int, raw_bytes: bytes) -> dict:
             "models": None,
             "project_id": None,
             "installation_id": None,
-            "conflicts": [],
         }
     private_key_b64 = base64.b64encode(raw_bytes).decode()
     empty = {
@@ -248,7 +290,6 @@ def _validate_github_app_credential(app_id: int, raw_bytes: bytes) -> dict:
         "models": None,
         "project_id": None,
         "installation_id": None,
-        "conflicts": [],
     }
     try:
         gh_client = github_app._app_jwt_client_for(app_id, private_key_b64)
@@ -269,7 +310,6 @@ def _validate_github_app_credential(app_id: int, raw_bytes: bytes) -> dict:
         "models": None,
         "project_id": None,
         "installation_id": installation_id,
-        "conflicts": [],
     }
 
 
@@ -280,6 +320,8 @@ async def validate_credential(
     app_id: int | None = Form(None),
     slot: int = Form(0),
     credential_file: UploadFile | None = File(None),
+    project_override: str | None = Form(None),
+    location_override: str | None = Form(None),
 ) -> JSONResponse:
     if family not in CREDENTIAL_FAMILIES:
         raise HTTPException(status_code=404, detail="unknown credential family")
@@ -294,7 +336,9 @@ async def validate_credential(
         if credential_file is None:
             raise HTTPException(status_code=422, detail="credential_file is required")
         raw_bytes = await credential_file.read()
-        payload = await asyncio.to_thread(_validate_vertex_credential, raw_bytes, slot)
+        payload = await asyncio.to_thread(
+            _validate_vertex_credential, raw_bytes, slot, project_override, location_override
+        )
     else:  # github_app
         if app_id is None or credential_file is None:
             raise HTTPException(status_code=422, detail="app_id and credential_file are required")
@@ -307,9 +351,15 @@ class ApplyLlmCredentialRequest(BaseModel):
     slot: int = Field(default=0, ge=0, lt=MAX_CREDENTIAL_SLOTS)
     credential: dict[str, str]
     model: str
-    vertex_gcp_project: str | None = None
-    vertex_gcp_location: str | None = None
-    clear_vertex_gcp_project: bool = False
+    # No default on either: the guided-setup project/location dropdowns are
+    # now always authoritative (mirroring `model`, which was never merged
+    # with an existing row either) -- the request MUST name both, even if
+    # vertex_gcp_project is explicitly null ("use the key's own project").
+    # A default here would let a caller silently omit the field, which is
+    # exactly the trap this replaced: blind-writing None on omission used to
+    # null every slot's project/location on a plain credential rotation.
+    vertex_gcp_project: str | None
+    vertex_gcp_location: str | None
 
 
 class ApplyGithubAppRequest(BaseModel):
@@ -326,25 +376,14 @@ def _apply_llm_credential(family: str, payload: ApplyLlmCredentialRequest) -> di
     docs/superpowers/specs/2026-09-08-slotted-config-and-db-delegation-
     design.md section 8."""
     slot_config_key = f"slot_config.{family}.{payload.slot}"
-    # store.set_slot_config's contract is all three fields together, so a
-    # request that omits vertex_gcp_project/_location (the common case: the
-    # guided flow is normally rotating a credential, not moving GCP regions)
-    # must be read-then-merged, NOT blind-written. Blind-writing None here
-    # meant every credential rotation through this flow nulled the slot's
-    # project/location and left providers/factory.py raising "no location
-    # configured" on every subsequent review.
-    existing = store.get_slot_config(family, payload.slot) or {}
-    vertex_gcp_project = (
-        None
-        if payload.clear_vertex_gcp_project
-        else (payload.vertex_gcp_project or existing.get("vertex_gcp_project"))
-    )
-    vertex_gcp_location = payload.vertex_gcp_location or existing.get("vertex_gcp_location")
-    if family == "vertex" and not vertex_gcp_location:
+    if family == "vertex" and not payload.vertex_gcp_location:
         # No env fallback for location (spec section 4b/10.4): a slot with no
         # resolvable location cannot run a single review, so refuse up front,
         # BEFORE the Render credential push below, rather than writing a row
-        # factory.py will reject later, on a PR.
+        # factory.py will reject later, on a PR. The guided-setup UI always
+        # sends a real location from its dropdown, so this only fires for a
+        # malformed/non-UI request -- a defensive backend guard, not the
+        # primary gate.
         return {
             "applied": [],
             "failed": [{"key": slot_config_key, "error": "vertex_gcp_location_required"}],
@@ -373,8 +412,8 @@ def _apply_llm_credential(family: str, payload: ApplyLlmCredentialRequest) -> di
             family,
             payload.slot,
             model=payload.model,
-            vertex_gcp_project=vertex_gcp_project if family == "vertex" else None,
-            vertex_gcp_location=vertex_gcp_location if family == "vertex" else None,
+            vertex_gcp_project=payload.vertex_gcp_project if family == "vertex" else None,
+            vertex_gcp_location=payload.vertex_gcp_location if family == "vertex" else None,
             now=datetime.now(timezone.utc).isoformat(),
         )
         applied.append(slot_config_key)
@@ -584,40 +623,95 @@ def _resolve_current_credential(provider: str, slot: int | None) -> tuple[bool, 
     return bool(value), value
 
 
-def _fetch_models_for_provider(provider: str, slot: int | None) -> dict:
+def _fetch_models_for_provider(
+    provider: str,
+    slot: int | None,
+    project_override: str | None = None,
+    location_override: str | None = None,
+    include_projects: bool = False,
+) -> dict:
+    """`project_override`/`location_override` unset (None, i.e. the query
+    param was never sent -- the config panel's initial page load) fall back
+    to the slot's stored slot_config values, same as before. Sent as an
+    empty string (the config panel's project dropdown has a blank "use the
+    key's own project" option, mirroring the guided-setup modal) means an
+    explicit override to "no override", NOT "fall back to the stored row" --
+    it must reach list_vertex_models as None so THAT function's own
+    key's-own-project fallback applies, rather than silently re-using
+    whatever the row still has on file.
+
+    `include_projects` only matters for vertex, and only costs a live call
+    when the caller actually needs it (populating the config panel's project
+    dropdown on its own per-row "Validate" click) -- every other call
+    (guided setup's models refresh, a plain re-validate after a dropdown
+    change) skips it.
+    """
     if provider == "vertex":
         if slot is None:
             slot = store.get_all_key_index_overrides().get("vertex", 0)
         info, error = _safe_resolve_vertex_info(slot)
         if error:
-            return {"ok": False, "models": None, "error": error}
+            return {"ok": False, "models": None, "error": error, "projects": None}
         # Per-slot project/location: `slot` exists on this function precisely
         # because different credentials see different catalogs, and since the
         # 2026-09-08 slotted-config work those two values live per slot in
         # slot_config rather than in one flat env var.
         row = store.get_slot_config("vertex", slot) or {}
+        project = (
+            row.get("vertex_gcp_project") or None
+            if project_override is None
+            else (project_override or None)
+        )
+        location = (
+            row.get("vertex_gcp_location") or None
+            if location_override is None
+            else (location_override or None)
+        )
         result = catalog.list_vertex_models(
-            info,
-            project_override=row.get("vertex_gcp_project") or None,
-            location_override=row.get("vertex_gcp_location") or None,
+            info, project_override=project, location_override=location
         )
-    else:
-        has_credential, api_key = _resolve_current_credential(provider, slot)
-        if not has_credential:
-            return {"ok": False, "models": None, "error": "no_credential_configured"}
-        result = (
-            catalog.list_gemini_models(api_key)
-            if provider == "gemini"
-            else catalog.list_groq_models(api_key)
-        )
-    return {"ok": result.ok, "models": result.models, "error": result.error}
+        projects = None
+        if include_projects:
+            projects_result = catalog.list_accessible_projects(info)
+            projects = set(projects_result.models or [])
+            embedded_project = info.get("project_id") if isinstance(info, dict) else None
+            projects.update(p for p in (project, embedded_project) if p)
+            projects = sorted(projects)
+        return {
+            "ok": result.ok,
+            "models": result.models,
+            "error": result.error,
+            "projects": projects,
+        }
+    has_credential, api_key = _resolve_current_credential(provider, slot)
+    if not has_credential:
+        return {"ok": False, "models": None, "error": "no_credential_configured", "projects": None}
+    result = (
+        catalog.list_gemini_models(api_key)
+        if provider == "gemini"
+        else catalog.list_groq_models(api_key)
+    )
+    return {"ok": result.ok, "models": result.models, "error": result.error, "projects": None}
 
 
 @router.get("/api/environment/credential/{family}/models")
-async def get_credential_models(family: str, slot: int | None = None) -> JSONResponse:
+async def get_credential_models(
+    family: str,
+    slot: int | None = None,
+    project_override: str | None = None,
+    location_override: str | None = None,
+    include_projects: bool = False,
+) -> JSONResponse:
     if family not in _LLM_PROVIDER_FAMILIES:
         raise HTTPException(status_code=404, detail="not an LLM provider family")
-    payload = await asyncio.to_thread(_fetch_models_for_provider, family, slot)
+    payload = await asyncio.to_thread(
+        _fetch_models_for_provider,
+        family,
+        slot,
+        project_override,
+        location_override,
+        include_projects,
+    )
     return JSONResponse(payload)
 
 
