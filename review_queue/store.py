@@ -800,6 +800,28 @@ def dashboard_queue_counts() -> dict[str, int]:
     return counts
 
 
+def dashboard_failed_tickets(limit: int = 100) -> list[dict]:
+    """Tickets that exhausted retries (status='failed'), newest first, with
+    the exception message (if any) that put them there."""
+    with _require_pool().connection() as conn:
+        rows = conn.execute(
+            "SELECT repo_full_name, pr_number, provider, attempts, last_error, updated_at "
+            "FROM tickets WHERE status = 'failed' ORDER BY updated_at DESC LIMIT %s",
+            (limit,),
+        ).fetchall()
+    return [
+        {
+            "repo": row["repo_full_name"],
+            "pr_number": row["pr_number"],
+            "provider": row["provider"],
+            "attempts": row["attempts"],
+            "last_error": row["last_error"],
+            "updated_at": row["updated_at"],
+        }
+        for row in rows
+    ]
+
+
 def dashboard_reviews(limit: int = 50) -> list[dict]:
     """Most recent completed reviews, newest first, with a derived comment_url."""
     with _require_pool().connection() as conn:

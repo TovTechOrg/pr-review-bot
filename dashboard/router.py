@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _REVIEWS_LIMIT = 50
+_FAILED_TICKETS_LIMIT = 100
 _STATIC_DIR = Path(__file__).parent / "static"
 _DASHBOARD_HTML = (_STATIC_DIR / "dashboard.html").read_text(encoding="utf-8")
 
@@ -49,6 +50,12 @@ def build_dashboard_payload() -> dict:
     except Exception:  # noqa: BLE001
         logger.exception("dashboard: failed to load reviews")
         payload["reviews"] = {"error": "data unavailable"}
+
+    try:
+        payload["failed_tickets"] = store.dashboard_failed_tickets(limit=_FAILED_TICKETS_LIMIT)
+    except Exception:  # noqa: BLE001
+        logger.exception("dashboard: failed to load failed tickets")
+        payload["failed_tickets"] = {"error": "data unavailable"}
 
     return payload
 

@@ -39,6 +39,7 @@ async def test_empty_state_shape():
     }
     assert body["queue"]["backoff"] == {"gemini": None, "groq": None, "vertex": None}
     assert body["reviews"] == []
+    assert body["failed_tickets"] == []
 
 
 async def test_includes_a_recorded_review_and_active_backoff():
@@ -103,6 +104,33 @@ async def test_degrades_queue_by_status_independently_of_backoff(monkeypatch):
     body = resp.json()
     assert body["queue"]["by_status"] == {"error": "data unavailable"}
     assert body["queue"]["backoff"]["groq"] == "2026-08-11T14:00:00+00:00"
+
+
+async def test_failed_tickets_included_and_degrade_independently(monkeypatch):
+    ticket_id = store.enqueue_or_update(
+        repo_full_name="owner/repo", pr_number=7, head_sha="sha", provider="groq",
+        now="2026-08-11T12:00:00+00:00",
+    )
+    store.claim_next_due(now="2026-08-11T12:00:00+00:00")
+    store.mark_failed(ticket_id, now="2026-08-11T12:00:01+00:00", error="boom")
+
+    client = await _client()
+    resp = await client.get("/api/dashboard")
+    body = resp.json()
+    row = body["failed_tickets"][0]
+    assert row["repo"] == "owner/repo"
+    assert row["pr_number"] == 7
+    assert row["provider"] == "groq"
+    assert row["last_error"] == "boom"
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(dashboard.store, "dashboard_failed_tickets", boom)
+    resp = await client.get("/api/dashboard")
+    body = resp.json()
+    assert body["failed_tickets"] == {"error": "data unavailable"}
+    assert body["stats"]["total_reviews"] == 0  # unaffected sections still populate
 
 
 async def test_dense_reviews_truncate_at_the_display_limit_and_stay_shaped():

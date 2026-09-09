@@ -376,6 +376,8 @@
   .kv-label { color: var(--text-muted); font-size: 0.85rem; }
   .kv-value { font-weight: 600; }
   .kv-row-wrap { align-items: flex-start; }
+  .pager { display: flex; align-items: center; justify-content: center; gap: 0.75rem; padding-top: 0.75rem; }
+  .pager-label { font-size: 0.85rem; color: var(--text-muted); }
   .tile-chip-list { display: flex; flex-wrap: wrap; gap: 0.3rem; }
   .tile-chip {
     background: var(--surface);
@@ -583,6 +585,19 @@
         </div>
         <div class="win-body">
           <section id="reviews"></section>
+        </div>
+      </div>
+      <div class="win">
+        <div class="win-title">
+          <span data-i18n="win_failed_tickets"></span>
+        </div>
+        <div class="win-body">
+          <section id="failedTickets"></section>
+          <div id="failedTicketsPager" class="pager" hidden>
+            <button type="button" id="failedTicketsPrevBtn" class="control" data-i18n="pager_prev"></button>
+            <span id="failedTicketsPageLabel" class="pager-label"></span>
+            <button type="button" id="failedTicketsNextBtn" class="control" data-i18n="pager_next"></button>
+          </div>
         </div>
       </div>
     </section>
@@ -945,6 +960,13 @@
         nav_environment: "Environment",
         win_queue: "Queue",
         win_activity: "Activity.log",
+        win_failed_tickets: "Failed reviews",
+        empty_failed_tickets: "No failed reviews.",
+        col_attempts: "Attempts",
+        col_error: "Error",
+        pager_prev: "Prev",
+        pager_next: "Next",
+        pager_page_of: "Page {page} of {total}",
         env_render_title: "Render environment variables",
         env_col_key: "Key",
         env_col_value: "Value",
@@ -1056,6 +1078,13 @@
         nav_environment: "סביבה",
         win_queue: "תור",
         win_activity: "יומן פעילות",
+        win_failed_tickets: "בדיקות שנכשלו",
+        empty_failed_tickets: "אין בדיקות שנכשלו.",
+        col_attempts: "ניסיונות",
+        col_error: "שגיאה",
+        pager_prev: "הקודם",
+        pager_next: "הבא",
+        pager_page_of: "עמוד {page} מתוך {total}",
         env_render_title: "משתני סביבה של Render",
         env_col_key: "מפתח",
         env_col_value: "ערך",
@@ -1493,6 +1522,47 @@
       });
     }
 
+    const FAILED_TICKETS_PAGE_SIZE = 10;
+    let failedTicketsPage = 0; // persists across polls, like expandedPrs
+
+    function renderFailedTickets(failedTickets) {
+      const el = document.getElementById("failedTickets");
+      const pager = document.getElementById("failedTicketsPager");
+      if (failedTickets.error) {
+        el.innerHTML = "";
+        pager.hidden = true;
+        return;
+      }
+      if (!failedTickets.length) {
+        el.innerHTML = `<p>${t("empty_failed_tickets")}</p>`;
+        pager.hidden = true;
+        return;
+      }
+      const pageCount = Math.ceil(failedTickets.length / FAILED_TICKETS_PAGE_SIZE);
+      failedTicketsPage = Math.min(failedTicketsPage, pageCount - 1);
+      const start = failedTicketsPage * FAILED_TICKETS_PAGE_SIZE;
+      const pageItems = failedTickets.slice(start, start + FAILED_TICKETS_PAGE_SIZE);
+      el.innerHTML = pageItems.map((ticket) => `
+        <div class="review-card">
+          <div class="review-row">
+            <span class="field"><span class="field-label">${t("col_pr")}: </span><span class="field-value">#${ticket.pr_number}</span></span>
+            <span class="field"><span class="field-label">${t("col_repo")}: </span><span class="field-value">${esc(ticket.repo)}</span></span>
+            <span class="field"><span class="field-label">${t("col_provider")}: </span><span class="field-value">${esc(ticket.provider)}</span></span>
+            <span class="field"><span class="field-label">${t("col_attempts")}: </span><span class="field-value">${ticket.attempts}</span></span>
+            <span class="field"><span class="field-label">${t("col_when")}: </span><span class="field-value">${new Date(ticket.updated_at).toLocaleString()}</span></span>
+          </div>
+          <div class="review-findings" style="display: block;">
+            <div class="finding">${esc(ticket.last_error || "")}</div>
+          </div>
+        </div>
+      `).join("");
+      pager.hidden = pageCount <= 1;
+      document.getElementById("failedTicketsPageLabel").textContent =
+        t("pager_page_of").replace("{page}", String(failedTicketsPage + 1)).replace("{total}", String(pageCount));
+      document.getElementById("failedTicketsPrevBtn").disabled = failedTicketsPage === 0;
+      document.getElementById("failedTicketsNextBtn").disabled = failedTicketsPage >= pageCount - 1;
+    }
+
     async function refreshDashboard() {
       const banner = document.getElementById("errorBanner");
       try {
@@ -1506,12 +1576,14 @@
           return;
         }
         const data = await response.json();
-        const hasError = data.stats.error || data.queue.by_status.error || data.reviews.error;
+        const hasError = data.stats.error || data.queue.by_status.error || data.reviews.error
+          || data.failed_tickets.error;
         banner.hidden = !hasError;
         if (hasError) banner.textContent = t("error_banner");
         renderStats(data.stats, data.queue);
         renderSpecialists(data.reviews);
         renderReviews(data.reviews);
+        renderFailedTickets(data.failed_tickets);
       } catch (err) {
         banner.hidden = false;
         banner.textContent = t("error_banner");
@@ -1556,6 +1628,15 @@
       } finally {
         window.location.href = "/login";
       }
+    });
+
+    document.getElementById("failedTicketsPrevBtn").addEventListener("click", () => {
+      failedTicketsPage = Math.max(0, failedTicketsPage - 1);
+      refreshDashboard();
+    });
+    document.getElementById("failedTicketsNextBtn").addEventListener("click", () => {
+      failedTicketsPage += 1;
+      refreshDashboard();
     });
 
     document.querySelectorAll(".popup-backdrop").forEach((backdrop) => {
