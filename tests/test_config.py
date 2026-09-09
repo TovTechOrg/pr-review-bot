@@ -332,7 +332,7 @@ def test_default_target_repo_is_the_only_value_when_single():
 
 
 def test_default_target_repo_is_the_first_of_several():
-    """Regression test: a demo script (seed_demo_pr.py, demo_provider_swap.py)
+    """Regression test: a demo script (seed_demo_pr.py)
     reading github_target_repo directly under multi-repo config gets the
     whole comma-joined string, not a single valid repo -- default_target_repo()
     exists so those scripts get one deterministic repo instead."""

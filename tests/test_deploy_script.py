@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 
 import httpx
+import psycopg
 import pytest
 import respx
 import yaml
@@ -180,7 +181,6 @@ def complete_config(monkeypatch):
     monkeypatch.setattr(settings, "github_webhook_secret", "s3cret")
     monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
     monkeypatch.setattr(settings, "public_base_url", "https://x.onrender.com")
-    monkeypatch.setattr(settings, "llm_provider", "groq")
     monkeypatch.setattr(settings, "groq_api_key", "gsk_x")
     monkeypatch.setattr(settings, "dashboard_username", "dash-user")
     monkeypatch.setattr(settings, "dashboard_password", "dash-pass")
@@ -259,62 +259,12 @@ def test_check_config_passes_with_target_repo_star(complete_config, monkeypatch)
     assert deploy.check_config().status == "PASS"
 
 
-def test_check_config_requires_the_key_for_the_selected_provider(complete_config, monkeypatch):
-    monkeypatch.setattr(settings, "llm_provider", "groq")
-    monkeypatch.setattr(settings, "groq_api_key", "")
-    result = deploy.check_config()
-    assert result.status == "FAIL"
-    assert "GROQ_API_KEY" in result.detail
-
-
-def test_check_config_ignores_provider_keys_for_other_providers(complete_config, monkeypatch):
-    """groq is selected, so a missing GEMINI_API_KEY is irrelevant."""
-    monkeypatch.setattr(settings, "gemini_api_key", "")
-    assert deploy.check_config().status == "PASS"
-
-
 def test_providers_table_covers_every_supported_provider():
-    """One table, read by check_config, --sync-env and set_override.py, so a
+    """One table, read by check_provider, --sync-env and set_override.py, so a
     provider cannot be known to one consumer and unknown to another."""
     assert set(deploy._PROVIDERS) == {"gemini", "groq", "vertex"}
     for credential, model_var in deploy._PROVIDERS.values():
         assert credential and model_var
-
-
-def test_check_config_fails_on_an_unrecognized_provider(complete_config, monkeypatch):
-    """An unrecognized value used to contribute no requirement and pass with
-    nothing verified."""
-    monkeypatch.setattr(settings, "llm_provider", "unknown")
-    result = deploy.check_config()
-    assert result.status == "FAIL"
-    assert "unknown" in result.detail
-    assert "gemini" in result.detail
-
-
-def test_check_config_reports_a_bad_provider_alongside_other_missing_keys(
-    complete_config, monkeypatch
-):
-    """An unsupported provider must not mask problems already collected --
-    one run surfaces every problem, per this module's own contract."""
-    monkeypatch.setattr(settings, "llm_provider", "unknown")
-    monkeypatch.setattr(settings, "github_webhook_secret", "")
-    detail = deploy.check_config().detail
-    assert "GITHUB_WEBHOOK_SECRET" in detail
-    assert "unknown" in detail
-
-
-def test_check_config_reports_an_unset_provider_distinctly_from_unsupported(
-    complete_config, monkeypatch
-):
-    """LLM_PROVIDER lost its implicit "gemini" default (design spec
-    2026-08-18 section 6e) -- an empty value must read as "unset, no
-    default" rather than reusing the "not supported" wording written for a
-    non-empty but unrecognized value."""
-    monkeypatch.setattr(settings, "llm_provider", "")
-    result = deploy.check_config()
-    assert result.status == "FAIL"
-    assert "unset" in result.detail
-    assert "gemini" in result.detail
 
 
 @pytest.mark.parametrize("model_var", ["GEMINI_MODEL", "GROQ_MODEL", "VERTEX_MODEL"])
@@ -473,27 +423,6 @@ def test_check_pricing_warns_when_the_active_slot_has_no_model(
     assert deploy.check_pricing().status == "PASS"
 
 
-def test_check_config_requires_the_gcp_key_when_vertex_selected(complete_config, monkeypatch):
-    """deploy.py answers "can this be DEPLOYED", and Render has no `gcloud`
-    ADC login -- so the credential is genuinely required there even though a
-    local run could fall back to implicit ADC."""
-    monkeypatch.setattr(settings, "llm_provider", "vertex")
-    monkeypatch.setattr(settings, "vertex_gcp_service_account_key", "")
-    result = deploy.check_config()
-    assert result.status == "FAIL"
-    assert "VERTEX_GCP_SERVICE_ACCOUNT_KEY" in result.detail
-
-
-def test_check_config_requires_the_gemini_key_when_gemini_selected(
-    complete_config, monkeypatch
-):
-    monkeypatch.setattr(settings, "llm_provider", "gemini")
-    monkeypatch.setattr(settings, "gemini_api_key", "")
-    result = deploy.check_config()
-    assert result.status == "FAIL"
-    assert "GEMINI_API_KEY" in result.detail
-
-
 def test_check_config_never_prints_a_secret_value(complete_config, monkeypatch):
     monkeypatch.setattr(settings, "github_webhook_secret", "")
     monkeypatch.setattr(settings, "groq_api_key", "gsk_SUPER_SECRET_VALUE")
@@ -541,7 +470,6 @@ def test_boot_credentials_live_passes_when_all_present(monkeypatch):
                         "GITHUB_APP_INSTALLATION_ID": "155887152",
                         "GITHUB_APP_PRIVATE_KEY": "aGVsbG8=",
                         "GITHUB_WEBHOOK_SECRET": "s3cret",
-                        "LLM_PROVIDER": "groq",
                         "DATABASE_URL": "postgresql://u:p@h/db",
                         "DASHBOARD_USERNAME": "dash-user",
                         "DASHBOARD_PASSWORD": "dash-pass",
@@ -570,7 +498,6 @@ def test_boot_credentials_live_fails_naming_exactly_the_missing_ones(monkeypatch
                         "GITHUB_APP_ID": "999999",
                         "GITHUB_APP_INSTALLATION_ID": "155887152",
                         "GITHUB_WEBHOOK_SECRET": "s3cret",
-                        "LLM_PROVIDER": "groq",
                         "DATABASE_URL": "postgresql://u:p@h/db",
                     }
                 ),
@@ -582,13 +509,15 @@ def test_boot_credentials_live_fails_naming_exactly_the_missing_ones(monkeypatch
     assert "GITHUB_APP_ID" not in result.detail
 
 
-def test_boot_credentials_live_also_requires_installation_id_and_llm_provider(monkeypatch):
+def test_boot_credentials_live_also_requires_installation_id(monkeypatch):
     """Regression: this check used to list only four vars, even though
     main.py's lifespan also refuses to boot without GITHUB_APP_
     INSTALLATION_ID (ISSUES.md 2026-08-21 made that unconditional, not just
-    a discovery fallback) and without a valid LLM_PROVIDER (checked first,
-    before anything else). A live Render service missing either one would
-    crash-loop while this check still reported PASS."""
+    a discovery fallback). A live Render service missing it would crash-loop
+    while this check still reported PASS. (LLM_PROVIDER is no longer in this
+    list at all -- provider is a runtime_config row now, not a Render env
+    var; see docs/superpowers/specs/2026-09-09-provider-key-index-db-only-
+    design.md.)"""
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
     monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
     with respx.mock:
@@ -609,11 +538,11 @@ def test_boot_credentials_live_also_requires_installation_id_and_llm_provider(mo
         result = deploy.check_boot_credentials_live()
     assert result.status == "FAIL"
     assert "GITHUB_APP_INSTALLATION_ID" in result.detail
-    assert "LLM_PROVIDER" in result.detail
+    assert "LLM_PROVIDER" not in result.detail
 
 
 def test_boot_credentials_live_also_requires_dashboard_credentials(monkeypatch):
-    """Same regression shape as the installation-id/llm-provider case above:
+    """Same regression shape as the installation-id case above:
     main.py's lifespan also refuses to boot without the three DASHBOARD_*
     vars now, so a live Render service missing any of them would crash-loop
     while this check still reported PASS if it didn't know about them."""
@@ -630,7 +559,6 @@ def test_boot_credentials_live_also_requires_dashboard_credentials(monkeypatch):
                         "GITHUB_APP_INSTALLATION_ID": "155887152",
                         "GITHUB_APP_PRIVATE_KEY": "aGVsbG8=",
                         "GITHUB_WEBHOOK_SECRET": "s3cret",
-                        "LLM_PROVIDER": "groq",
                         "DATABASE_URL": "postgresql://u:p@h/db",
                     }
                 ),
@@ -657,7 +585,6 @@ def test_boot_credentials_live_never_leaks_a_fetched_value(monkeypatch):
                         "GITHUB_APP_INSTALLATION_ID": "155887152",
                         "GITHUB_APP_PRIVATE_KEY": "SUPER_SECRET_PEM_B64",
                         "GITHUB_WEBHOOK_SECRET": "SUPER_SECRET_WEBHOOK",
-                        "LLM_PROVIDER": "groq",
                         "DATABASE_URL": "postgresql://u:SUPER_SECRET_PW@h/db",
                     }
                 ),
@@ -1539,34 +1466,35 @@ def test_an_exploding_check_becomes_a_fail_and_does_not_abort_the_run(runnable, 
 
 @pytest.fixture
 def gemini_only_config(complete_config, monkeypatch):
-    """A first-time user's .env: LLM_PROVIDER at its 'gemini' default, with the
-    other providers' keys listed but empty."""
-    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    """A first-time user's .env: gemini as the active provider (resolved from
+    the DB, not settings.llm_provider -- see the fixture's psycopg stub
+    below), with the other providers' keys listed but empty. Returns
+    "gemini", the provider to pass to _wanted_env()/etc."""
     monkeypatch.setattr(settings, "gemini_api_key", "gk_x")
     monkeypatch.setattr(settings, "groq_api_key", "")
     monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
-    # database_url is a dummy, unreachable host -- stub psycopg.connect so the
-    # masking guard's "no override" outcome is deterministic rather than an
-    # accident of DNS failure (tests must never open a real DB connection).
-    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(None))
-    return None
+    # database_url is a dummy, unreachable host -- stub psycopg.connect so
+    # _resolved_provider()'s read is deterministic rather than an accident of
+    # DNS failure (tests must never open a real DB connection).
+    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(("gemini",)))
+    return "gemini"
 
 
 def test_wanted_env_pushes_the_selected_providers_credential_not_model(
     gemini_only_config, monkeypatch
 ):
     monkeypatch.setattr(settings, "gemini_model", "gemini-flash-latest")
-    wanted = deploy._wanted_env()
+    wanted = deploy._wanted_env(gemini_only_config)
     assert wanted["GEMINI_API_KEY"] == "gk_x"
     assert "GEMINI_MODEL" not in wanted  # model is DB-only (slot_config) now
-    assert wanted["LLM_PROVIDER"] == "gemini"
+    assert "LLM_PROVIDER" not in wanted  # provider is DB-only (runtime_config) now
 
 
 def test_wanted_env_omits_unset_credentials_of_other_providers(gemini_only_config):
     """A Groq-only or Gemini-only .env must never be asked for another
     provider's key -- the whole point of opt-in provider config."""
-    wanted = deploy._wanted_env()
+    wanted = deploy._wanted_env(gemini_only_config)
     assert "GROQ_API_KEY" not in wanted
 
 
@@ -1575,7 +1503,7 @@ def test_wanted_env_includes_other_credentials_that_are_set(
 ):
     """Pushed when locally filled, so a later dashboard-side switch works."""
     monkeypatch.setattr(settings, "groq_api_key", "gsk_x")
-    assert deploy._wanted_env()["GROQ_API_KEY"] == "gsk_x"
+    assert deploy._wanted_env(gemini_only_config)["GROQ_API_KEY"] == "gsk_x"
 
 
 def test_wanted_env_includes_installation_id_when_set_locally(
@@ -1583,7 +1511,7 @@ def test_wanted_env_includes_installation_id_when_set_locally(
 ):
     """Required -- always synced once configured."""
     monkeypatch.setattr(settings, "github_app_installation_id", 148449134)
-    assert deploy._wanted_env()["GITHUB_APP_INSTALLATION_ID"] == "148449134"
+    assert deploy._wanted_env(gemini_only_config)["GITHUB_APP_INSTALLATION_ID"] == "148449134"
 
 
 def test_wanted_env_includes_installation_id_as_empty_when_unset(
@@ -1595,7 +1523,7 @@ def test_wanted_env_includes_installation_id_as_empty_when_unset(
     guard catches it, rather than being silently omitted the way a
     genuinely optional setting (e.g. VERTEX_GCP_PROJECT) is."""
     monkeypatch.setattr(settings, "github_app_installation_id", 0)
-    assert deploy._wanted_env()["GITHUB_APP_INSTALLATION_ID"] == ""
+    assert deploy._wanted_env(gemini_only_config)["GITHUB_APP_INSTALLATION_ID"] == ""
 
 
 def test_generic_operational_env_attrs_is_now_empty(gemini_only_config):
@@ -1606,7 +1534,7 @@ def test_generic_operational_env_attrs_is_now_empty(gemini_only_config):
     setting that genuinely needs this sync path -- see its own module
     comment. _wanted_env() must never mention any of the 12 either."""
     assert deploy._GENERIC_OPERATIONAL_ENV_ATTRS == {}
-    wanted = deploy._wanted_env()
+    wanted = deploy._wanted_env(gemini_only_config)
     for env_name in (
         "VERTEX_GCP_PROJECT", "VERTEX_GCP_LOCATION", "LLM_REQUEST_TIMEOUT_SECONDS",
         "DISPATCHER_IDLE_SLEEP_SECONDS", "DISPATCHER_DEFAULT_RETRY_AFTER_SECONDS",
@@ -1621,7 +1549,7 @@ def test_generic_operational_env_attrs_is_now_empty(gemini_only_config):
 def test_wanted_env_never_includes_the_never_synced_operational_keys(gemini_only_config):
     """RENDER_SERVICE_NAME/PUBLIC_BASE_URL are operator-machine-only settings
     (config.py's own field comments) -- they must never reach Render."""
-    wanted = deploy._wanted_env()
+    wanted = deploy._wanted_env(gemini_only_config)
     for key in deploy._NEVER_SYNCED_OPERATIONAL_KEYS:
         assert key not in wanted
 
@@ -1631,7 +1559,7 @@ def test_wanted_env_never_includes_the_db_synced_operational_keys(gemini_only_co
     sync_config_db()) -- they have no Render env var at all, so _wanted_env()
     (which only ever describes what --sync-env pushes to Render) must never
     mention them."""
-    wanted = deploy._wanted_env()
+    wanted = deploy._wanted_env(gemini_only_config)
     for key in deploy._DB_SYNCED_OPERATIONAL_KEYS:
         assert key not in wanted
 
@@ -1642,7 +1570,7 @@ def test_operational_keys_partition_cleanly_across_every_sync_destination():
     setting added to OPERATIONAL_KEYS but forgotten everywhere else fails a
     test instead of silently never syncing anywhere, the way the original 12
     did."""
-    handled_directly_in_wanted_env = {"LLM_PROVIDER", "GITHUB_TARGET_REPO"}
+    handled_directly_in_wanted_env = {"GITHUB_TARGET_REPO"}
     # GEMINI_MODEL/GROQ_MODEL/VERTEX_MODEL are no longer pushed to Render at
     # all (active_model() is DB-only, slot_config) -- their one remaining
     # sync path is sync_env()'s _seed_slot_zero_config_if_missing(), which
@@ -1703,16 +1631,16 @@ def sync_ready(monkeypatch):
     monkeypatch.setattr(settings, "github_app_installation_id", 148449134)
     monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
     monkeypatch.setattr(settings, "github_webhook_secret", "s3cret")
-    monkeypatch.setattr(settings, "llm_provider", "groq")
     monkeypatch.setattr(settings, "groq_api_key", "gsk_x")
     monkeypatch.setattr(settings, "dashboard_username", "dash-user")
     monkeypatch.setattr(settings, "dashboard_password", "dash-pass")
     monkeypatch.setattr(settings, "dashboard_session_secret", "dash-session-secret")
     monkeypatch.setattr(deploy.time, "sleep", lambda _seconds: None)
-    # database_url is a dummy, unreachable host -- stub psycopg.connect so the
-    # masking guard's "no override" outcome is deterministic rather than an
-    # accident of DNS failure (tests must never open a real DB connection).
-    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(None))
+    # database_url is a dummy, unreachable host -- stub psycopg.connect so
+    # _resolved_provider()'s read ("groq" is active) is deterministic rather
+    # than an accident of DNS failure (tests must never open a real DB
+    # connection).
+    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(("groq",)))
 
 
 def _env_var_list(values: dict):
@@ -1860,12 +1788,14 @@ def test_optional_empty_env_keys_is_now_empty():
 def test_sync_env_refuses_gemini_provider_with_no_synced_gemini_key(
     sync_ready, monkeypatch, capsys
 ):
-    """gemini selected (LLM_PROVIDER has no implicit default anymore -- design
-    spec 2026-08-18 section 6e); if the selected provider's own credential is
-    empty locally, syncing would push a service that boots and answers
-    /healthz while failing every real review, with every checklist check
-    reporting green. The guard must fire before any request."""
-    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    """gemini selected (runtime_config.provider has no implicit default --
+    design spec 2026-08-18 section 6e, generalized to the DB by
+    2026-09-09's provider-key-index-db-only design); if the selected
+    provider's own credential is empty locally, syncing would push a
+    service that boots and answers /healthz while failing every real
+    review, with every checklist check reporting green. The guard must
+    fire before any request."""
+    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(("gemini",)))
     monkeypatch.setattr(settings, "gemini_api_key", "")
     with respx.mock:
         route = respx.get(RENDER_SERVICES).mock(
@@ -1885,7 +1815,7 @@ def test_sync_env_reports_a_partial_push_as_exit_one_not_could_not_run(
     an operator thinking the half-configured service is untouched."""
     with respx.mock:
         respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
-        wanted = deploy._wanted_env()
+        wanted = deploy._wanted_env("groq")
         current = dict.fromkeys(wanted, "stale")
         respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
             return_value=httpx.Response(200, json=_env_var_list(current))
@@ -1908,7 +1838,7 @@ def test_sync_env_reports_a_partial_push_as_exit_one_not_could_not_run(
 def test_sync_env_pushes_only_changed_keys_via_the_single_key_endpoint(sync_ready):
     with respx.mock:
         respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
-        wanted = deploy._wanted_env()
+        wanted = deploy._wanted_env("groq")
         current = dict.fromkeys(wanted, "stale")
         # _OPTIONAL_EMPTY_ENV_KEYS is empty now (Task 13), so there is no
         # longer any key here that would take the DELETE branch instead of
@@ -1941,7 +1871,7 @@ def test_sync_env_skips_the_deploy_when_nothing_changed(sync_ready, capsys):
     with respx.mock:
         respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
         respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
-            return_value=httpx.Response(200, json=_env_var_list(deploy._wanted_env()))
+            return_value=httpx.Response(200, json=_env_var_list(deploy._wanted_env("groq")))
         )
         triggered = respx.post(f"{RENDER_SERVICES}/srv-1/deploys").mock(
             return_value=httpx.Response(201, json={})
@@ -2330,9 +2260,8 @@ def test_sync_config_db_an_existing_db_override_is_overwritten(
 
 
 def test_seed_slot_zero_config_seeds_when_missing(_real_db_target, db_query, monkeypatch):
-    monkeypatch.setattr(settings, "llm_provider", "groq")
     monkeypatch.setattr(settings, "groq_model", "llama-3.3-70b-versatile")
-    deploy._seed_slot_zero_config_if_missing()
+    deploy._seed_slot_zero_config_if_missing("groq")
     row = db_query(
         "SELECT model, vertex_gcp_project, vertex_gcp_location "
         "FROM slot_config WHERE provider = 'groq' AND slot_index = 0"
@@ -2346,13 +2275,12 @@ def test_seed_slot_zero_config_is_a_no_op_when_a_row_already_exists(
     """An operator's later dashboard/guided-setup edit to slot 0 must never
     be silently overwritten by a stale local .env.config value on a later
     --sync-env run."""
-    monkeypatch.setattr(settings, "llm_provider", "groq")
     monkeypatch.setattr(settings, "groq_model", "some-other-model")
     db_exec(
         "INSERT INTO slot_config (provider, slot_index, model, updated_at) "
         "VALUES ('groq', 0, 'operator-set-model', '2026-01-01T00:00:00+00:00')"
     )
-    deploy._seed_slot_zero_config_if_missing()
+    deploy._seed_slot_zero_config_if_missing("groq")
     row = db_query(
         "SELECT model FROM slot_config WHERE provider = 'groq' AND slot_index = 0"
     )
@@ -2360,10 +2288,9 @@ def test_seed_slot_zero_config_is_a_no_op_when_a_row_already_exists(
 
 
 def test_seed_slot_zero_config_does_nothing_for_an_unknown_provider(monkeypatch):
-    monkeypatch.setattr(settings, "llm_provider", "bogus")
     connected = []
     monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: connected.append(1))
-    deploy._seed_slot_zero_config_if_missing()
+    deploy._seed_slot_zero_config_if_missing("bogus")
     assert connected == []
 
 
@@ -2413,9 +2340,9 @@ def test_wanted_env_is_always_a_superset_of_the_always_synced_names():
     must always include it regardless of the selected provider -- otherwise the
     docs test would silently stop covering vars that are actually pushed. Unlike
     the old fixed eight-name set, exact equality no longer holds: _wanted_env()
-    also carries LLM_PROVIDER, the selected provider's credential and model var,
-    and any other provider's credential that happens to be set locally."""
-    assert set(deploy._ALWAYS_SYNCED) <= set(deploy._wanted_env())
+    also carries the selected provider's credential and any other provider's
+    credential that happens to be set locally."""
+    assert set(deploy._ALWAYS_SYNCED) <= set(deploy._wanted_env("groq"))
 
 
 def test_wanted_env_pushes_a_numbered_slot_with_a_local_value(gemini_only_config, monkeypatch):
@@ -2423,13 +2350,13 @@ def test_wanted_env_pushes_a_numbered_slot_with_a_local_value(gemini_only_config
         deploy._override, "local_slot_values",
         lambda base: {"GEMINI_API_KEY_1": "gk_slot1"} if base == "GEMINI_API_KEY" else {},
     )
-    wanted = deploy._wanted_env()
+    wanted = deploy._wanted_env(gemini_only_config)
     assert wanted["GEMINI_API_KEY_1"] == "gk_slot1"
 
 
 def test_wanted_env_omits_a_numbered_slot_with_no_local_value(gemini_only_config, monkeypatch):
     monkeypatch.setattr(deploy._override, "local_slot_values", lambda base: {})
-    wanted = deploy._wanted_env()
+    wanted = deploy._wanted_env(gemini_only_config)
     assert "GEMINI_API_KEY_1" not in wanted
     assert "GROQ_API_KEY_1" not in wanted
 
@@ -2446,7 +2373,7 @@ def test_wanted_env_pushes_numbered_slots_for_every_provider_not_just_the_select
         return {}
 
     monkeypatch.setattr(deploy._override, "local_slot_values", _slots)
-    wanted = deploy._wanted_env()
+    wanted = deploy._wanted_env(gemini_only_config)
     assert wanted["GROQ_API_KEY_2"] == "gsk_slot2"
 
 
@@ -2461,11 +2388,7 @@ def test_render_yaml_declares_every_synced_var():
     declared = {
         entry["key"] for entry in render["services"][0]["envVars"] if "key" in entry
     }
-    names = (
-        set(deploy._ALWAYS_SYNCED)
-        | {"LLM_PROVIDER"}
-        | set(deploy._GENERIC_OPERATIONAL_ENV_ATTRS)
-    )
+    names = set(deploy._ALWAYS_SYNCED) | set(deploy._GENERIC_OPERATIONAL_ENV_ATTRS)
     # Model vars are no longer expected in render.yaml at all: active_model()
     # is DB-only now (slot_config), so a model var is never pushed to Render.
     for credential, _model_var in deploy._PROVIDERS.values():
@@ -2557,75 +2480,78 @@ class _FakeConn:
 
 @pytest.fixture
 def override_seam(complete_config, monkeypatch):
-    """check_provider (and sync_env's masking guard) resolve the override via
-    a raw, short-timeout psycopg.connect() -- mirroring why check_database
-    avoids store.init_pool()'s 30s pool timeout in a one-shot CLI. This fakes
-    that connection so tests stay offline; call the fixture with the row
+    """check_provider (and sync_env) resolve the active provider via a raw,
+    short-timeout psycopg.connect() -- mirroring why check_database avoids
+    store.init_pool()'s 30s pool timeout in a one-shot CLI. This fakes that
+    connection so tests stay offline; call the fixture with the row
     fetchone() should return (a 1-tuple, or None for no row), or with an
     exception instance to simulate a query failure (e.g. a missing table).
+    Use psycopg.OperationalError for that, not RuntimeError -- RuntimeError
+    is _resolved_provider()'s own signal for "provider unset", so a fake
+    connectivity failure using the same type would be indistinguishable from
+    it (a real psycopg failure never raises bare RuntimeError).
 
     complete_config does not set a DATABASE_URL, so this also supplies one --
-    without it check_provider SKIPs before ever reaching psycopg.connect."""
+    without it check_provider SKIPs before ever reaching psycopg.connect.
+    Defaults to a resolved ("groq",) row, since provider is DB-only now (no
+    env fallback) -- most tests need a valid provider to get anywhere past
+    that resolution."""
     monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
 
     def _set(outcome):
         monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(outcome))
 
-    _set(None)
+    _set(("groq",))
     return _set
 
 
-def test_check_provider_reports_the_env_value_when_no_override(override_seam):
-    override_seam(None)
-    result = deploy.check_provider()
-    assert result.status == "PASS"
-    assert "groq" in result.detail
-    assert "env" in result.detail
-
-
-def test_check_provider_reports_a_satisfied_override(override_seam, monkeypatch):
-    monkeypatch.setattr(settings, "llm_provider", "gemini")
-    monkeypatch.setattr(settings, "gemini_api_key", "gk_x")
-    monkeypatch.setattr(settings, "groq_api_key", "gsk_x")
+def test_check_provider_reports_the_active_provider(override_seam):
     override_seam(("groq",))
     result = deploy.check_provider()
     assert result.status == "PASS"
-    assert "groq" in result.detail
-    assert "override" in result.detail
+    assert result.detail == "groq"
 
 
-def test_check_provider_fails_when_the_overrides_credential_is_missing(
-    override_seam, monkeypatch
-):
+def test_check_provider_reports_a_different_active_provider(override_seam, monkeypatch):
+    monkeypatch.setattr(settings, "gemini_api_key", "gk_x")
+    override_seam(("gemini",))
+    result = deploy.check_provider()
+    assert result.status == "PASS"
+    assert result.detail == "gemini"
+
+
+def test_check_provider_fails_when_the_credential_is_missing(override_seam):
     """Green rows on a service failing every review is the exact failure this
     check exists to prevent."""
-    monkeypatch.setattr(settings, "llm_provider", "gemini")
-    monkeypatch.setattr(settings, "gemini_api_key", "gk_x")
-    monkeypatch.setattr(settings, "groq_api_key", "")
-    override_seam(("groq",))
+    override_seam(("gemini",))  # gemini_api_key left unset by autouse fixture
     result = deploy.check_provider()
     assert result.status == "FAIL"
-    assert "GROQ_API_KEY" in result.detail
+    assert "GEMINI_API_KEY" in result.detail
 
 
-def test_check_provider_treats_an_empty_string_override_as_no_override(override_seam):
+def test_check_provider_fails_when_no_provider_is_set(override_seam):
+    override_seam(None)
+    result = deploy.check_provider()
+    assert result.status == "FAIL"
+    assert "runtime_config.provider is unset" in result.detail
+
+
+def test_check_provider_treats_an_empty_string_as_no_provider(override_seam):
     """store.get_provider_override() collapses '' to None
     (tests/test_provider_override.py::test_an_empty_provider_string_reads_as_no_override
     pins this). The raw read here must match, or the CLI and the dispatcher
-    would disagree about whether an override is active."""
+    would disagree about whether a provider is active."""
     override_seam(("",))
     result = deploy.check_provider()
-    assert result.status == "PASS"
-    assert "groq" in result.detail          # complete_config's env value, not ""
-    assert "env" in result.detail
-    assert "override" not in result.detail
+    assert result.status == "FAIL"
+    assert "unset" in result.detail
 
 
-def test_check_provider_skips_when_the_override_read_raises(override_seam):
+def test_check_provider_skips_when_the_read_raises(override_seam):
     """A database the app has never booted against has no runtime_config
     table yet -- the query raises. That is `database`'s row to report, not
     provider's, so this must SKIP rather than blow up."""
-    override_seam(RuntimeError("relation \"runtime_config\" does not exist"))
+    override_seam(psycopg.OperationalError("relation \"runtime_config\" does not exist"))
     result = deploy.check_provider()
     assert result.status == "SKIPPED"
 
@@ -2635,25 +2561,6 @@ def test_check_provider_skips_without_a_database_url(complete_config, monkeypatc
     assert deploy.check_provider().status == "SKIPPED"
 
 
-def test_resolved_provider_or_env_falls_back_without_a_database_url(monkeypatch):
-    monkeypatch.setattr(settings, "database_url", "")
-    monkeypatch.setattr(settings, "llm_provider", "groq")
-    assert deploy._resolved_provider_or_env() == ("groq", None)
-
-
-def test_resolved_provider_or_env_resolves_the_override_when_database_url_is_set(
-    override_seam,
-):
-    override_seam(("gemini",))
-    assert deploy._resolved_provider_or_env() == ("gemini", "gemini")
-
-
-def test_resolved_provider_or_env_propagates_a_db_error(override_seam):
-    override_seam(RuntimeError("boom"))
-    with pytest.raises(RuntimeError):
-        deploy._resolved_provider_or_env()
-
-
 def test_provider_live_fails_without_a_render_api_key(monkeypatch):
     monkeypatch.setattr(settings, "render_api_key", "")
     result = deploy.check_provider_live()
@@ -2661,38 +2568,33 @@ def test_provider_live_fails_without_a_render_api_key(monkeypatch):
     assert "RENDER_API_KEY" in result.detail
 
 
-def test_provider_live_skips_when_the_override_read_raises(override_seam, monkeypatch):
+def test_provider_live_skips_without_a_database_url(monkeypatch):
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
-    override_seam(RuntimeError("boom"))
+    monkeypatch.setattr(settings, "database_url", "")
     assert deploy.check_provider_live().status == "SKIPPED"
 
 
-def test_provider_live_passes_for_the_plain_env_provider_without_a_database_url(
-    monkeypatch,
-):
-    monkeypatch.setattr(settings, "database_url", "")
+def test_provider_live_skips_when_the_read_raises(override_seam, monkeypatch):
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
-    monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
-    monkeypatch.setattr(settings, "llm_provider", "groq")
-    with respx.mock:
-        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
-        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
-            return_value=httpx.Response(200, json=_env_var_list({"GROQ_API_KEY": "gsk_x"}))
-        )
-        result = deploy.check_provider_live()
-    assert result.status == "PASS"
-    assert "groq" in result.detail
-    assert "no DATABASE_URL to check for an override" in result.detail
+    override_seam(psycopg.OperationalError("boom"))
+    assert deploy.check_provider_live().status == "SKIPPED"
 
 
-def test_provider_live_fails_when_the_overrides_credential_is_missing_on_render(
+def test_provider_live_fails_when_no_provider_is_set(override_seam, monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    override_seam(None)
+    result = deploy.check_provider_live()
+    assert result.status == "FAIL"
+    assert "runtime_config.provider is unset" in result.detail
+
+
+def test_provider_live_fails_when_the_credential_is_missing_on_render(
     override_seam, monkeypatch
 ):
     """The exact failure hit live during the demo rehearsal: `provider` PASSes
     locally while `provider-live` catches that Render was never given the key."""
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
     monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
-    monkeypatch.setattr(settings, "llm_provider", "groq")
     monkeypatch.setattr(settings, "gemini_api_key", "gk_x")  # present locally
     override_seam(("gemini",))
     with respx.mock:
@@ -2709,8 +2611,7 @@ def test_provider_live_fails_when_the_overrides_credential_is_missing_on_render(
 def test_provider_live_never_leaks_a_fetched_value(override_seam, monkeypatch):
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
     monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
-    monkeypatch.setattr(settings, "llm_provider", "groq")
-    override_seam(None)
+    override_seam(("groq",))
     with respx.mock:
         respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
         respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
@@ -2720,9 +2621,7 @@ def test_provider_live_never_leaks_a_fetched_value(override_seam, monkeypatch):
         )
         result = deploy.check_provider_live()
     assert "gsk_SUPER_SECRET" not in result.detail
-    # DATABASE_URL was set and read (no override active) -- distinct from the
-    # no-DATABASE_URL fallback case, which says so explicitly.
-    assert result.detail.endswith("(env) -- GROQ_API_KEY present on Render")
+    assert result.detail.endswith("groq -- GROQ_API_KEY present on Render")
 
 
 def test_resolved_key_index_or_env_falls_back_without_a_database_url(monkeypatch):
@@ -2743,8 +2642,8 @@ def test_resolved_key_index_or_env_defaults_to_zero_when_no_override(override_se
 
 
 def test_resolved_key_index_or_env_propagates_a_db_error(override_seam):
-    override_seam(RuntimeError("boom"))
-    with pytest.raises(RuntimeError):
+    override_seam(psycopg.OperationalError("boom"))
+    with pytest.raises(psycopg.OperationalError):
         deploy._resolved_key_index_or_env("groq")
 
 
@@ -2759,15 +2658,15 @@ def test_api_key_live_skips_when_the_provider_resolution_raises(monkeypatch):
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
 
     def boom():
-        raise RuntimeError("db down")
+        raise psycopg.OperationalError("db down")
 
-    monkeypatch.setattr(deploy, "_resolved_provider_or_env", boom)
+    monkeypatch.setattr(deploy, "_resolved_provider", boom)
     assert deploy.check_api_key_live().status == "SKIPPED"
 
 
 def test_api_key_live_skips_when_the_index_resolution_raises(monkeypatch):
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
-    monkeypatch.setattr(deploy, "_resolved_provider_or_env", lambda: ("groq", None))
+    monkeypatch.setattr(deploy, "_resolved_provider", lambda: "groq")
 
     def boom(provider):
         raise RuntimeError("db down")
@@ -2778,14 +2677,14 @@ def test_api_key_live_skips_when_the_index_resolution_raises(monkeypatch):
 
 def test_api_key_live_skips_for_an_unsupported_provider(monkeypatch):
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
-    monkeypatch.setattr(deploy, "_resolved_provider_or_env", lambda: ("unknown", None))
+    monkeypatch.setattr(deploy, "_resolved_provider", lambda: "unknown")
     assert deploy.check_api_key_live().status == "SKIPPED"
 
 
 def test_api_key_live_passes_for_index_zero_present_on_render(monkeypatch):
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
     monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
-    monkeypatch.setattr(deploy, "_resolved_provider_or_env", lambda: ("groq", None))
+    monkeypatch.setattr(deploy, "_resolved_provider", lambda: "groq")
     monkeypatch.setattr(deploy, "_resolved_key_index_or_env", lambda provider: (0, None))
     with respx.mock:
         respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
@@ -2803,7 +2702,7 @@ def test_api_key_live_fails_when_the_overrides_slot_is_missing_on_render(monkeyp
     names index 2 but nobody ever pushed GROQ_API_KEY_2 to Render."""
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
     monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
-    monkeypatch.setattr(deploy, "_resolved_provider_or_env", lambda: ("groq", None))
+    monkeypatch.setattr(deploy, "_resolved_provider", lambda: "groq")
     monkeypatch.setattr(deploy, "_resolved_key_index_or_env", lambda provider: (2, 2))
     with respx.mock:
         respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
@@ -2819,7 +2718,7 @@ def test_api_key_live_fails_when_the_overrides_slot_is_missing_on_render(monkeyp
 def test_api_key_live_never_leaks_a_fetched_value(monkeypatch):
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
     monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
-    monkeypatch.setattr(deploy, "_resolved_provider_or_env", lambda: ("groq", None))
+    monkeypatch.setattr(deploy, "_resolved_provider", lambda: "groq")
     monkeypatch.setattr(deploy, "_resolved_key_index_or_env", lambda provider: (0, None))
     with respx.mock:
         respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
@@ -2915,26 +2814,6 @@ def test_run_checks_includes_the_boot_creds_live_row(monkeypatch):
     assert names.index("boot-creds-live") > names.index("config")
 
 
-def test_sync_env_refuses_when_an_override_would_mask_the_push(
-    complete_config, monkeypatch, capsys
-):
-    """--sync-env would otherwise report a provider change that silently does
-    nothing, because the override wins at runtime."""
-    monkeypatch.setattr(settings, "llm_provider", "gemini")
-    monkeypatch.setattr(settings, "gemini_api_key", "gk_x")
-    monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
-    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
-    # Same seam check_provider reads through -- no pool, no real connection.
-    monkeypatch.setattr(deploy, "_resolved_provider", lambda: ("groq", "groq"))
-    called = []
-    monkeypatch.setattr(deploy._render, "find_service_id", lambda: called.append(1))
-    code = deploy.sync_env()
-    assert code == 2
-    err = capsys.readouterr().err
-    assert "groq" in err and "set_override" in err
-    assert called == []
-
-
 def test_wanted_env_never_pushes_any_providers_model_var(monkeypatch):
     """Superseded by slot_config -- active_model() is DB-only now, so no
     provider's model var (not even the currently-selected one's) is ever
@@ -2942,12 +2821,11 @@ def test_wanted_env_never_pushes_any_providers_model_var(monkeypatch):
     from config import settings
     from scripts import deploy
 
-    monkeypatch.setattr(settings, "llm_provider", "vertex")
     monkeypatch.setattr(settings, "gemini_model", "model-gemini")
     monkeypatch.setattr(settings, "groq_model", "model-groq")
     monkeypatch.setattr(settings, "vertex_model", "model-vertex")
     monkeypatch.setattr(settings, "github_app_private_key", "pem-b64")
-    wanted = deploy._wanted_env()
+    wanted = deploy._wanted_env("vertex")
     assert "GEMINI_MODEL" not in wanted
     assert "GROQ_MODEL" not in wanted
     assert "VERTEX_MODEL" not in wanted
@@ -2996,7 +2874,6 @@ def test_sync_env_warns_on_a_non_active_providers_unpriced_model(
     pushed by _wanted_env() too, and a DB provider flip can activate vertex
     with no redeploy. An unpriced value there warns exactly as the active
     provider's would; the warning must name vertex specifically."""
-    assert settings.llm_provider == "groq"
     monkeypatch.setattr(settings, "vertex_model", "totally-made-up-model")
     monkeypatch.setattr(deploy._render, "find_service_id", lambda: None)
     assert deploy.sync_env() == 1

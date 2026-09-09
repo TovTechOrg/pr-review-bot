@@ -228,7 +228,7 @@ class Settings(BaseSettings):
     def default_target_repo(self) -> str:
         """The first entry of GITHUB_TARGET_REPO's comma-separated list (or
         "" if unset or "*") -- for a manual/demo script that operates against
-        exactly one repo (seed_demo_pr.py, demo_provider_swap.py), never
+        exactly one repo (seed_demo_pr.py), never
         target_repos() itself: that returns an unordered frozenset, correct
         for webhook.py's membership check but wrong here, where a single
         deterministic repo is needed. Reading github_target_repo directly

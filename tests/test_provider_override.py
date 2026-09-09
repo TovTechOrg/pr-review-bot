@@ -70,17 +70,21 @@ def test_an_empty_provider_string_reads_as_no_override(db_exec):
 
 
 def test_resolved_provider_matches_the_store_across_row_states(db_exec):
-    """There are two implementations of "what is the override": the store's
-    pooled, dict_row read (used by the dispatcher) and scripts/deploy.py's
-    raw-connection read (used by the CLI's `provider` check and the
-    --sync-env masking guard). Their equivalence was previously asserted only
-    in a docstring -- if the two ever disagreed, the CLI could report a
+    """There are two implementations of "what is the active provider": the
+    store's pooled, dict_row read (used by the dispatcher) and
+    scripts/deploy.py's raw-connection read (used by the CLI's `provider`
+    check and --sync-env). Their equivalence was previously asserted only in
+    a docstring -- if the two ever disagreed, the CLI could report a
     provider check nothing like what the dispatcher is actually running.
     Runs both against the same rows: no row, a set provider, NULL, and an
-    empty string."""
+    empty string -- provider is DB-only now (no env fallback), so an unset
+    row means _resolved_provider() raises, mirroring store's None."""
 
     def resolved() -> str | None:
-        return _resolved_provider()[1]
+        try:
+            return _resolved_provider()
+        except RuntimeError:
+            return None
 
     # no row at all
     assert store.get_provider_override() is None

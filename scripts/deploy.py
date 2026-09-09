@@ -88,7 +88,7 @@ _OPTIONAL_EMPTY_ENV_KEYS: frozenset[str] = frozenset()
 
 # OPERATIONAL_KEYS (config.py) names, mapped to the Settings attribute
 # holding their local value, for every one that has NO other sync path here:
-# not LLM_PROVIDER/GITHUB_TARGET_REPO (handled directly in _wanted_env()
+# not GITHUB_TARGET_REPO (handled directly in _wanted_env()
 # below), not a provider credential/model var (handled via _PROVIDERS), not a
 # _DB_SYNCED_OPERATIONAL_KEYS or _NEVER_SYNCED_OPERATIONAL_KEYS name (both
 # below). Before this existed, editing any of these in .env.config and
@@ -277,21 +277,6 @@ def check_config() -> CheckResult:
         )
     if not resolve_base_url():
         missing.append("PUBLIC_BASE_URL or RENDER_EXTERNAL_URL")
-    if not settings.llm_provider:
-        problems.append(
-            "LLM_PROVIDER is unset -- there is no default. Set it in .env.config "
-            f"to one of: {', '.join(sorted(_PROVIDERS))}"
-        )
-    elif (entry := _PROVIDERS.get(settings.llm_provider)) is None:
-        accepted = ", ".join(sorted(_PROVIDERS))
-        problems.append(
-            f"LLM_PROVIDER={settings.llm_provider!r} is not supported "
-            f"(expected one of: {accepted})"
-        )
-    else:
-        credential = entry[0]
-        if not getattr(settings, credential.lower(), ""):
-            missing.append(credential)
 
     detail_lines = []
     if missing:
@@ -348,24 +333,26 @@ def check_pricing() -> CheckResult:
 
 
 # The vars main.py's lifespan touches unconditionally at every boot --
-# LLM_PROVIDER (must be a supported provider) and GITHUB_WEBHOOK_SECRET
-# (must be non-empty) checked directly; GITHUB_APP_INSTALLATION_ID (must be
-# non-empty) then re-verified against GitHub via discover_and_verify_
-# installation_id(), which itself needs GITHUB_APP_ID/GITHUB_APP_PRIVATE_KEY
-# to make that call; DATABASE_URL via init_pool(). Unlike an earlier version
-# of this list, GITHUB_APP_INSTALLATION_ID's discovery is never skipped
-# because it's "already set" -- main.py refuses to start at all if it's
-# unset (ISSUES.md 2026-08-21), so it's just as boot-critical as the other
-# eight (the three DASHBOARD_* vars included -- main.py's lifespan
-# refuses to start with any of them empty or too short too). A rename/drop
-# of any of these nine that never reached Render crashes the whole ASGI app
-# at startup, not just one feature.
+# GITHUB_WEBHOOK_SECRET (must be non-empty) checked directly;
+# GITHUB_APP_INSTALLATION_ID (must be non-empty) then re-verified against
+# GitHub via discover_and_verify_installation_id(), which itself needs
+# GITHUB_APP_ID/GITHUB_APP_PRIVATE_KEY to make that call; DATABASE_URL via
+# init_pool() (which also gates the provider/slot_config DB check -- see
+# docs/superpowers/specs/2026-09-09-provider-key-index-db-only-design.md;
+# provider itself is a runtime_config row, not a Render env var, so it does
+# not belong in this list). Unlike an earlier version of this list,
+# GITHUB_APP_INSTALLATION_ID's discovery is never skipped because it's
+# "already set" -- main.py refuses to start at all if it's unset (ISSUES.md
+# 2026-08-21), so it's just as boot-critical as the other seven (the three
+# DASHBOARD_* vars included -- main.py's lifespan refuses to start with any
+# of them empty or too short too). A rename/drop of any of these eight that
+# never reached Render crashes the whole ASGI app at startup, not just one
+# feature.
 _BOOT_CREDENTIAL_NAMES = (
     "GITHUB_APP_ID",
     "GITHUB_APP_INSTALLATION_ID",
     "GITHUB_APP_PRIVATE_KEY",
     "GITHUB_WEBHOOK_SECRET",
-    "LLM_PROVIDER",
     "DATABASE_URL",
     "DASHBOARD_USERNAME",
     "DASHBOARD_PASSWORD",
@@ -645,9 +632,14 @@ def _runtime_config_schema_problem(missing: list[str] | None) -> str | None:
     )
 
 
-def _resolved_provider() -> tuple[str, str | None]:
-    """(active provider, override or None). The override wins at runtime, so
-    the CLI must resolve exactly as the dispatcher does.
+def _resolved_provider() -> str:
+    """The active provider, from runtime_config.provider -- required, no env
+    fallback (see docs/superpowers/specs/2026-09-09-provider-key-index-db-
+    only-design.md). Raises RuntimeError if the row's provider is NULL.
+    Callers must confirm settings.database_url is set before calling -- a
+    bare psycopg.connect against an empty DSN raises on its own, which every
+    caller already treats as a DB-unreachable condition via `except
+    Exception`.
 
     Reads via a raw short-timeout connection rather than store.init_pool(),
     for the same reason check_database does: the pool blocks 30s before
@@ -655,15 +647,17 @@ def _resolved_provider() -> tuple[str, str | None]:
     is a one-shot CLI, not a long-lived service amortising that cost.
 
     A bare psycopg.connect (unlike the store's pool) does not set
-    row_factory=dict_row, so the row -- if any -- comes back as a tuple, and
-    an empty-string override normalizes to None exactly as
-    store.get_provider_override() does, so the CLI and the dispatcher can
-    never disagree about whether an override is active.
+    row_factory=dict_row, so the row -- if any -- comes back as a tuple.
     """
     with psycopg.connect(settings.database_url, connect_timeout=_DB_CONNECT_TIMEOUT) as conn:
         row = conn.execute("SELECT provider FROM runtime_config WHERE id = 1").fetchone()
-    override = (row[0] if row else None) or None
-    return (override or settings.llm_provider), override
+    provider = (row[0] if row else None) or None
+    if provider is None:
+        raise RuntimeError(
+            "runtime_config.provider is unset -- run "
+            "`uv run python -m scripts.set_override <provider>` first"
+        )
+    return provider
 
 
 def _resolved_slot_models() -> dict[str, str | None]:
@@ -702,42 +696,25 @@ def _resolved_slot_models() -> dict[str, str | None]:
 
 
 def check_provider() -> CheckResult:
-    """Which provider will actually run, and whether its credential exists.
-
-    Without this, a DB override makes every other check's provider assumption
-    unverifiable: the service could run a provider whose key was never checked.
-    """
+    """Which provider will actually run, and whether its credential exists."""
     name = "provider"
     if not settings.database_url:
-        return CheckResult(name, "SKIPPED", "set DATABASE_URL to resolve the override")
+        return CheckResult(name, "SKIPPED", "set DATABASE_URL to resolve the active provider")
     try:
-        provider, override = _resolved_provider()
-    # deliberate: a DB problem is database's row to report, not ours
+        provider = _resolved_provider()
+    except RuntimeError as exc:
+        return CheckResult(name, "FAIL", str(exc))
+    # deliberate: a DB connectivity problem is database's row to report, not ours
     except Exception as exc:  # noqa: BLE001
-        return CheckResult(name, "SKIPPED", f"could not read the override ({type(exc).__name__})")
-    source = f"DB override; env={settings.llm_provider}" if override else "env"
+        return CheckResult(name, "SKIPPED", f"could not read runtime_config ({type(exc).__name__})")
     entry = _PROVIDERS.get(provider)
     if entry is None:
         accepted = ", ".join(sorted(_PROVIDERS))
-        return CheckResult(
-            name, "FAIL", f"{provider} ({source}) is not supported (expected: {accepted})"
-        )
+        return CheckResult(name, "FAIL", f"{provider} is not supported (expected: {accepted})")
     credential = entry[0]
     if not getattr(settings, credential.lower(), ""):
-        return CheckResult(name, "FAIL", f"{provider} ({source}) -- {credential} missing")
-    return CheckResult(name, "PASS", f"{provider} ({source})")
-
-
-def _resolved_provider_or_env() -> tuple[str, str | None]:
-    """Like _resolved_provider(), but usable without DATABASE_URL: without a
-    database there is no override to check, so this falls back to the
-    env-configured provider instead of requiring a connection. Used by
-    check_provider_live(), which -- unlike check_provider() -- must answer
-    "what's actually running" even when there's no override to resolve.
-    """
-    if not settings.database_url:
-        return settings.llm_provider, None
-    return _resolved_provider()
+        return CheckResult(name, "FAIL", f"{provider} -- {credential} missing")
+    return CheckResult(name, "PASS", provider)
 
 
 def _resolved_key_index(provider: str) -> tuple[int, int | None]:
@@ -775,24 +752,22 @@ def check_provider_live() -> CheckResult:
             name, "FAIL", "RENDER_API_KEY is required -- set it to verify credentials "
             "against the live service"
         )
+    if not settings.database_url:
+        return CheckResult(name, "SKIPPED", "set DATABASE_URL to resolve the active provider")
     try:
-        provider, override = _resolved_provider_or_env()
-    # deliberate: a DB problem is provider's/database's row to report, not ours
+        provider = _resolved_provider()
+    except RuntimeError as exc:
+        return CheckResult(name, "FAIL", str(exc))
+    # deliberate: a DB connectivity problem is provider's/database's row to report, not ours
     except Exception as exc:  # noqa: BLE001
         return CheckResult(
             name, "SKIPPED", f"could not resolve the active provider ({type(exc).__name__})"
         )
-    if override:
-        source = f"DB override; env={settings.llm_provider}"
-    elif not settings.database_url:
-        source = "env; no DATABASE_URL to check for an override"
-    else:
-        source = "env"
     entry = _PROVIDERS.get(provider)
     if entry is None:
         # check_config / check_provider already FAIL on an unsupported name;
         # there is no credential key to look up without a table entry.
-        return CheckResult(name, "SKIPPED", f"{provider} ({source}) is not a supported provider")
+        return CheckResult(name, "SKIPPED", f"{provider} is not a supported provider")
     credential = entry[0]
     try:
         service_id = _render.find_service_id()
@@ -802,10 +777,8 @@ def check_provider_live() -> CheckResult:
     except Exception as exc:  # noqa: BLE001
         return CheckResult(name, "FAIL", f"Render API error ({type(exc).__name__})")
     if not live_value:
-        return CheckResult(
-            name, "FAIL", f"{provider} ({source}) -- {credential} not present on Render"
-        )
-    return CheckResult(name, "PASS", f"{provider} ({source}) -- {credential} present on Render")
+        return CheckResult(name, "FAIL", f"{provider} -- {credential} not present on Render")
+    return CheckResult(name, "PASS", f"{provider} -- {credential} present on Render")
 
 
 def check_api_key_live() -> CheckResult:
@@ -821,7 +794,7 @@ def check_api_key_live() -> CheckResult:
             "against the live service"
         )
     try:
-        provider, _provider_override = _resolved_provider_or_env()
+        provider = _resolved_provider()
     # deliberate: a DB problem is provider's/database's row to report, not ours
     except Exception as exc:  # noqa: BLE001
         return CheckResult(
@@ -1030,15 +1003,16 @@ def report_as_json(results: list[CheckResult]) -> dict:
     }
 
 
-def _wanted_env() -> dict[str, str]:
-    """Local values for every var --sync-env will push.
+def _wanted_env(provider: str) -> dict[str, str]:
+    """Local values for every var --sync-env will push, for the given
+    active `provider` (resolved by the caller via _resolved_provider()).
 
-    Keys depend on the selected provider: the nine always-synced vars (see
-    _ALWAYS_SYNCED), plus LLM_PROVIDER, plus every provider's credential
-    (the selected one always, the others only when they have a local value
-    -- an opt-in .env lists the others empty, and must never be asked to
-    fill them). No model var: active_model() is DB-only (slot_config) now,
-    so a model var is never pushed to Render at all.
+    Keys: the nine always-synced vars (see _ALWAYS_SYNCED), plus every
+    provider's credential (the active one always, the others only when they
+    have a local value -- an opt-in .env lists the others empty, and must
+    never be asked to fill them). No LLM_PROVIDER, no model var: provider
+    and model are both DB-only now (runtime_config/slot_config), so neither
+    is ever pushed to Render at all.
     """
     wanted = {
         "DATABASE_URL": settings.database_url,
@@ -1051,9 +1025,8 @@ def _wanted_env() -> dict[str, str]:
         "DASHBOARD_PASSWORD": settings.dashboard_password,
         "DASHBOARD_SESSION_SECRET": settings.dashboard_session_secret,
         "RENDER_API_KEY": settings.render_api_key,
-        "LLM_PROVIDER": settings.llm_provider,
     }
-    entry = _PROVIDERS.get(settings.llm_provider)
+    entry = _PROVIDERS.get(provider)
     if entry is not None:
         credential, _ = entry
         wanted[credential] = getattr(settings, credential.lower(), "")
@@ -1392,12 +1365,12 @@ def sync_config_db() -> int:
     return 0
 
 
-def _seed_slot_zero_config_if_missing() -> None:
+def _seed_slot_zero_config_if_missing(provider: str) -> None:
     """The slot_config equivalent of store._seed_runtime_config_defaults,
     scoped to sync_env()'s slot-0 setup rather than first-boot -- slot_config
     has no universal default (only whichever slots actually have credentials
-    need rows), so this seeds the currently-active provider's slot 0 the
-    first time --sync-env runs, mirroring what Settings already has for it.
+    need rows), so this seeds `provider`'s slot 0 the first time --sync-env
+    runs, mirroring what Settings already has for it.
 
     Idempotent via its own early-return (a real row already there means an
     operator has since edited slot 0 through the dashboard/guided-setup,
@@ -1408,7 +1381,6 @@ def _seed_slot_zero_config_if_missing() -> None:
     reason as sync_config_db(): a one-shot CLI must not pay the pool's 30s
     connect timeout.
     """
-    provider = settings.llm_provider
     if provider not in _PROVIDERS:
         return
     model_var = _PROVIDERS[provider][1]
@@ -1471,49 +1443,38 @@ def sync_env() -> int:
             file=sys.stderr,
         )
         return 2
-    if settings.llm_provider not in _PROVIDERS:
-        accepted = ", ".join(sorted(_PROVIDERS))
+    if not settings.database_url:
         print(
-            f"refusing to sync LLM_PROVIDER={settings.llm_provider!r}: "
-            f"not a supported provider (expected one of: {accepted})",
+            "refusing to sync: DATABASE_URL is required to resolve the active "
+            "provider from runtime_config",
             file=sys.stderr,
         )
         return 2
-    if settings.database_url:
-        try:
-            _, override = _resolved_provider()
-        # deliberate: the provider check reports DB trouble
-        except Exception:  # noqa: BLE001
-            override = None
-        if override and override != settings.llm_provider:
-            print(
-                f"refusing to sync: a DB provider override ({override}) is active and "
-                f"wins over the LLM_PROVIDER={settings.llm_provider} being pushed. "
-                "Clear it first: uv run python -m scripts.set_override --clear",
-                file=sys.stderr,
-            )
-            return 2
-        # The former model-override-disagreement guard (a Render model var
-        # could disagree with an active DB model override) no longer applies:
-        # active_model() is DB-only now (slot_config), and _wanted_env()
-        # never pushes a model var to Render at all -- see
-        # docs/superpowers/specs/2026-09-08-slotted-config-and-db-delegation-
-        # design.md section 6. Nothing here can disagree with a push that
-        # doesn't happen.
-    # Deliberately NOT inside the `if settings.database_url:` block above: this
-    # is a pure local pricing-table lookup, so it must run whether or not a
-    # database is configured. A warning, not a refusal (design spec 2026-08-18
-    # section 6b): an unpriced model runs fine, it simply produces no cost
-    # estimate on the review comment (providers/pricing.py::
-    # estimate_cost_usd returns None), so there is nothing here worth blocking
-    # the push over.
-    for provider, model_var, model, known in _unpriced_models():
+    try:
+        provider = _resolved_provider()
+    except RuntimeError as exc:
+        print(f"refusing to sync: {exc}", file=sys.stderr)
+        return 2
+    # deliberate: the provider check reports DB trouble
+    except Exception as exc:  # noqa: BLE001
         print(
-            f"warning: {model_var}={model!r} has no pricing-table entry for {provider} "
-            f"(known: {known}); reviews will run without a cost estimate",
+            f"refusing to sync: could not resolve the active provider "
+            f"({type(exc).__name__})",
             file=sys.stderr,
         )
-    wanted = _wanted_env()
+        return 2
+    # A pure local pricing-table lookup, unrelated to the provider resolved
+    # above. A warning, not a refusal (design spec 2026-08-18 section 6b): an
+    # unpriced model runs fine, it simply produces no cost estimate on the
+    # review comment (providers/pricing.py::estimate_cost_usd returns None),
+    # so there is nothing here worth blocking the push over.
+    for unpriced_provider, model_var, model, known in _unpriced_models():
+        print(
+            f"warning: {model_var}={model!r} has no pricing-table entry for "
+            f"{unpriced_provider} (known: {known}); reviews will run without a cost estimate",
+            file=sys.stderr,
+        )
+    wanted = _wanted_env(provider)
     empty = sorted(
         key for key, value in wanted.items()
         if not value and key not in _OPTIONAL_EMPTY_ENV_KEYS
@@ -1536,21 +1497,20 @@ def sync_env() -> int:
     config_db_exit = sync_config_db()
     if config_db_exit != 0:
         return config_db_exit
-    if settings.database_url:
-        # Load-bearing, not best-effort: active_model() has no env fallback
-        # (2026-09-08 slotted-config-and-db-delegation), so a service that
-        # deploys with slot 0 unconfigured cannot run a single review. A
-        # failure here must refuse the sync, the same way every other
-        # required pre-push guard does, not degrade to a warning.
-        try:
-            _seed_slot_zero_config_if_missing()
-        except Exception as exc:  # noqa: BLE001
-            print(
-                f"refusing to sync: failed to seed slot_config for slot 0 "
-                f"({type(exc).__name__})",
-                file=sys.stderr,
-            )
-            return 2
+    # Load-bearing, not best-effort: active_model() has no env fallback
+    # (2026-09-08 slotted-config-and-db-delegation), so a service that
+    # deploys with slot 0 unconfigured cannot run a single review. A
+    # failure here must refuse the sync, the same way every other
+    # required pre-push guard does, not degrade to a warning.
+    try:
+        _seed_slot_zero_config_if_missing(provider)
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"refusing to sync: failed to seed slot_config for slot 0 "
+            f"({type(exc).__name__})",
+            file=sys.stderr,
+        )
+        return 2
     try:
         service_id = _render.find_service_id()
         if service_id is None:
@@ -1690,8 +1650,8 @@ CHECKS: tuple[CheckSpec, ...] = (
               "added after the table was first provisioned is never backfilled by the "
               "app's own CREATE TABLE IF NOT EXISTS boot DDL", False),
     CheckSpec("provider", lambda: check_provider(),
-              "The provider that will actually run -- LLM_PROVIDER, or an active DB "
-              "override -- has its credential set", False),
+              "The provider that will actually run -- runtime_config.provider, no env "
+              "fallback -- has its credential set", False),
     CheckSpec("provider-live", lambda: check_provider_live(),
               "The actively-resolved provider's credential is present on the deployed "
               "Render service, not just locally", True),
