@@ -34,7 +34,7 @@ import github_app
 import render_client as _render
 from config import settings
 from providers import pricing, registry
-from review_queue import store
+from review_queue import dispatcher_tuning_config, store
 from scripts import _override
 from scripts._prereqs import _looks_like_local_test_db
 
@@ -212,9 +212,10 @@ def _unpriced_models(
     can activate any of them with no redeploy, so an unpriced value sitting in
     a currently-inactive provider's var is a live landmine, not a harmless one.
 
-    `overrides`, when given, is a {provider: DB model override or None} map
-    (as returned by _resolved_model_overrides()) -- the EFFECTIVE model (an
-    active override, else the local value) is what gets checked, so an
+    `overrides`, when given, is a {provider: active-slot model or None} map
+    (as returned by _resolved_slot_models()) -- the EFFECTIVE model (the
+    active credential slot's configured model, else the local value) is what
+    gets checked, so an
     override set past set_override.py's own warning is reported too.
     check_pricing() passes this (it must report what will actually run);
     sync_env() omits it (it is warning about a PUSH of the local value -- its
@@ -323,7 +324,7 @@ def check_pricing() -> CheckResult:
     overrides: dict[str, str | None] = {}
     if settings.database_url:
         try:
-            overrides = _resolved_model_overrides()
+            overrides = _resolved_slot_models()
         except Exception:  # noqa: BLE001
             overrides = {}
     lines = []
@@ -665,24 +666,39 @@ def _resolved_provider() -> tuple[str, str | None]:
     return (override or settings.llm_provider), override
 
 
-def _resolved_model_overrides() -> dict[str, str | None]:
-    """{provider: DB model override or None} for every provider in
-    registry.PROVIDERS, in ONE connection -- mirrors
-    review_queue/store.py::get_all_model_overrides()'s single-query shape, via
-    this file's raw short-timeout connection rather than the pool, for the
-    same reason _resolved_provider does. Used by sync_env()'s model-override
-    guard, which used to call a per-provider version of this (one connection
-    per provider, in a loop) -- an unreachable DB then cost ~3x the connect
-    timeout instead of 1x. Column names come from registry.MODEL_COLUMNS -- a
-    hardcoded whitelist -- and are never built from a caller-supplied string.
+def _resolved_slot_models() -> dict[str, str | None]:
+    """{provider: the model configured for that provider's ACTIVE credential
+    slot}, in two queries (key-index overrides, then every provider's active
+    slot's model) over ONE connection -- this file's raw short-timeout
+    connection rather than the pool, same reason _resolved_provider does.
+
+    Replaces the old _resolved_model_overrides(), which read the flat
+    runtime_config.{provider}_model columns -- retired by the 2026-09-08
+    slotted-config work in favor of per-slot `slot_config` rows, since the
+    flat columns had no reader left (providers/active_model.py is fed from
+    slot_config only). This mirrors that resolution: no override means slot
+    0, exactly like providers/key_index.py's own "absent means 0" contract.
     """
-    columns = registry.MODEL_COLUMNS
+    columns = registry.KEY_INDEX_COLUMNS
     select = ", ".join(columns.values())
     with psycopg.connect(settings.database_url, connect_timeout=_DB_CONNECT_TIMEOUT) as conn:
-        row = conn.execute(f"SELECT {select} FROM runtime_config WHERE id = 1").fetchone()
-    if row is None:
-        return dict.fromkeys(columns, None)
-    return {provider: (value or None) for provider, value in zip(columns, row)}
+        index_row = conn.execute(f"SELECT {select} FROM runtime_config WHERE id = 1").fetchone()
+        indices = (
+            {provider: 0 for provider in columns}
+            if index_row is None
+            else {
+                provider: (value if value is not None else 0)
+                for provider, value in zip(columns, index_row)
+            }
+        )
+        resolved: dict[str, str | None] = {}
+        for provider, index in indices.items():
+            row = conn.execute(
+                "SELECT model FROM slot_config WHERE provider = %s AND slot_index = %s",
+                (provider, index),
+            ).fetchone()
+            resolved[provider] = (row[0] if row else None) or None
+    return resolved
 
 
 def check_provider() -> CheckResult:
@@ -1184,6 +1200,15 @@ def _verify_database_url_reachable() -> str:
 # Column order shared by the SELECT and the INSERT ... ON CONFLICT below, so
 # the two can never drift apart -- a name added to one without the other
 # would silently read or write the wrong value.
+# Every runtime_config column --sync-config-db mirrors from .env.config, in
+# the order `wanted` below builds its values. Extended from 6 to 16 by the
+# 2026-09-08 slotted-config-and-db-delegation work: the 10 keys it moved off
+# Render (9 tuning knobs + DISPATCHER_IDLE_SLEEP_SECONDS) had no sync path at
+# all between that change landing and this fix -- editing them in
+# .env.config was a silent no-op. VERTEX_GCP_PROJECT/_LOCATION
+# are also in _DB_SYNCED_OPERATIONAL_KEYS but are NOT here -- they're
+# slot_config columns, not flat runtime_config ones, and are seeded by
+# _seed_slot_zero_config_if_missing() below instead.
 _DB_SYNCED_COLUMNS = (
     "cooldown_base_seconds",
     "cooldown_max_seconds",
@@ -1191,17 +1216,31 @@ _DB_SYNCED_COLUMNS = (
     "key_usage_token_cap",
     "key_usage_reset_time_utc",
     "review_draft_prs",
+    "llm_request_timeout_seconds",
+    "dispatcher_default_retry_after_seconds",
+    "dispatcher_failure_base_backoff_seconds",
+    "dispatcher_failure_max_backoff_seconds",
+    "dispatcher_max_failure_attempts",
+    "dispatcher_max_notice_post_attempts",
+    "dispatcher_min_retry_after_seconds",
+    "dispatcher_backoff_jitter_seconds",
+    "dispatcher_notice_sweep_batch_size",
+    "dispatcher_idle_sleep_seconds",
 )
 
 
 def sync_config_db() -> int:
-    """Push .env.config's usage-cap/cooldown/review-draft values into
-    runtime_config, unconditionally -- these 6 keys are never a Render env var (see
-    render.yaml and _DB_SYNCED_OPERATIONAL_KEYS above), so this is their only
-    sync path. .env.config is the source of truth; the DB is only a mirror of
-    it that the dispatcher actually reads (review_queue/cooldown_config.py,
-    review_queue/usage_cap_config.py) -- see ISSUES.md's 2026-08-17 "two sources
-    of truth" entry for why a Render env var was the wrong mirror target.
+    """Push .env.config's usage-cap/cooldown/review-draft/tuning-knob values
+    into runtime_config, unconditionally -- these 16 columns (18 .env.config
+    keys; VERTEX_GCP_PROJECT/_LOCATION go to slot_config via
+    _seed_slot_zero_config_if_missing instead of a flat column) are never a
+    Render env var (see render.yaml and _DB_SYNCED_OPERATIONAL_KEYS above),
+    so this is their only sync path. .env.config is the source of truth; the
+    DB is only a mirror of it that the dispatcher actually reads
+    (review_queue/cooldown_config.py, review_queue/usage_cap_config.py,
+    review_queue/dispatcher_tuning_config.py) -- see ISSUES.md's 2026-08-17
+    "two sources of truth" entry for why a Render env var was the wrong
+    mirror target.
 
     Uses a raw, short-timeout connection rather than store.init_pool() /
     store.set_cooldown_override() -- same reason as _resolved_provider():
@@ -1255,7 +1294,54 @@ def sync_config_db() -> int:
         return 2
     tokens = settings.key_usage_token_cap
     reset = settings.key_usage_reset_time_utc.isoformat()
-    wanted = (base, cap, factor, tokens, reset, settings.review_draft_prs)
+
+    tuning = {
+        "llm_request_timeout_seconds": settings.llm_request_timeout_seconds,
+        "dispatcher_default_retry_after_seconds": settings.dispatcher_default_retry_after_seconds,
+        "dispatcher_failure_base_backoff_seconds":
+            settings.dispatcher_failure_base_backoff_seconds,
+        "dispatcher_failure_max_backoff_seconds":
+            settings.dispatcher_failure_max_backoff_seconds,
+        "dispatcher_max_failure_attempts": settings.dispatcher_max_failure_attempts,
+        "dispatcher_max_notice_post_attempts": settings.dispatcher_max_notice_post_attempts,
+        "dispatcher_min_retry_after_seconds": settings.dispatcher_min_retry_after_seconds,
+        "dispatcher_backoff_jitter_seconds": settings.dispatcher_backoff_jitter_seconds,
+        "dispatcher_notice_sweep_batch_size": settings.dispatcher_notice_sweep_batch_size,
+    }
+    # Same shared validator the dispatcher itself uses for a live config
+    # (review_queue/dispatcher_tuning_config.py), so this CLI and the running
+    # service can never disagree about what a usable tuning config is --
+    # mirrors how _runtime_config_schema_problem is shared with
+    # check_runtime_config_schema.
+    invalid = dispatcher_tuning_config.problems(tuning)
+    if invalid:
+        print(
+            "refusing to sync: dispatcher tuning config would be unusable -- "
+            + "; ".join(invalid)
+            + " -- fix .env.config first",
+            file=sys.stderr,
+        )
+        return 2
+    if settings.dispatcher_idle_sleep_seconds <= 0:
+        print(
+            "refusing to sync: DISPATCHER_IDLE_SLEEP_SECONDS="
+            f"{settings.dispatcher_idle_sleep_seconds} would busy-loop the dispatcher "
+            "(must be > 0) -- fix .env.config first",
+            file=sys.stderr,
+        )
+        return 2
+
+    seed = {
+        "cooldown_base_seconds": base,
+        "cooldown_max_seconds": cap,
+        "cooldown_factor": factor,
+        "key_usage_token_cap": tokens,
+        "key_usage_reset_time_utc": reset,
+        "review_draft_prs": settings.review_draft_prs,
+        "dispatcher_idle_sleep_seconds": settings.dispatcher_idle_sleep_seconds,
+        **tuning,
+    }
+    wanted = tuple(seed[column] for column in _DB_SYNCED_COLUMNS)
 
     # A column store.py's schema declares but the live table never got (CREATE
     # TABLE IF NOT EXISTS is a no-op against an already-provisioned table --

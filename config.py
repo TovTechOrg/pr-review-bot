@@ -151,10 +151,17 @@ class Settings(BaseSettings):
     dispatcher_rereview_cooldown_max_seconds: float = 3600.0
     # ge=1.0: a factor < 1 would shrink the cooldown across escalation
     # levels instead of lengthening it, defeating the point of escalation.
+    # This constraint guards only the .env.config -> --sync-config-db seed
+    # path; the live value comes from runtime_config, validated at runtime by
+    # review_queue/dispatcher_tuning_config.py's own bounds (for the 9
+    # tuning knobs) or cooldown_config.py's discard predicate (for this
+    # field) -- keep those in sync with this one.
     dispatcher_rereview_cooldown_factor: float = Field(default=2.0, ge=1.0)
     # gt=0: 0 would silently disable the notice sweep entirely, and -1 means
     # "no limit" in SQLite, silently reverting to the unbounded pre-fix
-    # behavior this setting exists to prevent.
+    # behavior this setting exists to prevent. Same caveat as the factor
+    # above: this only guards the seed path, not the live DB value -- see
+    # review_queue/dispatcher_tuning_config.py's matching bound.
     dispatcher_notice_sweep_batch_size: int = Field(default=20, gt=0)
 
     # --- Draft PRs. Database-only, like the cooldown/usage-cap settings

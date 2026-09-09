@@ -328,8 +328,7 @@
   }
   .provider-model-row label { color: var(--text-muted); font-size: 0.85rem; }
   .provider-model-row .cfg-key-slot { width: 4.5rem; flex: 0 0 auto; }
-  .provider-model-row .cfg-model { flex: 1 1 180px; min-width: 0; }
-  .provider-model-row .cfg-model-status { font-size: 0.85rem; color: var(--text-muted); }
+  .provider-model-row select, .provider-model-row input[type="text"] { flex: 1 1 180px; min-width: 0; }
   .popup-backdrop {
     position: fixed;
     inset: 0;
@@ -677,16 +676,16 @@
             <option value="vertex">vertex</option>
           </select>
           <div id="providerModelRows" class="provider-model-grid"></div>
-          <!-- Read-only listing of every configured slot's model (and for
-               vertex, project/location) across all providers -- editing
-               happens via guided setup, not here (Task 16, best-effort per
-               spec section 10.3). -->
+          <!-- Editable per-slot model (and for vertex, project/location)
+               grid -- one row per Render-credentialed slot, saved
+               independently via PATCH /api/environment/slot-config
+               (renderSlotConfigRows/saveSlotConfig). -->
           <div id="slotConfigRows" class="provider-model-grid"></div>
           <!-- Alphabetized by field key (cooldown_base_seconds, cooldown_factor,
                cooldown_max_seconds, dispatcher_backoff_jitter_seconds,
                dispatcher_default_retry_after_seconds,
                dispatcher_failure_base_backoff_seconds,
-               dispatcher_failure_max_backoff_seconds,
+               dispatcher_failure_max_backoff_seconds, dispatcher_idle_sleep_seconds,
                dispatcher_max_failure_attempts, dispatcher_max_notice_post_attempts,
                dispatcher_min_retry_after_seconds, dispatcher_notice_sweep_batch_size,
                llm_request_timeout_seconds, review_draft_prs, usage_cap_reset,
@@ -751,7 +750,7 @@
               <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_dispatcher_backoff_jitter_seconds"></span>
             </span>
           </label>
-          <input id="cfgDispatcherBackoffJitterSeconds" type="number" step="any">
+          <input id="cfgDispatcherBackoffJitterSeconds" type="number" step="any" min="0">
           <label>
             <span data-i18n="env_config_dispatcher_default_retry_after_seconds"></span>
             <span class="info-wrap">
@@ -766,7 +765,7 @@
               <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_dispatcher_default_retry_after_seconds"></span>
             </span>
           </label>
-          <input id="cfgDispatcherDefaultRetryAfterSeconds" type="number" step="any">
+          <input id="cfgDispatcherDefaultRetryAfterSeconds" type="number" step="any" min="0">
           <label>
             <span data-i18n="env_config_dispatcher_failure_base_backoff_seconds"></span>
             <span class="info-wrap">
@@ -781,7 +780,7 @@
               <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_dispatcher_failure_base_backoff_seconds"></span>
             </span>
           </label>
-          <input id="cfgDispatcherFailureBaseBackoffSeconds" type="number" step="any">
+          <input id="cfgDispatcherFailureBaseBackoffSeconds" type="number" step="any" min="0">
           <label>
             <span data-i18n="env_config_dispatcher_failure_max_backoff_seconds"></span>
             <span class="info-wrap">
@@ -796,7 +795,22 @@
               <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_dispatcher_failure_max_backoff_seconds"></span>
             </span>
           </label>
-          <input id="cfgDispatcherFailureMaxBackoffSeconds" type="number" step="any">
+          <input id="cfgDispatcherFailureMaxBackoffSeconds" type="number" step="any" min="0">
+          <label>
+            <span data-i18n="env_config_dispatcher_idle_sleep_seconds"></span>
+            <span class="info-wrap">
+              <button type="button" class="info-icon" data-action="info" aria-label="More info" data-i18n-aria="env_info_label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9"/>
+                  <line x1="12" y1="11" x2="12" y2="16"/>
+                  <circle cx="12" cy="7.5" r="0.75" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_dispatcher_idle_sleep_seconds"></span>
+            </span>
+          </label>
+          <input id="cfgDispatcherIdleSleepSeconds" type="number" step="any" min="0">
           <label>
             <span data-i18n="env_config_dispatcher_max_failure_attempts"></span>
             <span class="info-wrap">
@@ -811,7 +825,7 @@
               <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_dispatcher_max_failure_attempts"></span>
             </span>
           </label>
-          <input id="cfgDispatcherMaxFailureAttempts" type="number" step="1">
+          <input id="cfgDispatcherMaxFailureAttempts" type="number" step="1" min="1">
           <label>
             <span data-i18n="env_config_dispatcher_max_notice_post_attempts"></span>
             <span class="info-wrap">
@@ -826,7 +840,7 @@
               <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_dispatcher_max_notice_post_attempts"></span>
             </span>
           </label>
-          <input id="cfgDispatcherMaxNoticePostAttempts" type="number" step="1">
+          <input id="cfgDispatcherMaxNoticePostAttempts" type="number" step="1" min="1">
           <label>
             <span data-i18n="env_config_dispatcher_min_retry_after_seconds"></span>
             <span class="info-wrap">
@@ -841,7 +855,7 @@
               <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_dispatcher_min_retry_after_seconds"></span>
             </span>
           </label>
-          <input id="cfgDispatcherMinRetryAfterSeconds" type="number" step="any">
+          <input id="cfgDispatcherMinRetryAfterSeconds" type="number" step="any" min="0">
           <label>
             <span data-i18n="env_config_dispatcher_notice_sweep_batch_size"></span>
             <span class="info-wrap">
@@ -856,7 +870,7 @@
               <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_dispatcher_notice_sweep_batch_size"></span>
             </span>
           </label>
-          <input id="cfgDispatcherNoticeSweepBatchSize" type="number" step="1">
+          <input id="cfgDispatcherNoticeSweepBatchSize" type="number" step="1" min="1">
           <label>
             <span data-i18n="env_config_llm_request_timeout_seconds"></span>
             <span class="info-wrap">
@@ -871,7 +885,7 @@
               <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_llm_request_timeout_seconds"></span>
             </span>
           </label>
-          <input id="cfgLlmRequestTimeoutSeconds" type="number" step="any">
+          <input id="cfgLlmRequestTimeoutSeconds" type="number" step="any" min="0">
           <label>
             <input id="cfgReviewDraftPrs" type="checkbox">
             <span data-i18n="env_config_review_draft_prs"></span>
@@ -985,6 +999,7 @@
         env_config_dispatcher_default_retry_after_seconds: "Default retry-after (s)",
         env_config_dispatcher_failure_base_backoff_seconds: "Failure backoff base (s)",
         env_config_dispatcher_failure_max_backoff_seconds: "Failure backoff max (s)",
+        env_config_dispatcher_idle_sleep_seconds: "Idle sleep (s)",
         env_config_dispatcher_max_failure_attempts: "Max failure attempts",
         env_config_dispatcher_max_notice_post_attempts: "Max notice post attempts",
         env_config_dispatcher_min_retry_after_seconds: "Min retry-after (s)",
@@ -997,6 +1012,8 @@
         env_delete: "Delete",
         env_config_model: "Model",
         env_config_key_slot: "Key slot",
+        env_config_vertex_project: "GCP project",
+        env_config_vertex_location: "GCP location",
         env_no_slots_configured: "No slots configured yet — use Guided setup above.",
         env_validating: "Checking…",
         env_valid: "✓ valid",
@@ -1016,6 +1033,7 @@
         cfg_desc_dispatcher_default_retry_after_seconds: "Fallback delay before retrying a review when no other backoff applies.",
         cfg_desc_dispatcher_failure_base_backoff_seconds: "Starting backoff delay after a review failure, doubling on each further failure up to the max below.",
         cfg_desc_dispatcher_failure_max_backoff_seconds: "Upper bound on the failure backoff delay.",
+        cfg_desc_dispatcher_idle_sleep_seconds: "How long the dispatcher sleeps between ticks when the queue is empty.",
         cfg_desc_dispatcher_max_failure_attempts: "How many times a review is retried after failing before being given up on.",
         cfg_desc_dispatcher_max_notice_post_attempts: "How many times posting a PR notice comment is retried before giving up.",
         cfg_desc_dispatcher_min_retry_after_seconds: "Smallest allowed delay before a retry, regardless of what triggered it.",
@@ -1103,6 +1121,7 @@
         env_config_dispatcher_default_retry_after_seconds: "ברירת מחדל לניסיון חוזר (שנ')",
         env_config_dispatcher_failure_base_backoff_seconds: "בסיס נסיגה לכשל (שנ')",
         env_config_dispatcher_failure_max_backoff_seconds: "מקסימום נסיגה לכשל (שנ')",
+        env_config_dispatcher_idle_sleep_seconds: "שינה בזמן חוסר פעילות (שנ')",
         env_config_dispatcher_max_failure_attempts: "מקסימום ניסיונות כשל",
         env_config_dispatcher_max_notice_post_attempts: "מקסימום ניסיונות פרסום הודעה",
         env_config_dispatcher_min_retry_after_seconds: "מינימום לניסיון חוזר (שנ')",
@@ -1115,6 +1134,8 @@
         env_delete: "מחק",
         env_config_model: "מודל",
         env_config_key_slot: "חריץ מפתח",
+        env_config_vertex_project: "פרויקט GCP",
+        env_config_vertex_location: "מיקום GCP",
         env_no_slots_configured: "עדיין לא הוגדרו חריצים — השתמשו בהתקנה המודרכת למעלה.",
         env_validating: "בודק…",
         env_valid: "✓ תקין",
@@ -1134,6 +1155,7 @@
         cfg_desc_dispatcher_default_retry_after_seconds: "השהיה כברירת מחדל לפני ניסיון חזרה על בדיקה כשאין השהיה אחרת שחלה.",
         cfg_desc_dispatcher_failure_base_backoff_seconds: "השהיית הנסיגה ההתחלתית לאחר כשל בבדיקה, מוכפלת בכל כשל נוסף עד למקסימום שמופיע להלן.",
         cfg_desc_dispatcher_failure_max_backoff_seconds: "הגבול העליון להשהיית הנסיגה לאחר כשל.",
+        cfg_desc_dispatcher_idle_sleep_seconds: "כמה זמן המפיץ ישן בין בדיקות כשהתור ריק.",
         cfg_desc_dispatcher_max_failure_attempts: "כמה פעמים בדיקה תיוסה שוב לאחר כשל לפני שנוטשים אותה.",
         cfg_desc_dispatcher_max_notice_post_attempts: "כמה פעמים פרסום תגובת הודעה ב-PR ינוסה שוב לפני נטישה.",
         cfg_desc_dispatcher_min_retry_after_seconds: "ההשהיה המינימלית המותרת לפני ניסיון חזרה, ללא קשר לגורם לה.",
@@ -2215,7 +2237,7 @@
     document.getElementById("saveRenderVarsBtn").addEventListener("click", saveRenderVars);
 
     const LLM_PROVIDERS = ["gemini", "groq", "vertex"];
-    let currentConfig = { model: {}, key_index: {} };
+    let currentConfig = { key_index: {} };
     let currentAvailableKeySlots = { gemini: [], groq: [], vertex: [] };
     // Scoped separately so an invalid VERTEX_GCP_PROJECT/VERTEX_GCP_LOCATION field edited
     // directly in the render-vars table only blocks the render-vars Save
@@ -2229,19 +2251,21 @@
     }
 
     function renderProviderModelRows() {
+      // Model editing moved to #slotConfigRows (renderSlotConfigRows) -- this
+      // row now only carries the key-slot selector (which provider's
+      // credential is ACTIVE), a real live override
+      // (runtime_config.{provider}_key_index). The per-provider model
+      // dropdown that used to live here wrote a retired flat
+      // runtime_config.{provider}_model column that nothing read -- see
+      // docs/superpowers/specs/2026-09-08-slotted-config-and-db-delegation-
+      // design.md section 4b.
       const container = document.getElementById("providerModelRows");
       container.innerHTML = LLM_PROVIDERS.map((provider) => {
         const slots = currentAvailableKeySlots[provider] || [];
         const currentSlot = currentConfig.key_index[provider] ?? "";
-        const currentModel = currentConfig.model[provider] || "";
         const slotOptions = slots
           .map((s) => `<option value="${s}" ${String(s) === String(currentSlot) ? "selected" : ""}>${s}</option>`)
           .join("");
-        const disabled = modelCatalog[provider].status !== "ok";
-        // A blank leading option means "no override" -- distinct from the
-        // live catalog's own entries, and always available even while the
-        // catalog is loading/unavailable so the field can still be cleared.
-        const modelOptions = `<option value=""></option>${modelOptionsHtml(provider, currentModel)}`;
         return `
           <div class="provider-model-row" data-provider="${provider}">
             <span class="provider-name">${esc(provider)}</span>
@@ -2250,33 +2274,48 @@
               <option value="">—</option>
               ${slotOptions}
             </select>
-            <label>${t("env_config_model")}</label>
-            <select class="cfg-model" data-provider="${provider}" ${disabled ? "disabled" : ""}>
-              ${modelOptions}
-            </select>
-            <span class="cfg-model-status" data-provider="${provider}">${modelStatusHtml(provider)}</span>
           </div>
         `;
       }).join("");
+    }
 
-      container.querySelectorAll(".model-retry").forEach((btn) => {
-        btn.addEventListener("click", () => loadModelCatalog(btn.getAttribute("data-provider")));
-      });
+    // Editable per-slot model (and for vertex, project/location) grid --
+    // one row per slot that HAS a credential on Render (available_key_slots),
+    // not just slots that already have a slot_config row, so a spare slot
+    // can be configured for the first time here. Replaces the old
+    // per-provider "current model" dropdown on #providerModelRows (which
+    // wrote a retired flat runtime_config.{provider}_model column nothing
+    // read -- see docs/superpowers/specs/2026-09-08-slotted-config-and-db-
+    // delegation-design.md section 4b) as the one place a slot's model gets
+    // edited.
+    function slotConfigEntry(slotConfigs, provider, slot) {
+      return ((slotConfigs && slotConfigs[provider]) || []).find((e) => e.slot === slot) || {};
     }
 
     function renderSlotConfigRows(slotConfigs) {
       const container = document.getElementById("slotConfigRows");
       const rows = LLM_PROVIDERS.flatMap((provider) => {
-        const entries = (slotConfigs && slotConfigs[provider]) || [];
-        return entries.map((entry) => {
-          const parts = [`${t("env_config_key_slot")} ${entry.slot}`, entry.model || "—"];
-          if (provider === "vertex") {
-            parts.push(entry.vertex_gcp_project || "—", entry.vertex_gcp_location || "—");
-          }
+        const slots = currentAvailableKeySlots[provider] || [];
+        return slots.map((slot) => {
+          const entry = slotConfigEntry(slotConfigs, provider, slot);
+          const rowId = `slotCfg-${provider}-${slot}`;
+          const modelOptions = `<option value=""></option>${modelOptionsHtml(provider, entry.model || "")}`;
+          const vertexFields = provider === "vertex"
+            ? `
+              <label>${t("env_config_vertex_project")}</label>
+              <input id="${rowId}-project" type="text" value="${esc(entry.vertex_gcp_project || "")}">
+              <label>${t("env_config_vertex_location")}</label>
+              <input id="${rowId}-location" type="text" value="${esc(entry.vertex_gcp_location || "")}">
+            `
+            : "";
           return `
             <div class="provider-model-row" data-provider="${provider}">
-              <span class="provider-name">${esc(provider)}</span>
-              <span>${parts.map(esc).join(" · ")}</span>
+              <span class="provider-name">${esc(provider)} (${t("env_config_key_slot")} ${slot})</span>
+              <label>${t("env_config_model")}</label>
+              <select id="${rowId}-model">${modelOptions}</select>
+              ${vertexFields}
+              <button type="button" class="control slot-config-save" data-provider="${esc(provider)}" data-slot="${slot}">${t("env_save")}</button>
+              <span class="field-hint" data-slot-result="${provider}-${slot}"></span>
             </div>
           `;
         });
@@ -2284,6 +2323,33 @@
       container.innerHTML = rows.length
         ? rows.join("")
         : `<div class="provider-model-row"><span>${t("env_no_slots_configured")}</span></div>`;
+      container.querySelectorAll(".slot-config-save").forEach((btn) => {
+        btn.addEventListener("click", () => saveSlotConfig(
+          btn.getAttribute("data-provider"), parseInt(btn.getAttribute("data-slot"), 10)
+        ));
+      });
+    }
+
+    async function saveSlotConfig(provider, slot) {
+      const rowId = `slotCfg-${provider}-${slot}`;
+      const body = {
+        provider,
+        slot,
+        model: document.getElementById(`${rowId}-model`).value || null,
+      };
+      if (provider === "vertex") {
+        body.vertex_gcp_project = document.getElementById(`${rowId}-project`).value || null;
+        body.vertex_gcp_location = document.getElementById(`${rowId}-location`).value || null;
+      }
+      const resp = await fetch("/api/environment/slot-config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const result = await resp.json();
+      const hint = document.querySelector(`[data-slot-result="${provider}-${slot}"]`);
+      if (hint) hint.textContent = formatSaveResult(result);
+      await fetchEnvironmentConfig();
     }
 
     const TUNING_KNOB_FIELDS = [
@@ -2296,7 +2362,18 @@
       "dispatcher_min_retry_after_seconds",
       "dispatcher_backoff_jitter_seconds",
       "dispatcher_notice_sweep_batch_size",
+      "dispatcher_idle_sleep_seconds",
     ];
+
+    // parseFloat on these sends e.g. 5.0, which pydantic's int coercion
+    // accepts but a stray "5.5" makes the whole PATCH 422 -- parse them as
+    // ints so a fractional entry is truncated client-side instead of failing
+    // the entire save.
+    const INTEGER_KNOB_FIELDS = new Set([
+      "dispatcher_max_failure_attempts",
+      "dispatcher_max_notice_post_attempts",
+      "dispatcher_notice_sweep_batch_size",
+    ]);
 
     function tuningKnobFieldId(field) {
       return "cfg" + field.replace(/(^|_)([a-z])/g, (_m, _sep, c) => c.toUpperCase());
@@ -2313,7 +2390,7 @@
       TUNING_KNOB_FIELDS.forEach((field) => {
         document.getElementById(tuningKnobFieldId(field)).value = cfg[field] ?? "";
       });
-      currentConfig = { model: cfg.model || {}, key_index: cfg.key_index || {} };
+      currentConfig = { key_index: cfg.key_index || {} };
       invalidConfigFields.clear();
       updateSaveGuards();
       renderProviderModelRows();
@@ -2339,21 +2416,24 @@
         usage_cap_tokens: parseInt(document.getElementById("cfgUsageCapTokens").value, 10) || null,
         usage_cap_reset: document.getElementById("cfgUsageCapReset").value || null,
         review_draft_prs: document.getElementById("cfgReviewDraftPrs").checked,
-        model: {},
         key_index: {},
       };
       TUNING_KNOB_FIELDS.forEach((field) => {
         const raw = document.getElementById(tuningKnobFieldId(field)).value;
-        body[field] = raw === "" ? null : parseFloat(raw);
+        // Blank means "don't touch this field", NOT null: these 9 have no
+        // fallback, and a NULL column stops the dispatcher dead. Omitting the
+        // key entirely is what _apply_config_patch's exclude_unset already
+        // treats as "not sent".
+        if (raw !== "") {
+          body[field] = INTEGER_KNOB_FIELDS.has(field) ? parseInt(raw, 10) : parseFloat(raw);
+        }
       });
       // Always set every provider's field (never conditional on truthiness)
-      // so blanking a model input or resetting a key-slot select to "—"
-      // actually clears the override server-side, instead of the field
-      // being silently omitted and the stale override left in place.
-      document.querySelectorAll(".cfg-model").forEach((input) => {
-        const provider = input.getAttribute("data-provider");
-        body.model[provider] = input.value || null;
-      });
+      // so resetting a key-slot select to "—" actually clears the override
+      // server-side, instead of the field being silently omitted and the
+      // stale override left in place. Model editing is a separate PATCH
+      // (saveSlotConfig, per-row in #slotConfigRows) since it targets
+      // slot_config, not this endpoint.
       document.querySelectorAll(".cfg-key-slot").forEach((select) => {
         const provider = select.getAttribute("data-provider");
         body.key_index[provider] = select.value !== "" ? parseInt(select.value, 10) : null;

@@ -389,12 +389,36 @@ def main(argv: list[str] | None = None) -> int:
     # nothing behavior-visible has changed. Activating first would leave a
     # provider live against a stale model -- exactly the gemini/vertex breakage
     # this override exists to prevent.
-    if args.model is not None:
-        store.set_model_override(args.provider, args.model.strip(), now)
-        print(f"{args.provider} model override set to {args.model.strip()}")
-    elif args.clear_model:
-        store.set_model_override(args.provider, None, now)
-        print(f"{args.provider} model override cleared")
+    #
+    # Targets the SAME slot the credential verification above just checked
+    # (--index when given, else this provider's currently-active slot) -- so
+    # this can never write a model to a slot whose credential presence was
+    # never verified. Writes slot_config, not the retired flat
+    # runtime_config.{provider}_model column: providers/active_model.py is
+    # fed from slot_config only, and set_slot_config's contract is all three
+    # fields together, so the other two (vertex project/location) are read
+    # back and re-written unchanged rather than being silently nulled.
+    if args.model is not None or args.clear_model:
+        if args.index is not None:
+            target_index = args.index
+        elif args.clear_index:
+            target_index = 0
+        else:
+            target_index = store.get_key_index_override(args.provider) or 0
+        existing = store.get_slot_config(args.provider, target_index) or {}
+        model = args.model.strip() if args.model is not None else None
+        store.set_slot_config(
+            args.provider,
+            target_index,
+            model=model,
+            vertex_gcp_project=existing.get("vertex_gcp_project"),
+            vertex_gcp_location=existing.get("vertex_gcp_location"),
+            now=now,
+        )
+        if model is not None:
+            print(f"{args.provider} slot {target_index} model set to {model}")
+        else:
+            print(f"{args.provider} slot {target_index} model cleared")
     if not args.no_activate:
         store.set_provider_override(args.provider, now)
         print(f"provider override set to {args.provider}")

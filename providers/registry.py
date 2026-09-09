@@ -39,18 +39,6 @@ KEY_INDEX_COLUMNS = {
     "vertex": "vertex_key_index",
 }
 
-# provider -> the runtime_config column holding its model override. Same
-# hardcoded-whitelist role as KEY_INDEX_COLUMNS above: psycopg parameterizes
-# values but not column identifiers, so looking the name up here -- rather
-# than building it from a caller's `provider` string -- IS the injection
-# guard for every statement that touches one of these columns.
-MODEL_COLUMNS = {
-    "gemini": "gemini_model",
-    "groq": "groq_model",
-    "vertex": "vertex_model",
-}
-
-
 def slot_env_name(provider: str, index: int) -> str:
     """The env-var name for `provider`'s API-key slot `index`.
 

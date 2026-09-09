@@ -141,7 +141,12 @@ async def attempt_review(
     # threading them down as call parameters keeps providers/ and
     # specialists/ fully dependency-free from review_queue/ -- see
     # providers/base.py::LLMProvider's docstring for the full reasoning.
-    tuning = dispatcher_tuning_config.effective_config()
+    # require_config(), not effective_config(): no env fallback means a
+    # missing/invalid value must raise a named error, not KeyError from a
+    # dict lookup. dispatcher.process_next_due's own guard has already
+    # validated this before calling attempt_review, so this is a backstop
+    # for any other caller.
+    tuning = dispatcher_tuning_config.require_config()
     timeout_seconds = tuning["llm_request_timeout_seconds"]
     default_retry_after_seconds = tuning["dispatcher_default_retry_after_seconds"]
 

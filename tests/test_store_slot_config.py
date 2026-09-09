@@ -94,6 +94,7 @@ def test_set_dispatcher_tuning_config_round_trips():
         dispatcher_min_retry_after_seconds=0.5,
         dispatcher_backoff_jitter_seconds=1.5,
         dispatcher_notice_sweep_batch_size=10,
+        dispatcher_idle_sleep_seconds=5.0,
         now="2026-09-08T00:00:00+00:00",
     )
     row = store.get_dispatcher_tuning_config()
@@ -107,4 +108,5 @@ def test_set_dispatcher_tuning_config_round_trips():
         "dispatcher_min_retry_after_seconds": 0.5,
         "dispatcher_backoff_jitter_seconds": 1.5,
         "dispatcher_notice_sweep_batch_size": 10,
+        "dispatcher_idle_sleep_seconds": 5.0,
     }

@@ -49,27 +49,36 @@ from review_queue import (
 logger = logging.getLogger(__name__)
 
 
-def _jitter() -> float:
+def _jitter(config: dict | None = None) -> float:
     """Injectable jitter source — 0.0 unless dispatcher_backoff_jitter_seconds > 0.
 
     Kept as a module-level seam so tests monkeypatch it to a constant and the
     whole system stays deterministic; a future multi-instance deployment sets
     the config > 0 to spread retries without a code change.
+
+    ``config`` is the caller's already-validated tuning dict (from
+    dispatcher_tuning_config.require_config()). Omitting it re-resolves via
+    require_config(), which RAISES rather than KeyError-ing on an empty or
+    invalid cache. process_next_due's hard-failure handler always passes its
+    already-resolved ``tuning`` explicitly, since raising from inside that
+    handler is exactly the bug this parameter exists to prevent.
     """
-    jitter_max = dispatcher_tuning_config.effective_config()["dispatcher_backoff_jitter_seconds"]
+    tuning = config if config is not None else dispatcher_tuning_config.require_config()
+    jitter_max = tuning["dispatcher_backoff_jitter_seconds"]
     if jitter_max <= 0:
         return 0.0
     return random.uniform(0.0, jitter_max)
 
 
-def compute_backoff(attempts: int, jitter: float = 0.0) -> float:
+def compute_backoff(attempts: int, jitter: float = 0.0, config: dict | None = None) -> float:
     """Exponential backoff for a hard-failure retry: min(base*2^(n-1), cap) + jitter.
 
     ``attempts`` is the 1-based per-ticket hard-failure count (first failure -> base).
+    ``config``: see _jitter's docstring -- same contract.
     """
-    config = dispatcher_tuning_config.effective_config()
-    base = config["dispatcher_failure_base_backoff_seconds"]
-    cap = config["dispatcher_failure_max_backoff_seconds"]
+    tuning = config if config is not None else dispatcher_tuning_config.require_config()
+    base = tuning["dispatcher_failure_base_backoff_seconds"]
+    cap = tuning["dispatcher_failure_max_backoff_seconds"]
     return min(base * 2 ** (attempts - 1), cap) + jitter
 
 
@@ -78,6 +87,12 @@ _blocked_until: dict[str, datetime] = {}
 _IDLE_SLEEP_REFRESH_INTERVAL_SECONDS = 30
 _idle_sleep_seconds: float | None = None
 _last_idle_sleep_refresh: float = 0.0
+
+# Hardcoded floor for the "tuning config unavailable" deferral, NOT a config
+# fallback (same distinction as run_forever's 1.0 idle-sleep floor): the
+# value that would tell us how long to wait is exactly the one that's
+# missing, so it cannot come from config.
+_UNCONFIGURED_DEFER_SECONDS = 60.0
 
 
 def reset_blocked_until() -> None:
@@ -182,7 +197,22 @@ async def post_pending_notices(now: datetime) -> int:
     count posted. Called once per run_forever iteration, alongside
     process_next_due."""
     posted = 0
-    tickets = await asyncio.to_thread(store.tickets_needing_notice, now.isoformat())
+    try:
+        batch_size = dispatcher_tuning_config.require_config()[
+            "dispatcher_notice_sweep_batch_size"
+        ]
+    except dispatcher_tuning_config.TuningConfigUnavailable as exc:
+        # The sweep is cosmetic (it only refreshes a schedule footnote);
+        # skipping one iteration is strictly better than either an unbounded
+        # query or a guessed batch size. process_next_due's own guard is what
+        # makes a genuinely missing/invalid tuning config visible on the PR;
+        # this sweep can just wait for the next iteration once it's fixed. On
+        # a fully idle queue the cache may legitimately be cold on the very
+        # first iteration (process_next_due populates it, and it may not have
+        # run yet), so this is not itself an error condition worth escalating.
+        logger.warning("skipping notice sweep: %s", exc)
+        return 0
+    tickets = await asyncio.to_thread(store.tickets_needing_notice, now.isoformat(), batch_size)
     for ticket in tickets:
         try:
             comment = await asyncio.to_thread(
@@ -240,35 +270,40 @@ async def _refresh_slot_config() -> None:
 
 async def _refresh_usage_cap_overrides() -> None:
     """Refresh the usage-cap override once per claimed ticket, same cadence and
-    fail-safe shape as the refreshes above: degrade to the env defaults rather
-    than keep a stale cache."""
+    fail-safe shape as the refreshes above. No env fallback (spec section
+    10.4): a failed refresh degrades to an empty cache, which
+    usage_cap_config.effective_caps() reads as "cap not enforced this tick" --
+    not a real default, since there is none left to fall back to."""
     try:
         tokens, reset = await asyncio.to_thread(store.get_usage_cap_overrides)
         usage_cap_config.set_override_cache(tokens, reset)
     except Exception:  # noqa: BLE001
-        logger.exception("failed to refresh usage-cap overrides; using env defaults")
+        logger.exception("failed to refresh usage-cap overrides; cap not enforced this tick")
         usage_cap_config.reset_override_cache()
 
 
 async def _refresh_review_draft_override() -> None:
     """Refresh the draft-PR review override once per claimed ticket, same
-    cadence and fail-safe shape as the refreshes above: degrade to the env
-    default rather than keep a stale cache."""
+    cadence and fail-safe shape as the refreshes above. No env fallback (spec
+    section 10.4): a failed refresh degrades to an empty cache, which
+    review_draft_config reads as "no override in force" for this tick."""
     try:
         value = await asyncio.to_thread(store.get_review_draft_override)
         review_draft_config.set_override_cache(value)
     except Exception:  # noqa: BLE001
-        logger.exception("failed to refresh review-draft override; using env default")
+        logger.exception("failed to refresh review-draft override; no override this tick")
         review_draft_config.reset_override_cache()
 
 
 async def _refresh_dispatcher_tuning_config() -> None:
-    """Refresh the 8 shared tuning knobs once per claimed ticket, same
+    """Refresh the 9 shared tuning knobs once per claimed ticket, same
     cadence and fail-safe shape as the refreshes above -- a DB-read failure
-    must never abort a review, but (unlike the old cooldown/usage-cap
-    pattern) there is no env default to degrade to: reset_override_cache()
-    empties the cache, and effective_config() reading {} is a real
-    missing-config state a caller must surface, not silently patch over."""
+    must never abort a review, but (unlike provider/key-index, which fall
+    back to env/index-0) there is no env default to degrade to:
+    reset_override_cache() empties the cache, and process_next_due's own
+    guard (dispatcher_tuning_config.require_config()) is what turns that
+    empty/invalid cache into a visible, deferred failure rather than
+    silently patching over it."""
     try:
         config = await asyncio.to_thread(store.get_dispatcher_tuning_config)
         dispatcher_tuning_config.set_override_cache(config)
@@ -308,14 +343,16 @@ async def process_next_due(now: datetime) -> StepResult:
         active.set_override_cache(None)
 
     # Refresh the cooldown override once per claimed ticket, same cadence and
-    # fail-safe shape as the provider-override refresh above: a failure here
-    # must never abort a review, and must never leave a stale cached override
-    # in place -- degrade all the way to the env defaults.
+    # fail-safe shape as the provider-override refresh above -- but UNLIKE
+    # provider, there is no env fallback here any more (spec section 10.4):
+    # a failure degrades to an empty cache, which cooldown_config.
+    # effective_cooldown() reads as "not yet available this tick", not a
+    # real default.
     try:
         base, cap, factor = await asyncio.to_thread(store.get_cooldown_overrides)
         cooldown_config.set_override_cache(base, cap, factor)
     except Exception:  # noqa: BLE001
-        logger.exception("failed to refresh the cooldown override; using env defaults")
+        logger.exception("failed to refresh the cooldown override; unavailable this tick")
         cooldown_config.reset_override_cache()
 
     # Refresh the API-key-index overrides once per claimed ticket, same
@@ -337,6 +374,43 @@ async def process_next_due(now: datetime) -> StepResult:
     await _refresh_review_draft_override()
 
     await _refresh_dispatcher_tuning_config()
+
+    # Resolved once, up front, and threaded into every read below -- including
+    # the hard-failure handler's own compute_backoff/_jitter calls. Discovering
+    # a missing/invalid value from inside that handler is what turned a
+    # retryable failure into a ticket stuck in 'running' with no comment and
+    # no deferral: the exception used to escape past the very code that would
+    # have deferred it. A missing tuning config is deferred exactly like a
+    # provider rate limit (defer_rate_limited: no attempts increment, no hard
+    # stop) since it isn't the ticket's fault.
+    try:
+        tuning = dispatcher_tuning_config.require_config()
+    except dispatcher_tuning_config.TuningConfigUnavailable as exc:
+        logger.error(
+            "dispatcher tuning config unavailable (%s) -- deferring ticket %s; fix it in the "
+            "dashboard config panel or run: uv run python -m scripts.deploy --sync-config-db",
+            exc, ticket.id,
+        )
+        until = now + timedelta(seconds=_UNCONFIGURED_DEFER_SECONDS)
+        await asyncio.to_thread(
+            store.defer_rate_limited,
+            ticket.id,
+            not_before=until.isoformat(),
+            now=now.isoformat(),
+        )
+        if not _has_visible_review(ticket):
+            comment = await _post_placeholder(
+                ticket.repo_full_name,
+                ticket.pr_number,
+                _UNCONFIGURED_DEFER_SECONDS,
+                now,
+                ticket.comment_id,
+                reason="config",
+            )
+            await asyncio.to_thread(
+                store.set_comment_id, ticket.id, comment.id if comment is not None else None
+            )
+        return StepResult(action="deferred", ticket_id=ticket.id)
 
     if ticket.notice_not_before is not None:
         try:
@@ -446,9 +520,7 @@ async def process_next_due(now: datetime) -> StepResult:
         logger.exception("review attempt failed for ticket %s", ticket.id)
         await asyncio.to_thread(_check_installation_still_valid_or_die)
         next_attempt = ticket.attempts + 1
-        max_failure_attempts = dispatcher_tuning_config.effective_config()[
-            "dispatcher_max_failure_attempts"
-        ]
+        max_failure_attempts = tuning["dispatcher_max_failure_attempts"]
         if next_attempt >= max_failure_attempts:
             comment_lost = False
             try:
@@ -492,10 +564,9 @@ async def process_next_due(now: datetime) -> StepResult:
                 # dispatcher_max_notice_post_attempts -- not dispatcher_max_notice_post_attempts
                 # tries *on top of* the hard-stop attempt, which is what a plain
                 # `+` here previously allowed (dispatcher_max_notice_post_attempts + 1 tries).
-                _tuning = dispatcher_tuning_config.effective_config()
                 notice_post_ceiling = (
-                    _tuning["dispatcher_max_failure_attempts"]
-                    + _tuning["dispatcher_max_notice_post_attempts"]
+                    tuning["dispatcher_max_failure_attempts"]
+                    + tuning["dispatcher_max_notice_post_attempts"]
                     - 2
                 )
                 if next_attempt > notice_post_ceiling:
@@ -513,7 +584,7 @@ async def process_next_due(now: datetime) -> StepResult:
                         error=str(exc),
                     )
                     return StepResult(action="failed", ticket_id=ticket.id)
-                backoff = compute_backoff(next_attempt, _jitter())
+                backoff = compute_backoff(next_attempt, _jitter(tuning), tuning)
                 await asyncio.to_thread(
                     store.defer_failed,
                     ticket.id,
@@ -525,7 +596,7 @@ async def process_next_due(now: datetime) -> StepResult:
                 store.mark_failed, ticket.id, now=now.isoformat(), error=str(exc)
             )
             return StepResult(action="failed", ticket_id=ticket.id)
-        backoff = compute_backoff(next_attempt, _jitter())
+        backoff = compute_backoff(next_attempt, _jitter(tuning), tuning)
         until = now + timedelta(seconds=backoff)
         await asyncio.to_thread(
             store.defer_failed,
@@ -542,7 +613,7 @@ async def process_next_due(now: datetime) -> StepResult:
     if isinstance(outcome, ReviewRateLimited):
         wait = max(
             outcome.retry_after,
-            dispatcher_tuning_config.effective_config()["dispatcher_min_retry_after_seconds"],
+            tuning["dispatcher_min_retry_after_seconds"],
         )
         until = now + timedelta(seconds=wait)
         _blocked_until[provider] = until

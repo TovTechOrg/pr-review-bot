@@ -140,7 +140,7 @@ def render_sync_env() -> str:
     """
     always = sorted(deploy._ALWAYS_SYNCED)
     credentials = sorted({c for c, _m in registry.PROVIDERS.values()})
-    models = sorted({m for _c, m in registry.PROVIDERS.values()})
+    model_seeds = sorted({m for _c, m in registry.PROVIDERS.values()})
     generic = sorted(deploy._GENERIC_OPERATIONAL_ENV_ATTRS)
     db_only = sorted(deploy._DB_SYNCED_OPERATIONAL_KEYS)
     never = sorted(deploy._NEVER_SYNCED_OPERATIONAL_KEYS)
@@ -157,12 +157,19 @@ def render_sync_env() -> str:
             "",
             "Plus `LLM_PROVIDER`, and `GITHUB_APP_INSTALLATION_ID` once it is set "
             "locally (it is optional, so an empty value is not an error).\n",
-            "## Every provider's model var\n",
-            *bullets(models),
+            "## Never pushed: per-slot model, project, and location\n",
+            *bullets(model_seeds),
             "",
-            "All of them, not just the active provider's: a database override can "
-            "activate any provider with no redeploy, so a provider whose model var "
-            "was never pushed would read a missing value on the service.\n",
+            "These are **not** Render env vars. Since the 2026-09-08 slotted-config "
+            "change, the model in force -- and, for Vertex, the GCP project and "
+            "location -- live per credential slot in the `slot_config` database "
+            "table, so different key slots can run different models and regions "
+            "with no redeploy. The values above are read from `.env.config` exactly "
+            "once, as the seed for the active provider's slot 0, the first time "
+            "`--sync-env` runs against a database with no row for it. After that, "
+            "change them in the dashboard's Environment tab (or `uv run python -m "
+            "scripts.set_override <provider> --index N --model M`) -- editing "
+            "`.env.config` and redeploying does nothing.\n",
             "## Provider credentials\n",
             *bullets(credentials),
             "",

@@ -20,8 +20,7 @@ EXPECTED_COLUMNS = {
     "runtime_config": {
         "id", "provider", "updated_at", "cooldown_base_seconds",
         "cooldown_max_seconds", "cooldown_factor", "gemini_key_index",
-        "groq_key_index", "vertex_key_index", "gemini_model", "groq_model",
-        "vertex_model", "key_usage_token_cap",
+        "groq_key_index", "vertex_key_index", "key_usage_token_cap",
         "key_usage_reset_time_utc", "review_draft_prs",
         "llm_request_timeout_seconds", "dispatcher_default_retry_after_seconds",
         "dispatcher_failure_base_backoff_seconds",

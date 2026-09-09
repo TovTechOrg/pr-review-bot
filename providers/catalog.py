@@ -19,8 +19,6 @@ from google.genai import types
 from google.oauth2 import service_account
 from groq import Groq
 
-from config import settings
-
 _VERTEX_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 _LIST_TIMEOUT_MS = 10_000
 
@@ -109,19 +107,27 @@ def list_groq_models(api_key: str) -> CatalogResult:
     return CatalogResult(ok=True, models=[m.id for m in response.data], error=None)
 
 
+_DEFAULT_CATALOG_LOCATION = "us-central1"
+
+
 def list_vertex_models(
     service_account_info: dict | None,
     project_override: str | None = None,
     location_override: str | None = None,
 ) -> CatalogResult:
-    project = (
-        project_override
-        or settings.vertex_gcp_project
-        or (service_account_info or {}).get("project_id", "")
-    )
+    """`location_override` unset falls back to _DEFAULT_CATALOG_LOCATION -- a
+    LITERAL, not a Settings read. settings.vertex_gcp_location is no longer
+    authoritative (it's only a seed value for slot_config -- see
+    docs/superpowers/specs/2026-09-08-slotted-config-and-db-delegation-
+    design.md section 10.4) and doesn't exist as an env var on the deployed
+    service at all, so reading it here silently listed every slot's catalog
+    from whatever the operator's local .env.config happened to say. This
+    fallback exists only for this read-only catalog listing; the review path
+    (providers/factory.py) has no location fallback at all, by design."""
+    project = project_override or (service_account_info or {}).get("project_id", "")
     if not project:
         return CatalogResult(ok=False, models=None, error="invalid_service_account_json")
-    location = location_override or settings.vertex_gcp_location
+    location = location_override or _DEFAULT_CATALOG_LOCATION
 
     creds = None
     if service_account_info is not None:

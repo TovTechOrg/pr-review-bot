@@ -146,7 +146,7 @@ def format_placeholder(
     pr_number: int,
     retry_after: float,
     now: datetime,
-    reason: Literal["provider", "usage_cap"] = "provider",
+    reason: Literal["provider", "usage_cap", "config"] = "provider",
 ) -> str:
     """Marker-prefixed placeholder comment shown while a review is delayed.
 
@@ -161,10 +161,19 @@ def format_placeholder(
       regardless of wait length (the cause doesn't change with magnitude),
       and explicit that this is not the provider's limit -- an operator
       debugging a stalled review must not go hunting at the provider.
+    - "config": the dispatcher's own tuning config is missing or invalid
+      (review_queue/dispatcher_tuning_config.py). Names the cause plainly so
+      an operator doesn't mistake a stuck queue for a provider outage.
     """
     header = f"## 🤖 Automated Code Review — PR #{pr_number}\n"
     eta = (now + timedelta(seconds=retry_after)).strftime("%H:%M UTC")
-    if reason == "usage_cap":
+    if reason == "config":
+        note = (
+            "⚠️ Dispatcher configuration issue — review queued, will retry "
+            "automatically once an operator fixes the dispatcher's tuning "
+            "config (see the dashboard's config panel)."
+        )
+    elif reason == "usage_cap":
         note = (
             "⏳ Bot's own daily usage limit reached for this key — review "
             "queued, will post automatically after the limit resets "

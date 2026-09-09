@@ -756,21 +756,21 @@ def _seed_deferred_with_review(
 def test_tickets_needing_notice_matches_never_notified(db_exec):
     tid = _enqueue()
     _seed_deferred_with_review(db_exec, tid, not_before=FUTURE, notice_not_before=None)
-    result = store.tickets_needing_notice(now=T0)
+    result = store.tickets_needing_notice(now=T0, limit=100)
     assert [t.id for t in result] == [tid]
 
 
 def test_tickets_needing_notice_matches_stale_marker(db_exec):
     tid = _enqueue()
     _seed_deferred_with_review(db_exec, tid, not_before=FUTURE, notice_not_before=T_COOL)
-    result = store.tickets_needing_notice(now=T0)
+    result = store.tickets_needing_notice(now=T0, limit=100)
     assert [t.id for t in result] == [tid]
 
 
 def test_tickets_needing_notice_excludes_up_to_date_marker(db_exec):
     tid = _enqueue()
     _seed_deferred_with_review(db_exec, tid, not_before=FUTURE, notice_not_before=FUTURE)
-    assert store.tickets_needing_notice(now=T0) == []
+    assert store.tickets_needing_notice(now=T0, limit=100) == []
 
 
 def test_tickets_needing_notice_excludes_no_visible_review(db_exec):
@@ -780,13 +780,13 @@ def test_tickets_needing_notice_excludes_no_visible_review(db_exec):
         "WHERE id=%s",
         (FUTURE, tid),
     )
-    assert store.tickets_needing_notice(now=T0) == []
+    assert store.tickets_needing_notice(now=T0, limit=100) == []
 
 
 def test_tickets_needing_notice_excludes_already_due_ticket(db_exec):
     tid = _enqueue()
     _seed_deferred_with_review(db_exec, tid, not_before=PAST, notice_not_before=None)
-    assert store.tickets_needing_notice(now=T0) == []
+    assert store.tickets_needing_notice(now=T0, limit=100) == []
 
 
 def test_tickets_needing_notice_excludes_retrying_status(db_exec):
@@ -796,7 +796,7 @@ def test_tickets_needing_notice_excludes_retrying_status(db_exec):
         "notice_not_before=NULL WHERE id=%s",
         (FUTURE, T0, tid),
     )
-    assert store.tickets_needing_notice(now=T0) == []
+    assert store.tickets_needing_notice(now=T0, limit=100) == []
 
 
 def test_mark_notice_posted_persists_marker(db_exec):
@@ -804,7 +804,7 @@ def test_mark_notice_posted_persists_marker(db_exec):
     _seed_deferred_with_review(db_exec, tid, not_before=FUTURE, notice_not_before=None)
     store.mark_notice_posted(tid, FUTURE)
     assert store.get_ticket(tid).notice_not_before == FUTURE
-    assert store.tickets_needing_notice(now=T0) == []
+    assert store.tickets_needing_notice(now=T0, limit=100) == []
 
 
 def test_clear_notice_resets_marker_to_none(db_exec):
@@ -814,28 +814,36 @@ def test_clear_notice_resets_marker_to_none(db_exec):
     assert store.get_ticket(tid).notice_not_before is None
 
 
-def test_tickets_needing_notice_respects_batch_cap(db_exec):
-    db_exec(
-        "INSERT INTO runtime_config (id, updated_at, dispatcher_notice_sweep_batch_size) "
-        "VALUES (1, %s, 2) "
-        "ON CONFLICT (id) DO UPDATE SET dispatcher_notice_sweep_batch_size = 2",
-        (T0,),
-    )
+def test_tickets_needing_notice_respects_the_passed_limit(db_exec):
     tids = []
-    for pr in range(1, 4):  # 3 tickets, cap is 2
+    for pr in range(1, 4):  # 3 tickets, limit is 2
         tid = _enqueue(pr=pr, now=T0)
         _seed_deferred_with_review(db_exec, tid, not_before=FUTURE, notice_not_before=None)
         tids.append(tid)
 
-    first_batch = store.tickets_needing_notice(now=T0)
+    first_batch = store.tickets_needing_notice(now=T0, limit=2)
     assert len(first_batch) == 2
     assert [t.id for t in first_batch] == tids[:2]  # oldest-enqueued first
 
     for t in first_batch:
         store.mark_notice_posted(t.id, FUTURE)
 
-    second_batch = store.tickets_needing_notice(now=T0)
+    second_batch = store.tickets_needing_notice(now=T0, limit=2)
     assert [t.id for t in second_batch] == tids[2:]  # the leftover ticket, picked up next "tick"
+
+
+def test_tickets_needing_notice_is_never_unbounded_on_a_null_column(db_exec):
+    """Regression test: LIMIT (SELECT ... FROM runtime_config) used to
+    silently become "no limit" whenever that column was NULL (a missing row,
+    or a legacy DB before a backfill ran). The fix makes the limit a Python
+    parameter with no SQL fallback, so passing a small limit here must still
+    cap the result even though the DB column itself was never touched."""
+    tids = []
+    for pr in range(1, 4):
+        tid = _enqueue(pr=pr, now=T0)
+        _seed_deferred_with_review(db_exec, tid, not_before=FUTURE, notice_not_before=None)
+        tids.append(tid)
+    assert len(store.tickets_needing_notice(now=T0, limit=1)) == 1
 
 
 def test_schema_columns_match_the_ticket_dataclass(db_query):
@@ -902,29 +910,16 @@ def test_new_ticket_has_no_defer_reason():
     assert store.get_ticket(_enqueue()).defer_reason is None
 
 
-def test_model_override_round_trips_per_provider():
-    """Per-provider, not one shared column: flipping which provider is active
-    must never disturb another provider's model."""
-    store.set_model_override("vertex", "gemini-2.5-flash", "2026-08-15T00:00:00+00:00")
-    store.set_model_override("groq", "llama-3.1-8b-instant", "2026-08-15T00:00:00+00:00")
-    assert store.get_model_override("vertex") == "gemini-2.5-flash"
-    assert store.get_model_override("groq") == "llama-3.1-8b-instant"
-    assert store.get_model_override("gemini") is None
-
-
-def test_model_override_clears_with_none():
-    store.set_model_override("vertex", "gemini-2.5-flash", "2026-08-15T00:00:00+00:00")
-    store.set_model_override("vertex", None, "2026-08-15T00:01:00+00:00")
-    assert store.get_model_override("vertex") is None
-
-
-def test_get_all_model_overrides_omits_unset_providers():
-    store.set_model_override("groq", "llama-3.1-8b-instant", "2026-08-15T00:00:00+00:00")
-    assert store.get_all_model_overrides() == {"groq": "llama-3.1-8b-instant"}
-
-
-def test_get_all_model_overrides_is_empty_before_any_write():
-    assert store.get_all_model_overrides() == {}
+def test_flat_model_override_functions_no_longer_exist():
+    """The flat per-provider model override (runtime_config.{provider}_model)
+    was retired in favor of slot_config -- see docs/superpowers/specs/
+    2026-09-08-slotted-config-and-db-delegation-design.md section 4b. This
+    pins the retirement so a future re-introduction (e.g. a copy-pasted
+    partial revert) is caught immediately rather than silently resurrecting
+    a write path with no reader."""
+    assert not hasattr(store, "set_model_override")
+    assert not hasattr(store, "get_model_override")
+    assert not hasattr(store, "get_all_model_overrides")
 
 
 def test_usage_cap_overrides_round_trip():

@@ -20,11 +20,10 @@ from pydantic import BaseModel, Field, ValidationError
 import config_deps
 import github_app
 import render_client
-from config import settings
 from config_deps import CREDENTIAL_FAMILIES, MAX_CREDENTIAL_SLOTS, credential_slot_vars
 from providers import catalog, credentials, registry, vertex_credentials
 from providers.registry import slot_env_name
-from review_queue import store
+from review_queue import dispatcher_tuning_config, store
 
 logger = logging.getLogger(__name__)
 
@@ -84,8 +83,13 @@ def _safe_resolve_vertex_info(slot: int) -> tuple[dict | None, str | None]:
     `info` is always None in that case. `info is None` with no error means
     "no explicit key -- fall through to implicit ADC", mirroring
     providers/factory.py's own definition of "configured": a missing key
-    is only a problem when VERTEX_GCP_PROJECT isn't set either, since without
-    either there is nothing for ADC to resolve against.
+    is only a problem when the slot's own vertex_gcp_project isn't set
+    either, since without either there is nothing for ADC to resolve
+    against. Reads slot_config, not settings.vertex_gcp_project: that env
+    var has been DB-only since the 2026-09-08 slotted-config work and no
+    longer exists on the deployed service, so checking it here always read
+    as unset and reported no_credential_configured for a perfectly-
+    configured ADC-plus-slot_config setup.
     """
     try:
         info = vertex_credentials.resolve_service_account_info(slot)
@@ -93,8 +97,10 @@ def _safe_resolve_vertex_info(slot: int) -> tuple[dict | None, str | None]:
         # Covers json.JSONDecodeError, binascii.Error, and UnicodeDecodeError
         # too -- all are ValueError subclasses.
         return None, "invalid_service_account_json"
-    if info is None and not settings.vertex_gcp_project:
-        return None, "no_credential_configured"
+    if info is None:
+        slot_project = (store.get_slot_config("vertex", slot) or {}).get("vertex_gcp_project")
+        if not slot_project:
+            return None, "no_credential_configured"
     return info, None
 
 
@@ -104,7 +110,12 @@ def _validate_model_var(provider: str, candidate: str) -> dict:
         info, error = _safe_resolve_vertex_info(slot)
         if error:
             return {"ok": False, "error": error, "models": None}
-        result = catalog.list_vertex_models(info)
+        row = store.get_slot_config("vertex", slot) or {}
+        result = catalog.list_vertex_models(
+            info,
+            project_override=row.get("vertex_gcp_project") or None,
+            location_override=row.get("vertex_gcp_location") or None,
+        )
     else:
         slot = store.get_all_key_index_overrides().get(provider, 0)
         _, api_key = credentials.resolve(provider, slot)
@@ -167,7 +178,7 @@ def _validate_llm_credential(family: str, api_key: str) -> dict:
     }
 
 
-def _validate_vertex_credential(raw_bytes: bytes) -> dict:
+def _validate_vertex_credential(raw_bytes: bytes, slot: int) -> dict:
     try:
         info = json.loads(raw_bytes.decode())
     except (json.JSONDecodeError, UnicodeDecodeError):
@@ -180,18 +191,21 @@ def _validate_vertex_credential(raw_bytes: bytes) -> dict:
             "conflicts": [],
         }
     project_id = info.get("project_id") if isinstance(info, dict) else None
-    # Validate the uploaded key against ITS OWN project, not whatever
-    # VERTEX_GCP_PROJECT currently happens to be set to -- a replacement key for a
-    # different (but perfectly valid) project must not be rejected just
-    # because the old VERTEX_GCP_PROJECT override hasn't been updated yet. The
+    # Validate the uploaded key against ITS OWN project, not whatever the
+    # slot's current vertex_gcp_project happens to be -- a replacement key
+    # for a different (but perfectly valid) project must not be rejected just
+    # because the slot's existing project hasn't been updated yet. The
     # mismatch itself is surfaced separately below, as a conflict prompt
     # rather than a validation failure.
     result = catalog.list_vertex_models(info, project_override=project_id)
     conflicts: list[dict] = []
     if result.ok and project_id:
-        service_id = render_client.find_service_id()
-        current_project = (
-            render_client.env_vars(service_id).get("VERTEX_GCP_PROJECT") if service_id else None
+        # slot_config, not Render: VERTEX_GCP_PROJECT has been DB-only since
+        # the 2026-09-08 slotted-config work, so reading it off the Render
+        # service always returned None -- and this conflict prompt, the whole
+        # reason config_deps.conflicts_for exists, could never fire.
+        current_project = (store.get_slot_config("vertex", slot) or {}).get(
+            "vertex_gcp_project"
         )
         conflicts = config_deps.conflicts_for("vertex", project_id, current_project)
     return {
@@ -264,10 +278,13 @@ async def validate_credential(
     family: str,
     api_key: str | None = Form(None),
     app_id: int | None = Form(None),
+    slot: int = Form(0),
     credential_file: UploadFile | None = File(None),
 ) -> JSONResponse:
     if family not in CREDENTIAL_FAMILIES:
         raise HTTPException(status_code=404, detail="unknown credential family")
+    if not (0 <= slot < MAX_CREDENTIAL_SLOTS):
+        raise HTTPException(status_code=422, detail="slot out of range")
 
     if family in ("gemini", "groq"):
         if not api_key:
@@ -277,7 +294,7 @@ async def validate_credential(
         if credential_file is None:
             raise HTTPException(status_code=422, detail="credential_file is required")
         raw_bytes = await credential_file.read()
-        payload = await asyncio.to_thread(_validate_vertex_credential, raw_bytes)
+        payload = await asyncio.to_thread(_validate_vertex_credential, raw_bytes, slot)
     else:  # github_app
         if app_id is None or credential_file is None:
             raise HTTPException(status_code=422, detail="app_id and credential_file are required")
@@ -308,6 +325,31 @@ def _apply_llm_credential(family: str, payload: ApplyLlmCredentialRequest) -> di
     partial write, so this is one upsert call, not per-field pushes. See
     docs/superpowers/specs/2026-09-08-slotted-config-and-db-delegation-
     design.md section 8."""
+    slot_config_key = f"slot_config.{family}.{payload.slot}"
+    # store.set_slot_config's contract is all three fields together, so a
+    # request that omits vertex_gcp_project/_location (the common case: the
+    # guided flow is normally rotating a credential, not moving GCP regions)
+    # must be read-then-merged, NOT blind-written. Blind-writing None here
+    # meant every credential rotation through this flow nulled the slot's
+    # project/location and left providers/factory.py raising "no location
+    # configured" on every subsequent review.
+    existing = store.get_slot_config(family, payload.slot) or {}
+    vertex_gcp_project = (
+        None
+        if payload.clear_vertex_gcp_project
+        else (payload.vertex_gcp_project or existing.get("vertex_gcp_project"))
+    )
+    vertex_gcp_location = payload.vertex_gcp_location or existing.get("vertex_gcp_location")
+    if family == "vertex" and not vertex_gcp_location:
+        # No env fallback for location (spec section 4b/10.4): a slot with no
+        # resolvable location cannot run a single review, so refuse up front,
+        # BEFORE the Render credential push below, rather than writing a row
+        # factory.py will reject later, on a PR.
+        return {
+            "applied": [],
+            "failed": [{"key": slot_config_key, "error": "vertex_gcp_location_required"}],
+        }
+
     service_id = render_client.find_service_id()
     if service_id is None:
         return {"applied": [], "failed": [{"key": "*", "error": "service_not_found"}]}
@@ -326,17 +368,13 @@ def _apply_llm_credential(family: str, payload: ApplyLlmCredentialRequest) -> di
     except Exception as exc:  # noqa: BLE001
         failed.append({"key": credential_var, "error": type(exc).__name__})
 
-    slot_config_key = f"slot_config.{family}.{payload.slot}"
     try:
-        vertex_gcp_project = (
-            None if payload.clear_vertex_gcp_project else payload.vertex_gcp_project
-        )
         store.set_slot_config(
             family,
             payload.slot,
             model=payload.model,
             vertex_gcp_project=vertex_gcp_project if family == "vertex" else None,
-            vertex_gcp_location=payload.vertex_gcp_location if family == "vertex" else None,
+            vertex_gcp_location=vertex_gcp_location if family == "vertex" else None,
             now=datetime.now(timezone.utc).isoformat(),
         )
         applied.append(slot_config_key)
@@ -503,7 +541,6 @@ def _build_config_payload() -> dict:
         "usage_cap_reset": reset,
         "review_draft_prs": store.get_review_draft_override(),
         "key_index": store.get_all_key_index_overrides(),
-        "model": store.get_all_model_overrides(),
     }
     payload.update(store.get_dispatcher_tuning_config())
     payload["slot_configs"] = _slot_configs_by_provider()
@@ -554,7 +591,16 @@ def _fetch_models_for_provider(provider: str, slot: int | None) -> dict:
         info, error = _safe_resolve_vertex_info(slot)
         if error:
             return {"ok": False, "models": None, "error": error}
-        result = catalog.list_vertex_models(info)
+        # Per-slot project/location: `slot` exists on this function precisely
+        # because different credentials see different catalogs, and since the
+        # 2026-09-08 slotted-config work those two values live per slot in
+        # slot_config rather than in one flat env var.
+        row = store.get_slot_config("vertex", slot) or {}
+        result = catalog.list_vertex_models(
+            info,
+            project_override=row.get("vertex_gcp_project") or None,
+            location_override=row.get("vertex_gcp_location") or None,
+        )
     else:
         has_credential, api_key = _resolve_current_credential(provider, slot)
         if not has_credential:
@@ -585,6 +631,7 @@ _TUNING_KNOB_KEYS = (
     "dispatcher_min_retry_after_seconds",
     "dispatcher_backoff_jitter_seconds",
     "dispatcher_notice_sweep_batch_size",
+    "dispatcher_idle_sleep_seconds",
 )
 
 
@@ -597,7 +644,6 @@ class EnvironmentConfigPatch(BaseModel):
     usage_cap_reset: str | None = None
     review_draft_prs: bool | None = None
     key_index: dict[str, int | None] = {}
-    model: dict[str, str | None] = {}
     llm_request_timeout_seconds: float | None = None
     dispatcher_default_retry_after_seconds: float | None = None
     dispatcher_failure_base_backoff_seconds: float | None = None
@@ -607,6 +653,7 @@ class EnvironmentConfigPatch(BaseModel):
     dispatcher_min_retry_after_seconds: float | None = None
     dispatcher_backoff_jitter_seconds: float | None = None
     dispatcher_notice_sweep_batch_size: int | None = None
+    dispatcher_idle_sleep_seconds: float | None = None
 
 
 def _apply_config_patch(payload: EnvironmentConfigPatch) -> dict:
@@ -674,25 +721,40 @@ def _apply_config_patch(payload: EnvironmentConfigPatch) -> dict:
         except Exception as exc:  # noqa: BLE001
             failed.append({"key": f"key_index.{provider}", "error": type(exc).__name__})
 
-    for provider, model in fields.get("model", {}).items():
-        if provider not in registry.PROVIDERS:
-            failed.append({"key": f"model.{provider}", "error": "unknown_provider"})
-            continue
-        try:
-            store.set_model_override(provider, model, now)
-            applied.append(f"model.{provider}")
-        except Exception as exc:  # noqa: BLE001
-            failed.append({"key": f"model.{provider}", "error": type(exc).__name__})
-
     tuning_fields = {k: fields[k] for k in _TUNING_KNOB_KEYS if k in fields}
     if tuning_fields:
-        try:
-            current = store.get_dispatcher_tuning_config()
-            merged = {**current, **tuning_fields}
-            store.set_dispatcher_tuning_config(**merged, now=now)
-            applied.extend(tuning_fields.keys())
-        except Exception as exc:  # noqa: BLE001
-            failed.extend({"key": k, "error": type(exc).__name__} for k in tuning_fields)
+        current = store.get_dispatcher_tuning_config()
+        merged = {**current, **tuning_fields}
+        # The 9 knobs have no env fallback and no Settings-side Field()
+        # constraint at runtime any more, so this endpoint is the ONLY place
+        # a bad value can be caught before it reaches the dispatcher. Rejected
+        # as a whole group (they're one upsert) with the offending reasons
+        # named, never partially written.
+        invalid = dispatcher_tuning_config.problems(merged)
+        # dispatcher_idle_sleep_seconds is NOT one of the 9 require_config()
+        # validates (it's read through a separate throttled path -- see
+        # review_queue/dispatcher.py's run_forever -- not the per-tick
+        # tuning cache), so it needs its own check here rather than relying
+        # on dispatcher_tuning_config.problems().
+        idle_sleep = merged.get("dispatcher_idle_sleep_seconds")
+        if idle_sleep is None:
+            invalid.append("dispatcher_idle_sleep_seconds is not set")
+        elif idle_sleep <= 0:
+            invalid.append(
+                f"dispatcher_idle_sleep_seconds={idle_sleep!r} would busy-loop the "
+                "dispatcher (must be > 0)"
+            )
+        if invalid:
+            failed.extend(
+                {"key": k, "error": "invalid_tuning_config: " + "; ".join(invalid)}
+                for k in tuning_fields
+            )
+        else:
+            try:
+                store.set_dispatcher_tuning_config(**merged, now=now)
+                applied.extend(tuning_fields.keys())
+            except Exception as exc:  # noqa: BLE001
+                failed.extend({"key": k, "error": type(exc).__name__} for k in tuning_fields)
 
     return {"applied": applied, "failed": failed}
 
@@ -700,6 +762,58 @@ def _apply_config_patch(payload: EnvironmentConfigPatch) -> dict:
 @router.patch("/api/environment/config")
 async def patch_environment_config(payload: EnvironmentConfigPatch) -> JSONResponse:
     result = await asyncio.to_thread(_apply_config_patch, payload)
+    return JSONResponse(result)
+
+
+class SlotConfigPatch(BaseModel):
+    provider: str
+    slot: int = Field(ge=0, lt=MAX_CREDENTIAL_SLOTS)
+    model: str | None = None
+    vertex_gcp_project: str | None = None
+    vertex_gcp_location: str | None = None
+
+
+def _apply_slot_config_patch(payload: SlotConfigPatch) -> dict:
+    """Edit one slot_config row directly -- this is the config panel's
+    per-slot model/project/location editor, replacing the retired
+    per-provider `model` field on EnvironmentConfigPatch (see providers/
+    registry.py's retired MODEL_COLUMNS and docs/superpowers/specs/
+    2026-09-08-slotted-config-and-db-delegation-design.md section 4b).
+
+    Merges over the current row (store.set_slot_config is all-three-together
+    by contract), so a caller sending only `model` cannot silently null a
+    vertex slot's project/location -- the same trap _apply_llm_credential
+    fell into before its own fix. Never touches *_key_index: which slot is
+    active is a separate concern (spec section 4a)."""
+    if payload.provider not in registry.PROVIDERS:
+        return {"applied": [], "failed": [{"key": "provider", "error": "unknown_provider"}]}
+    key = f"slot_config.{payload.provider}.{payload.slot}"
+    fields = payload.model_dump(exclude_unset=True, exclude={"provider", "slot"})
+    existing = store.get_slot_config(payload.provider, payload.slot) or {}
+    model = fields.get("model", existing.get("model"))
+    project = fields.get("vertex_gcp_project", existing.get("vertex_gcp_project"))
+    location = fields.get("vertex_gcp_location", existing.get("vertex_gcp_location"))
+    if not model:
+        return {"applied": [], "failed": [{"key": key, "error": "model_required"}]}
+    if payload.provider == "vertex" and not location:
+        return {"applied": [], "failed": [{"key": key, "error": "vertex_gcp_location_required"}]}
+    try:
+        store.set_slot_config(
+            payload.provider,
+            payload.slot,
+            model=model,
+            vertex_gcp_project=project if payload.provider == "vertex" else None,
+            vertex_gcp_location=location if payload.provider == "vertex" else None,
+            now=datetime.now(timezone.utc).isoformat(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"applied": [], "failed": [{"key": key, "error": type(exc).__name__}]}
+    return {"applied": [key], "failed": []}
+
+
+@router.patch("/api/environment/slot-config")
+async def patch_slot_config(payload: SlotConfigPatch) -> JSONResponse:
+    result = await asyncio.to_thread(_apply_slot_config_patch, payload)
     return JSONResponse(result)
 
 

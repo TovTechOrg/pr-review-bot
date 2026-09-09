@@ -21,6 +21,11 @@ from scripts import _override, set_override
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
+def _slot_model(provider: str, index: int = 0) -> str | None:
+    row = store.get_slot_config(provider, index)
+    return row["model"] if row else None
+
+
 @pytest.fixture(autouse=True)
 def _temp_db(db, monkeypatch):
     """The `db` fixture's URL is local-shaped by construction (a real
@@ -282,7 +287,7 @@ def test_clear_index_with_activating_still_verifies(monkeypatch, db_url, capsys)
 
 def test_sets_model_and_activates_provider():
     assert set_override.main(["vertex", "--model", "gemini-2.5-flash"]) == 0
-    assert store.get_model_override("vertex") == "gemini-2.5-flash"
+    assert _slot_model("vertex") == "gemini-2.5-flash"
     assert store.get_provider_override() == "vertex"
 
 
@@ -290,7 +295,7 @@ def test_sets_model_without_activating():
     assert set_override.main(
         ["vertex", "--model", "gemini-2.5-flash", "--no-activate"]
     ) == 0
-    assert store.get_model_override("vertex") == "gemini-2.5-flash"
+    assert _slot_model("vertex") == "gemini-2.5-flash"
     assert store.get_provider_override() is None
 
 
@@ -298,8 +303,57 @@ def test_clear_model_leaves_other_providers_alone():
     set_override.main(["groq", "--model", "llama-3.3-70b-versatile", "--no-activate"])
     set_override.main(["vertex", "--model", "gemini-2.5-flash", "--no-activate"])
     assert set_override.main(["vertex", "--clear-model", "--no-activate"]) == 0
-    assert store.get_model_override("vertex") is None
-    assert store.get_model_override("groq") == "llama-3.3-70b-versatile"
+    assert _slot_model("vertex") is None
+    assert _slot_model("groq") == "llama-3.3-70b-versatile"
+
+
+def test_model_flag_writes_the_explicit_index_slot():
+    assert set_override.main(
+        ["vertex", "--index", "2", "--model", "gemini-2.5-flash", "--no-activate"]
+    ) == 0
+    assert _slot_model("vertex", 2) == "gemini-2.5-flash"
+    assert _slot_model("vertex", 0) is None
+
+
+def test_model_flag_defaults_to_the_active_slot():
+    set_override.main(["vertex", "--index", "1", "--no-activate"])
+    assert set_override.main(
+        ["vertex", "--model", "gemini-2.5-flash", "--no-activate"]
+    ) == 0
+    assert _slot_model("vertex", 1) == "gemini-2.5-flash"
+    assert _slot_model("vertex", 0) is None
+
+
+def test_model_flag_preserves_vertex_project_and_location():
+    store.set_slot_config(
+        "vertex", 0,
+        model="old-model",
+        vertex_gcp_project="proj-a",
+        vertex_gcp_location="us-east1",
+        now="2026-09-08T00:00:00+00:00",
+    )
+    assert set_override.main(
+        ["vertex", "--model", "gemini-2.5-flash", "--no-activate"]
+    ) == 0
+    row = store.get_slot_config("vertex", 0)
+    assert row["model"] == "gemini-2.5-flash"
+    assert row["vertex_gcp_project"] == "proj-a"
+    assert row["vertex_gcp_location"] == "us-east1"
+
+
+def test_clear_model_nulls_only_the_model_field():
+    store.set_slot_config(
+        "vertex", 0,
+        model="old-model",
+        vertex_gcp_project="proj-a",
+        vertex_gcp_location="us-east1",
+        now="2026-09-08T00:00:00+00:00",
+    )
+    assert set_override.main(["vertex", "--clear-model", "--no-activate"]) == 0
+    row = store.get_slot_config("vertex", 0)
+    assert row["model"] is None
+    assert row["vertex_gcp_project"] == "proj-a"
+    assert row["vertex_gcp_location"] == "us-east1"
 
 
 def test_model_and_clear_model_are_mutually_exclusive(capsys):
@@ -318,7 +372,7 @@ def test_known_model_is_accepted():
     assert set_override.main(
         ["vertex", "--model", "gemini-2.5-flash", "--no-activate"]
     ) == 0
-    assert store.get_model_override("vertex") == "gemini-2.5-flash"
+    assert _slot_model("vertex") == "gemini-2.5-flash"
 
 
 def test_unknown_model_warns_but_still_sets_the_override(capsys):
@@ -333,7 +387,7 @@ def test_unknown_model_warns_but_still_sets_the_override(capsys):
     assert code == 0
     assert "no-such-model" in err
     assert "gemini-2.5-flash" in err
-    assert store.get_model_override("vertex") == "no-such-model"
+    assert _slot_model("vertex") == "no-such-model"
 
 
 def test_force_is_harmless_for_an_unpriced_model():
@@ -344,7 +398,7 @@ def test_force_is_harmless_for_an_unpriced_model():
     assert set_override.main(
         ["vertex", "--model", "no-such-model", "--no-activate", "--force"]
     ) == 0
-    assert store.get_model_override("vertex") == "no-such-model"
+    assert _slot_model("vertex") == "no-such-model"
 
 
 def test_empty_model_is_refused(capsys):

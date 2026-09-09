@@ -57,10 +57,8 @@ def _env(db, monkeypatch):
     # every test in this file gets the same real values the pre-refactor
     # settings.dispatcher_* reads used to provide, without needing to seed
     # a real runtime_config row per test.
-    monkeypatch.setattr(
-        dispatcher.store,
-        "get_dispatcher_tuning_config",
-        lambda: {
+    def _tuning_config_stub():
+        return {
             "llm_request_timeout_seconds": settings.llm_request_timeout_seconds,
             "dispatcher_default_retry_after_seconds": (
                 settings.dispatcher_default_retry_after_seconds
@@ -76,8 +74,18 @@ def _env(db, monkeypatch):
             "dispatcher_min_retry_after_seconds": settings.dispatcher_min_retry_after_seconds,
             "dispatcher_backoff_jitter_seconds": settings.dispatcher_backoff_jitter_seconds,
             "dispatcher_notice_sweep_batch_size": settings.dispatcher_notice_sweep_batch_size,
-        },
-    )
+            "dispatcher_idle_sleep_seconds": settings.dispatcher_idle_sleep_seconds,
+        }
+
+    monkeypatch.setattr(dispatcher.store, "get_dispatcher_tuning_config", _tuning_config_stub)
+    # post_pending_notices (and require_config() generally) read the cache
+    # directly, not through a refresh -- a test that calls it without going
+    # through process_next_due first (which is what actually calls
+    # _refresh_dispatcher_tuning_config) would otherwise see an empty cache
+    # and every such call would defer/skip instead of exercising the real
+    # behavior. Seeded here so every test in this file starts with a real,
+    # valid tuning config already in place, matching the stub above.
+    dispatcher_tuning_config.set_override_cache(_tuning_config_stub())
     # cooldown_config/usage_cap_config/review_draft_config also lost their
     # env-fallback tier (Task 6) -- stubbed here the same way, reading
     # `settings` live at call time (not snapshotted) so existing test bodies
@@ -178,6 +186,41 @@ async def test_idle_when_no_tickets(monkeypatch):
     _stub_comments(monkeypatch)
     result = await dispatcher.process_next_due(NOW)
     assert result.action == "idle"
+
+
+async def test_unavailable_tuning_config_defers_the_ticket_and_posts_a_placeholder(monkeypatch):
+    """Regression test for the tuning-config-unavailable bug: before the fix,
+    an empty/invalid tuning cache raised a KeyError/TypeError from inside
+    process_next_due's own hard-failure handler (compute_backoff/_jitter),
+    which escaped past the deferral/comment-posting code entirely and left
+    the ticket stuck in status='running' forever with no comment and no
+    deferral. The fix resolves the config up front and defers cleanly
+    instead."""
+    posted = _stub_comments(monkeypatch)
+    tid = _enqueue(pr=1)
+    monkeypatch.setattr(dispatcher.store, "get_dispatcher_tuning_config", lambda: {})
+
+    result = await dispatcher.process_next_due(NOW)
+
+    assert result.action == "deferred"
+    ticket = store.get_ticket(tid)
+    assert ticket.status == "deferred"
+    assert ticket.not_before is not None
+    assert len(posted) == 1
+
+
+async def test_unavailable_tuning_config_never_calls_attempt_review(monkeypatch):
+    _stub_comments(monkeypatch)
+    _enqueue(pr=1)
+    monkeypatch.setattr(dispatcher.store, "get_dispatcher_tuning_config", lambda: {})
+
+    async def _boom(*args, **kwargs):
+        raise AssertionError("attempt_review must not be called with no valid tuning config")
+
+    monkeypatch.setattr(dispatcher, "attempt_review", _boom)
+
+    result = await dispatcher.process_next_due(NOW)
+    assert result.action == "deferred"
 
 
 async def test_completed_ticket_runs_and_marks_done(monkeypatch):
@@ -330,7 +373,7 @@ async def test_first_hard_failure_defers_with_backoff_not_terminal(monkeypatch):
     _stub_comments(monkeypatch)
     monkeypatch.setattr(settings, "dispatcher_failure_base_backoff_seconds", 2.0)
     monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 5)
-    monkeypatch.setattr(dispatcher, "_jitter", lambda: 0.0)
+    monkeypatch.setattr(dispatcher, "_jitter", lambda *a, **k: 0.0)
     tid = _enqueue(pr=5)
 
     async def boom(repo, pr, comment_id=None):
@@ -809,7 +852,7 @@ async def test_terminal_failure_overwrites_when_no_good_review(monkeypatch, db_e
 async def test_terminal_notice_post_failure_defers_instead_of_stranding(monkeypatch):
     monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 1)
     monkeypatch.setattr(settings, "dispatcher_failure_base_backoff_seconds", 2.0)
-    monkeypatch.setattr(dispatcher, "_jitter", lambda: 0.0)
+    monkeypatch.setattr(dispatcher, "_jitter", lambda *a, **k: 0.0)
     tid = _enqueue(pr=25)  # fresh -> overwrite path
 
     def boom_post(repo, pr, body, comment_id=None):
@@ -839,7 +882,7 @@ async def test_repeated_notice_post_failure_eventually_goes_terminal(monkeypatch
     monkeypatch.setattr(settings, "dispatcher_max_notice_post_attempts", 3)
     monkeypatch.setattr(settings, "dispatcher_failure_base_backoff_seconds", 2.0)
     monkeypatch.setattr(settings, "dispatcher_failure_max_backoff_seconds", 300.0)
-    monkeypatch.setattr(dispatcher, "_jitter", lambda: 0.0)
+    monkeypatch.setattr(dispatcher, "_jitter", lambda *a, **k: 0.0)
     tid = _enqueue(pr=26)  # fresh -> overwrite path (upsert_comment)
 
     def boom_post(repo, pr, body, comment_id=None):
@@ -881,7 +924,7 @@ async def test_notice_post_ceiling_makes_exactly_max_notice_post_attempts_tries(
     monkeypatch.setattr(settings, "dispatcher_max_notice_post_attempts", 3)
     monkeypatch.setattr(settings, "dispatcher_failure_base_backoff_seconds", 2.0)
     monkeypatch.setattr(settings, "dispatcher_failure_max_backoff_seconds", 300.0)
-    monkeypatch.setattr(dispatcher, "_jitter", lambda: 0.0)
+    monkeypatch.setattr(dispatcher, "_jitter", lambda *a, **k: 0.0)
     tid = _enqueue(pr=27)  # fresh -> overwrite path (upsert_comment)
 
     post_attempts = []
@@ -1128,6 +1171,33 @@ def _stub_append_schedule(monkeypatch):
 
     monkeypatch.setattr(dispatcher.github_app, "append_schedule_notice", fake_append)
     return posted
+
+
+async def test_post_pending_notices_skips_when_tuning_config_is_unavailable(monkeypatch, db_exec):
+    dispatcher_tuning_config.reset_override_cache()
+    called = []
+    monkeypatch.setattr(
+        dispatcher.store, "tickets_needing_notice", lambda *a, **k: called.append((a, k))
+    )
+
+    count = await dispatcher.post_pending_notices(NOW)
+
+    assert count == 0
+    assert called == []
+
+
+async def test_post_pending_notices_passes_the_configured_batch_size(monkeypatch, db_exec):
+    seen = {}
+
+    def fake_tickets_needing_notice(now, limit):
+        seen["limit"] = limit
+        return []
+
+    monkeypatch.setattr(dispatcher.store, "tickets_needing_notice", fake_tickets_needing_notice)
+
+    await dispatcher.post_pending_notices(NOW)
+
+    assert seen["limit"] == settings.dispatcher_notice_sweep_batch_size
 
 
 async def test_post_pending_notices_posts_for_matching_ticket(monkeypatch, db_exec):

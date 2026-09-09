@@ -48,6 +48,10 @@ class Greeting(BaseModel):
 
 
 def main() -> int:
+    # Deliberately reads the operator's own local .env.config seed values
+    # (settings.vertex_gcp_project/_location), not the deployed service's
+    # slot_config -- this is a manual, operator-machine verification script
+    # against slot 0's local seed, not a read of production's live DB state.
     info = vertex_credentials.resolve_service_account_info(0)
     project = settings.vertex_gcp_project or (info or {}).get("project_id", "")
     source = "service-account key" if info is not None else "implicit ADC (gcloud)"

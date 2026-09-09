@@ -149,3 +149,27 @@ repos share no git history). Each pass:
 
 No live deploy/migration step is needed from either pass — the user
 redeploys both services fresh with hand-edited env vars afterward.
+
+## 8. Addendum (post-implementation review, 2026-09-08)
+
+Two corrections to this spec's own text, recorded rather than silently
+edited, found by a code-correction review that ran after the same-day
+follow-up spec (`2026-09-08-slotted-config-and-db-delegation-design.md`)
+had also landed:
+
+- §4's fourth bullet places `ENV_VAR_DESCRIPTIONS`, `CONFIG_FIELD_ENV_VAR`,
+  and `CREDENTIAL_SLOT_BASE_VARS` in `dashboard/environment.py`. They
+  actually live in `dashboard/static/dashboard.html` (`ENV_VAR_DESCRIPTIONS`
+  and `CREDENTIAL_SLOT_BASE_VARS` as JS constants, with the field
+  descriptions rendered from `cfg_desc_*` i18n keys). The rename itself was
+  applied in the right place; only this file list was wrong.
+- §5's second verification bullet ("A DB-stored `vertex_model`/
+  `gemini_model` override still resolves to the correct active model") was
+  superseded within the same day by the slotted-config-and-db-delegation
+  spec's §4b, which replaced the flat `runtime_config.{provider}_model`
+  path with per-slot `slot_config`. The equivalent requirement is now "a
+  `slot_config` row for `(provider, active slot)` resolves to the correct
+  active model" — see that spec's §11 addendum for how the flat columns
+  were retired. Any test written against `store.get_model_override` (which
+  no longer exists) was satisfying the letter of this bullet while
+  exercising a column nothing reads.

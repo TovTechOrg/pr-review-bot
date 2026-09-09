@@ -401,7 +401,7 @@ def test_check_pricing_warns_on_an_unpriced_db_model_override(complete_config, m
     flags, not guessed syntax)."""
     monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
     monkeypatch.setattr(
-        deploy, "_resolved_model_overrides",
+        deploy, "_resolved_slot_models",
         lambda: {"gemini": None, "groq": None, "vertex": "totally-made-up-model"},
     )
     result = deploy.check_pricing()
@@ -416,7 +416,7 @@ def test_check_pricing_warns_on_an_unpriced_db_model_override(complete_config, m
 def test_check_pricing_passes_a_priced_db_model_override(complete_config, monkeypatch):
     monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
     monkeypatch.setattr(
-        deploy, "_resolved_model_overrides",
+        deploy, "_resolved_slot_models",
         lambda: {"gemini": None, "groq": None, "vertex": "gemini-2.5-flash"},
     )
     assert deploy.check_pricing().status == "PASS"
@@ -433,7 +433,43 @@ def test_check_pricing_degrades_to_local_only_when_the_db_read_fails(
     def _boom():
         raise RuntimeError("db unreachable")
 
-    monkeypatch.setattr(deploy, "_resolved_model_overrides", _boom)
+    monkeypatch.setattr(deploy, "_resolved_slot_models", _boom)
+    assert deploy.check_pricing().status == "PASS"
+
+
+def test_check_pricing_reports_the_active_slots_model(
+    _real_db_target, complete_config, monkeypatch, db_exec
+):
+    """_resolved_slot_models must resolve the model from the ACTIVE key-index
+    slot's slot_config row, not the retired flat runtime_config.*_model
+    columns (which nothing reads any more)."""
+    monkeypatch.setattr(settings, "database_url", settings.database_url)
+    db_exec(
+        "INSERT INTO runtime_config (id, updated_at, groq_key_index) VALUES (1, %s, 1) "
+        "ON CONFLICT (id) DO UPDATE SET groq_key_index = 1",
+        ("2026-09-08T00:00:00+00:00",),
+    )
+    db_exec(
+        "INSERT INTO slot_config (provider, slot_index, model, updated_at) "
+        "VALUES ('groq', 1, 'totally-made-up-model', %s)",
+        ("2026-09-08T00:00:00+00:00",),
+    )
+    result = deploy.check_pricing()
+    assert result.status == "WARN"
+    assert "totally-made-up-model" in result.detail
+    assert "groq" in result.detail
+
+
+def test_check_pricing_warns_when_the_active_slot_has_no_model(
+    _real_db_target, complete_config, monkeypatch, db_exec
+):
+    db_exec(
+        "INSERT INTO runtime_config (id, updated_at, groq_key_index) VALUES (1, %s, 2) "
+        "ON CONFLICT (id) DO UPDATE SET groq_key_index = 2",
+        ("2026-09-08T00:00:00+00:00",),
+    )
+    # No slot_config row for (groq, 2) -- falls back to the local env value,
+    # which complete_config already primes with a priced model.
     assert deploy.check_pricing().status == "PASS"
 
 
@@ -2187,6 +2223,54 @@ def test_sync_config_db_writes_settings_values_into_runtime_config(
     assert row == (45.0, 900.0, 1.5, 20000, "04:00:00")
 
 
+def test_sync_config_db_writes_every_tuning_knob_into_runtime_config(
+    _real_db_target, db_query, monkeypatch
+):
+    """Regression test for the whole finding: --sync-config-db used to never
+    write any of the 9 tuning knobs (or DISPATCHER_IDLE_SLEEP_SECONDS) into
+    runtime_config at all -- editing them in .env.config and running this
+    was a complete no-op."""
+    overrides = {
+        "llm_request_timeout_seconds": 12.0,
+        "dispatcher_default_retry_after_seconds": 13.0,
+        "dispatcher_failure_base_backoff_seconds": 14.0,
+        "dispatcher_failure_max_backoff_seconds": 900.0,
+        "dispatcher_max_failure_attempts": 7,
+        "dispatcher_max_notice_post_attempts": 4,
+        "dispatcher_min_retry_after_seconds": 15.0,
+        "dispatcher_backoff_jitter_seconds": 16.0,
+        "dispatcher_notice_sweep_batch_size": 25,
+        "dispatcher_idle_sleep_seconds": 17.0,
+    }
+    for attr, value in overrides.items():
+        monkeypatch.setattr(settings, attr, value)
+    assert deploy.sync_config_db() == 0
+    row = db_query(
+        "SELECT " + ", ".join(overrides) + " FROM runtime_config WHERE id = 1"
+    )[0]
+    assert row == tuple(overrides.values())
+
+
+def test_sync_config_db_refuses_an_invalid_tuning_knob(monkeypatch, capsys):
+    monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
+    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(None))
+    monkeypatch.setattr(settings, "dispatcher_notice_sweep_batch_size", 0)
+    assert deploy.sync_config_db() == 2
+    err = capsys.readouterr().err
+    assert "refusing to sync" in err
+    assert "dispatcher_notice_sweep_batch_size" in err
+
+
+def test_sync_config_db_refuses_a_non_positive_idle_sleep(monkeypatch, capsys):
+    monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
+    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(None))
+    monkeypatch.setattr(settings, "dispatcher_idle_sleep_seconds", 0.0)
+    assert deploy.sync_config_db() == 2
+    err = capsys.readouterr().err
+    assert "refusing to sync" in err
+    assert "DISPATCHER_IDLE_SLEEP_SECONDS" in err
+
+
 def test_sync_config_db_writes_review_draft_prs_into_runtime_config(
     _real_db_target, db_query, monkeypatch
 ):
@@ -2882,7 +2966,7 @@ def test_sync_env_no_longer_has_a_model_override_disagreement_guard():
 
     source = inspect.getsource(deploy.sync_env)
     assert "a DB model override" not in source
-    assert "_resolved_model_overrides" not in source
+    assert "_resolved_slot_models" not in source
 
 
 @pytest.mark.parametrize("model_var", ["GEMINI_MODEL", "GROQ_MODEL", "VERTEX_MODEL"])

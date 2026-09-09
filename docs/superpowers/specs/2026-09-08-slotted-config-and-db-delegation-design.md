@@ -317,3 +317,56 @@ thing that dialog already exists to surface, not a silent side effect.
    **Resolved: return `None`, `_build` raises** — keeps the new cache
    modules exactly as narrow/dependency-free as `active_model.py`'s
    existing docstring describes.
+
+## 11. Addendum (post-implementation review, 2026-09-08)
+
+A code-correction review of the implementation against this spec found a
+handful of places where the implementation either fell short of what this
+document specifies, or where this document's own text was imprecise. Both
+are recorded here rather than silently rewritten, per this project's
+convention of not rewriting dated artifacts.
+
+- **§6 arithmetic was off by one.** "Once migrated: remove all 11 (9 knobs +
+  project + location)" undercounts: `DISPATCHER_IDLE_SLEEP_SECONDS` was
+  always intended to move too (§6 calls it out as "the one exception" to the
+  *refresh mechanism*, not an exemption from the migration) — the correct
+  count is **12** (9 knobs + `DISPATCHER_IDLE_SLEEP_SECONDS` + project +
+  location). The implementation correctly moved 12; only this spec's count
+  was wrong. Relatedly, §7's "9 more flat fields" undercounts the dashboard
+  config panel by the same one field — it needs a 10th editable field for
+  `DISPATCHER_IDLE_SLEEP_SECONDS`, even though its *runtime read* stays on
+  the separate throttled path described in §6, not the per-tick tuning
+  cache.
+- **The "editable in the same pass" resolution in #3 above was not fully
+  honored.** The implementation shipped the per-slot listing read-only, and
+  separately never gave `--sync-config-db`/`sync_config_db()` a write path
+  for the 10 new DB-only keys at all — meaning editing them in
+  `.env.config` and running `--sync-config-db` was a silent no-op, and an
+  already-provisioned database could never receive them short of a manual
+  `ALTER TABLE` followed by a value that arrives `NULL` with no filler.
+  Both gaps are closed in the same follow-up pass that produced this
+  addendum: the per-slot listing is now editable (`PATCH
+  /api/environment/slot-config`), and `_DB_SYNCED_COLUMNS` covers all 16
+  columns. No backfill pass for an already-provisioned database was added:
+  this project has no production deployment yet, so there is no existing
+  database whose `runtime_config` row predates these columns -- every
+  database `_seed_runtime_config_defaults` ever runs against gets the full
+  16-column `INSERT` on its first boot. If that stops being true once a
+  real deployment exists, a NULL-backfilling pass would need to be added
+  back for databases provisioned before this change.
+- **This spec's §4b never assigned a fate to the flat per-provider model
+  columns it superseded.** `runtime_config.gemini_model`/`groq_model`/
+  `vertex_model`, `providers/registry.py::MODEL_COLUMNS`, and
+  `store.get_model_override`/`set_model_override`/`get_all_model_overrides`
+  were left in place with slot_config replacing them as the actual
+  resolution path — leaving three live writers (the dashboard config panel,
+  `scripts/set_override.py --model`, and nothing reading any of them)
+  silently orphaned. Resolved in the same follow-up pass: the flat columns,
+  `MODEL_COLUMNS`, and their CRUD are deleted outright (not merely
+  bypassed), and every writer (`set_override.py`, the dashboard's config
+  panel and its new per-slot PATCH endpoint, `scripts/deploy.py`'s pricing
+  check) is repointed at `slot_config`. No DB migration was needed: this
+  project's schema is declarative (see `store.py`'s own comment on
+  `RUNTIME_CONFIG_COLUMNS`), so a column no longer declared here simply
+  stops being written to; nothing reads the orphaned columns on an existing
+  database either.

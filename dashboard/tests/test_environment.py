@@ -11,7 +11,6 @@ from httpx import ASGITransport, AsyncClient
 
 import github_app
 import render_client
-from config import settings
 from main import app
 from providers import catalog, credentials, vertex_credentials
 from review_queue import store
@@ -183,6 +182,7 @@ async def test_get_environment_config_reflects_tuning_knob_overrides(db):
         dispatcher_min_retry_after_seconds=0.5,
         dispatcher_backoff_jitter_seconds=1.5,
         dispatcher_notice_sweep_batch_size=10,
+        dispatcher_idle_sleep_seconds=5.0,
         now="2026-01-01T00:00:00+00:00",
     )
     client = await _client()
@@ -204,6 +204,7 @@ async def test_patch_environment_config_partial_tuning_knob_merges_with_current_
         dispatcher_min_retry_after_seconds=0.5,
         dispatcher_backoff_jitter_seconds=1.5,
         dispatcher_notice_sweep_batch_size=10,
+        dispatcher_idle_sleep_seconds=5.0,
         now="2026-01-01T00:00:00+00:00",
     )
     client = await _client()
@@ -241,6 +242,193 @@ async def test_get_environment_config_exposes_slot_configs_by_provider(db):
         }
     ]
     assert body["slot_configs"]["gemini"] == []
+
+
+async def test_config_patch_rejects_a_null_tuning_knob(db):
+    """Regression test: a blanked tuning-knob field must never reach the DB
+    as NULL -- review_queue/dispatcher_tuning_config.py has no fallback for
+    it any more, and a NULL column stops the dispatcher dead."""
+    client = await _client()
+    resp = await client.patch(
+        "/api/environment/config", json={"dispatcher_backoff_jitter_seconds": None}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["applied"] == []
+    assert any(f["key"] == "dispatcher_backoff_jitter_seconds" for f in body["failed"])
+    assert store.get_dispatcher_tuning_config()["dispatcher_backoff_jitter_seconds"] is None
+
+
+async def test_config_patch_rejects_a_zero_notice_sweep_batch_size(db):
+    client = await _client()
+    resp = await client.patch(
+        "/api/environment/config", json={"dispatcher_notice_sweep_batch_size": 0}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["applied"] == []
+    assert any(
+        "dispatcher_notice_sweep_batch_size" in f["error"] for f in body["failed"]
+    )
+
+
+async def test_config_patch_rejects_a_base_backoff_above_the_configured_max(db):
+    store.set_dispatcher_tuning_config(
+        llm_request_timeout_seconds=30.0,
+        dispatcher_default_retry_after_seconds=45.0,
+        dispatcher_failure_base_backoff_seconds=1.0,
+        dispatcher_failure_max_backoff_seconds=200.0,
+        dispatcher_max_failure_attempts=4,
+        dispatcher_max_notice_post_attempts=2,
+        dispatcher_min_retry_after_seconds=0.5,
+        dispatcher_backoff_jitter_seconds=1.5,
+        dispatcher_notice_sweep_batch_size=10,
+        dispatcher_idle_sleep_seconds=5.0,
+        now="2026-01-01T00:00:00+00:00",
+    )
+    client = await _client()
+    resp = await client.patch(
+        "/api/environment/config", json={"dispatcher_failure_base_backoff_seconds": 500.0}
+    )
+    body = resp.json()
+    assert body["applied"] == []
+    assert store.get_dispatcher_tuning_config()["dispatcher_failure_base_backoff_seconds"] == 1.0
+
+
+async def test_config_patch_still_applies_a_valid_tuning_knob(db):
+    """Guards against over-blocking: a genuinely valid value must still be
+    accepted."""
+    store.set_dispatcher_tuning_config(
+        llm_request_timeout_seconds=30.0,
+        dispatcher_default_retry_after_seconds=45.0,
+        dispatcher_failure_base_backoff_seconds=1.0,
+        dispatcher_failure_max_backoff_seconds=200.0,
+        dispatcher_max_failure_attempts=4,
+        dispatcher_max_notice_post_attempts=2,
+        dispatcher_min_retry_after_seconds=0.5,
+        dispatcher_backoff_jitter_seconds=1.5,
+        dispatcher_notice_sweep_batch_size=10,
+        dispatcher_idle_sleep_seconds=5.0,
+        now="2026-01-01T00:00:00+00:00",
+    )
+    client = await _client()
+    resp = await client.patch(
+        "/api/environment/config", json={"dispatcher_backoff_jitter_seconds": 3.0}
+    )
+    assert resp.json() == {"applied": ["dispatcher_backoff_jitter_seconds"], "failed": []}
+    assert store.get_dispatcher_tuning_config()["dispatcher_backoff_jitter_seconds"] == 3.0
+
+
+async def test_config_patch_applies_idle_sleep_seconds(db):
+    store.set_dispatcher_tuning_config(
+        llm_request_timeout_seconds=30.0,
+        dispatcher_default_retry_after_seconds=45.0,
+        dispatcher_failure_base_backoff_seconds=1.0,
+        dispatcher_failure_max_backoff_seconds=200.0,
+        dispatcher_max_failure_attempts=4,
+        dispatcher_max_notice_post_attempts=2,
+        dispatcher_min_retry_after_seconds=0.5,
+        dispatcher_backoff_jitter_seconds=1.5,
+        dispatcher_notice_sweep_batch_size=10,
+        dispatcher_idle_sleep_seconds=5.0,
+        now="2026-01-01T00:00:00+00:00",
+    )
+    client = await _client()
+    resp = await client.patch(
+        "/api/environment/config", json={"dispatcher_idle_sleep_seconds": 12.0}
+    )
+    assert resp.json() == {"applied": ["dispatcher_idle_sleep_seconds"], "failed": []}
+    assert store.get_dispatcher_tuning_config()["dispatcher_idle_sleep_seconds"] == 12.0
+
+
+async def test_config_patch_rejects_a_non_positive_idle_sleep(db):
+    client = await _client()
+    resp = await client.patch(
+        "/api/environment/config", json={"dispatcher_idle_sleep_seconds": 0.0}
+    )
+    body = resp.json()
+    assert body["applied"] == []
+    assert any(
+        "dispatcher_idle_sleep_seconds" in f["error"] for f in body["failed"]
+    )
+
+
+async def test_get_environment_config_includes_idle_sleep_seconds(db):
+    client = await _client()
+    resp = await client.get("/api/environment/config")
+    assert "dispatcher_idle_sleep_seconds" in resp.json()
+
+
+async def test_slot_config_patch_sets_a_model_for_a_spare_slot(db):
+    client = await _client()
+    resp = await client.patch(
+        "/api/environment/slot-config",
+        json={"provider": "groq", "slot": 1, "model": "llama-3.3-70b-versatile"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"applied": ["slot_config.groq.1"], "failed": []}
+    assert store.get_slot_config("groq", 1)["model"] == "llama-3.3-70b-versatile"
+
+
+async def test_slot_config_patch_preserves_project_and_location_when_only_model_is_sent(db):
+    store.set_slot_config(
+        "vertex", 0, model="old-model", vertex_gcp_project="proj-a",
+        vertex_gcp_location="us-east1", now="2026-01-01T00:00:00+00:00",
+    )
+    client = await _client()
+    resp = await client.patch(
+        "/api/environment/slot-config",
+        json={"provider": "vertex", "slot": 0, "model": "gemini-2.5-flash"},
+    )
+    assert resp.status_code == 200
+    row = store.get_slot_config("vertex", 0)
+    assert row == {
+        "model": "gemini-2.5-flash",
+        "vertex_gcp_project": "proj-a",
+        "vertex_gcp_location": "us-east1",
+    }
+
+
+async def test_slot_config_patch_refuses_a_vertex_row_with_no_location(db):
+    client = await _client()
+    resp = await client.patch(
+        "/api/environment/slot-config",
+        json={"provider": "vertex", "slot": 2, "model": "gemini-2.5-flash"},
+    )
+    body = resp.json()
+    assert body["applied"] == []
+    assert body["failed"] == [
+        {"key": "slot_config.vertex.2", "error": "vertex_gcp_location_required"}
+    ]
+    assert store.get_slot_config("vertex", 2) is None
+
+
+async def test_slot_config_patch_refuses_an_unknown_provider(db):
+    client = await _client()
+    resp = await client.patch(
+        "/api/environment/slot-config",
+        json={"provider": "openai", "slot": 0, "model": "x"},
+    )
+    assert resp.json()["failed"] == [{"key": "provider", "error": "unknown_provider"}]
+
+
+async def test_slot_config_patch_refuses_an_out_of_range_slot(db):
+    client = await _client()
+    resp = await client.patch(
+        "/api/environment/slot-config",
+        json={"provider": "groq", "slot": 999, "model": "x"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_slot_config_patch_never_changes_the_active_key_index(db):
+    store.set_key_index_override("groq", 0, "2026-01-01T00:00:00+00:00")
+    client = await _client()
+    await client.patch(
+        "/api/environment/slot-config",
+        json={"provider": "groq", "slot": 1, "model": "llama-3.3-70b-versatile"},
+    )
+    assert store.get_key_index_override("groq") == 0
 
 
 async def test_patch_environment_config_rejects_an_unknown_provider_in_key_index():
@@ -291,7 +479,15 @@ async def test_guided_gemini_validate_failure_is_structural(monkeypatch):
     assert body["error"] == "unauthorized"
 
 
-async def test_guided_vertex_validate_uploads_file_and_flags_project_conflict(monkeypatch):
+async def test_guided_vertex_validate_uploads_file_and_flags_project_conflict(monkeypatch, db):
+    """current_project comes from slot_config, not Render: VERTEX_GCP_PROJECT
+    has been DB-only since the 2026-09-08 slotted-config work, so it no
+    longer exists as a Render env var at all."""
+    store.set_slot_config(
+        "vertex", 0,
+        model="m", vertex_gcp_project="old-proj", vertex_gcp_location="us-east1",
+        now="2026-09-08T00:00:00+00:00",
+    )
     key_json = b'{"project_id": "new-proj", "token_uri": "https://oauth2.googleapis.com/token"}'
 
     def _list_vertex(info, project_override=None, location_override=None):
@@ -303,13 +499,15 @@ async def test_guided_vertex_validate_uploads_file_and_flags_project_conflict(mo
         return catalog.CatalogResult(ok=True, models=["gemini-2.5-flash"], error=None)
 
     monkeypatch.setattr(catalog, "list_vertex_models", _list_vertex)
-    monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
-    monkeypatch.setattr(
-        render_client, "env_vars", lambda service_id: {"VERTEX_GCP_PROJECT": "old-proj"}
-    )
+
+    def _boom(*a, **kw):
+        raise AssertionError("must not call render_client.env_vars -- slot_config is authoritative")
+
+    monkeypatch.setattr(render_client, "env_vars", _boom)
     client = await _client()
     resp = await client.post(
         "/api/environment/credential/vertex/validate",
+        data={"slot": "0"},
         files={"credential_file": ("key.json", io.BytesIO(key_json), "application/json")},
     )
     body = resp.json()
@@ -318,6 +516,38 @@ async def test_guided_vertex_validate_uploads_file_and_flags_project_conflict(mo
     assert body["conflicts"] == [
         {"var": "VERTEX_GCP_PROJECT", "current": "old-proj", "new": "new-proj"}
     ]
+
+
+async def test_guided_vertex_validate_reports_no_conflict_for_a_different_slot(monkeypatch, db):
+    store.set_slot_config(
+        "vertex", 0,
+        model="m", vertex_gcp_project="old-proj", vertex_gcp_location="us-east1",
+        now="2026-09-08T00:00:00+00:00",
+    )
+    key_json = b'{"project_id": "new-proj", "token_uri": "https://oauth2.googleapis.com/token"}'
+    monkeypatch.setattr(
+        catalog, "list_vertex_models",
+        lambda info, project_override=None, location_override=None: catalog.CatalogResult(
+            ok=True, models=["gemini-2.5-flash"], error=None
+        ),
+    )
+    client = await _client()
+    resp = await client.post(
+        "/api/environment/credential/vertex/validate",
+        data={"slot": "1"},  # slot 1 has no existing row -- no conflict possible
+        files={"credential_file": ("key.json", io.BytesIO(key_json), "application/json")},
+    )
+    assert resp.json()["conflicts"] == []
+
+
+async def test_vertex_validate_rejects_an_out_of_range_slot():
+    client = await _client()
+    resp = await client.post(
+        "/api/environment/credential/vertex/validate",
+        data={"slot": "999"},
+        files={"credential_file": ("key.json", io.BytesIO(b"{}"), "application/json")},
+    )
+    assert resp.status_code == 422
 
 
 async def test_guided_github_app_validate_success_shows_installation_id(monkeypatch):
@@ -437,6 +667,96 @@ async def test_apply_reports_slot_config_write_failure_as_a_named_failed_entry(m
     assert any(f["key"] == "slot_config.groq.0" for f in body["failed"])
 
 
+async def test_apply_preserves_existing_vertex_project_and_location_when_omitted(monkeypatch, db):
+    """Regression test: a guided credential rotation that omits project/
+    location (the common case -- rotating a key, not moving GCP regions)
+    must not null out the slot's existing values. Before the fix, this was a
+    blind overwrite that broke every subsequent review on the slot with 'no
+    location configured'."""
+    store.set_slot_config(
+        "vertex", 0,
+        model="old-model", vertex_gcp_project="proj-a", vertex_gcp_location="us-east1",
+        now="2026-09-08T00:00:00+00:00",
+    )
+    monkeypatch.setattr(render_client, "push_env_var", lambda *a: None)
+    monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+    monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
+    client = await _client()
+    resp = await client.post(
+        "/api/environment/credential/vertex/apply",
+        json={
+            "slot": 0,
+            "credential": {"service_account_b64": "..."},
+            "model": "gemini-2.5-flash",
+        },
+    )
+    assert resp.status_code == 200
+    row = store.get_slot_config("vertex", 0)
+    assert row == {
+        "model": "gemini-2.5-flash",
+        "vertex_gcp_project": "proj-a",
+        "vertex_gcp_location": "us-east1",
+    }
+
+
+async def test_apply_refuses_a_vertex_slot_with_no_resolvable_location(monkeypatch, db):
+    pushed = []
+    monkeypatch.setattr(render_client, "push_env_var", lambda *a: pushed.append(a))
+    monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+    client = await _client()
+    resp = await client.post(
+        "/api/environment/credential/vertex/apply",
+        json={"slot": 0, "credential": {"service_account_b64": "..."}, "model": "gemini-2.5-flash"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert any(f["error"] == "vertex_gcp_location_required" for f in body["failed"])
+    assert body["applied"] == []
+    assert pushed == []  # refused BEFORE the Render credential push
+
+
+async def test_apply_clear_vertex_project_writes_null_but_keeps_location(monkeypatch, db):
+    store.set_slot_config(
+        "vertex", 0,
+        model="old-model", vertex_gcp_project="proj-a", vertex_gcp_location="us-east1",
+        now="2026-09-08T00:00:00+00:00",
+    )
+    monkeypatch.setattr(render_client, "push_env_var", lambda *a: None)
+    monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+    monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
+    client = await _client()
+    await client.post(
+        "/api/environment/credential/vertex/apply",
+        json={
+            "slot": 0,
+            "credential": {"service_account_b64": "..."},
+            "model": "gemini-2.5-flash",
+            "clear_vertex_gcp_project": True,
+        },
+    )
+    row = store.get_slot_config("vertex", 0)
+    assert row["vertex_gcp_project"] is None
+    assert row["vertex_gcp_location"] == "us-east1"
+
+
+async def test_apply_never_writes_vertex_columns_for_a_groq_family(monkeypatch, db):
+    monkeypatch.setattr(render_client, "push_env_var", lambda *a: None)
+    monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+    monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
+    client = await _client()
+    await client.post(
+        "/api/environment/credential/groq/apply",
+        json={
+            "slot": 0,
+            "credential": {"api_key": "real-key"},
+            "model": "llama-3.3-70b-versatile",
+            "vertex_gcp_project": "should-be-ignored",
+        },
+    )
+    row = store.get_slot_config("groq", 0)
+    assert row["vertex_gcp_project"] is None
+
+
 async def test_guided_github_app_apply_writes_id_key_and_installation(monkeypatch):
     applied = {}
     monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
@@ -545,13 +865,13 @@ async def test_credential_models_refresh_rejects_github_app_family():
     assert resp.status_code == 404
 
 
-async def test_credential_models_refresh_vertex_resolves_service_account_info(monkeypatch):
+async def test_credential_models_refresh_vertex_resolves_service_account_info(monkeypatch, db):
     monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"vertex": 0})
     monkeypatch.setattr(
         vertex_credentials, "resolve_service_account_info", lambda index: {"project_id": "proj-a"}
     )
 
-    def _list_vertex(info):
+    def _list_vertex(info, project_override=None, location_override=None):
         assert info == {"project_id": "proj-a"}
         return catalog.CatalogResult(ok=True, models=["gemini-2.5-flash"], error=None)
 
@@ -560,6 +880,48 @@ async def test_credential_models_refresh_vertex_resolves_service_account_info(mo
     resp = await client.get("/api/environment/credential/vertex/models")
     assert resp.status_code == 200
     assert resp.json()["models"] == ["gemini-2.5-flash"]
+
+
+async def test_vertex_model_fetch_uses_the_slots_configured_location(monkeypatch, db):
+    store.set_slot_config(
+        "vertex", 1, model="m", vertex_gcp_project="proj-a", vertex_gcp_location="europe-west4",
+        now="2026-09-08T00:00:00+00:00",
+    )
+    monkeypatch.setattr(
+        vertex_credentials, "resolve_service_account_info", lambda index: {"project_id": "proj-a"}
+    )
+    seen = {}
+
+    def _list_vertex(info, project_override=None, location_override=None):
+        seen["project_override"] = project_override
+        seen["location_override"] = location_override
+        return catalog.CatalogResult(ok=True, models=["gemini-2.5-flash"], error=None)
+
+    monkeypatch.setattr(catalog, "list_vertex_models", _list_vertex)
+    client = await _client()
+    resp = await client.get("/api/environment/credential/vertex/models?slot=1")
+    assert resp.status_code == 200
+    assert seen["project_override"] == "proj-a"
+    assert seen["location_override"] == "europe-west4"
+
+
+async def test_vertex_model_fetch_falls_back_when_the_slot_has_no_config(monkeypatch, db):
+    monkeypatch.setattr(
+        vertex_credentials, "resolve_service_account_info", lambda index: {"project_id": "proj-a"}
+    )
+    seen = {}
+
+    def _list_vertex(info, project_override=None, location_override=None):
+        seen["project_override"] = project_override
+        seen["location_override"] = location_override
+        return catalog.CatalogResult(ok=True, models=["gemini-2.5-flash"], error=None)
+
+    monkeypatch.setattr(catalog, "list_vertex_models", _list_vertex)
+    client = await _client()
+    resp = await client.get("/api/environment/credential/vertex/models?slot=3")
+    assert resp.status_code == 200
+    assert seen["project_override"] is None
+    assert seen["location_override"] is None
 
 
 async def test_validate_model_var_ok_when_in_catalog(monkeypatch):
@@ -918,20 +1280,39 @@ async def test_guided_gemini_apply_also_sets_slot_config_model(monkeypatch, db):
     assert store.get_slot_config("gemini", 0)["model"] == "gemini-flash-latest"
 
 
-async def test_validate_vertex_model_no_credential_configured(monkeypatch):
+async def test_validate_vertex_model_no_credential_configured(monkeypatch, db):
     monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {})
     monkeypatch.setattr(vertex_credentials, "resolve_service_account_info", lambda index: None)
-    monkeypatch.setattr(settings, "vertex_gcp_project", "")
     client = await _client()
     resp = await client.post("/api/environment/validate/VERTEX_MODEL", json={"value": "x"})
     assert resp.status_code == 200
     assert resp.json()["error"] == "no_credential_configured"
 
 
-async def test_validate_gcp_project_no_credential_configured_does_not_hit_network(monkeypatch):
+async def test_safe_resolve_vertex_info_accepts_adc_when_the_slot_has_a_project(monkeypatch, db):
+    """The slot's own slot_config.vertex_gcp_project (not the retired
+    settings.vertex_gcp_project env var) is what makes an implicit-ADC setup
+    with no explicit key count as 'configured'."""
+    store.set_slot_config(
+        "vertex", 0, model="m", vertex_gcp_project="proj-a", vertex_gcp_location="us-east1",
+        now="2026-09-08T00:00:00+00:00",
+    )
     monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {})
     monkeypatch.setattr(vertex_credentials, "resolve_service_account_info", lambda index: None)
-    monkeypatch.setattr(settings, "vertex_gcp_project", "")
+    monkeypatch.setattr(
+        catalog, "list_vertex_models",
+        lambda info, project_override=None, location_override=None: catalog.CatalogResult(
+            ok=True, models=["gemini-2.5-flash"], error=None
+        ),
+    )
+    client = await _client()
+    resp = await client.post("/api/environment/validate/VERTEX_MODEL", json={"value": "x"})
+    assert resp.json()["error"] != "no_credential_configured"
+
+
+async def test_validate_gcp_project_no_credential_configured_does_not_hit_network(monkeypatch, db):
+    monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {})
+    monkeypatch.setattr(vertex_credentials, "resolve_service_account_info", lambda index: None)
 
     def _boom(*a, **k):
         raise AssertionError("list_vertex_models must not be called with no credential at all")

@@ -18,13 +18,13 @@
 
 Plus `LLM_PROVIDER`, and `GITHUB_APP_INSTALLATION_ID` once it is set locally (it is optional, so an empty value is not an error).
 
-## Every provider's model var
+## Never pushed: per-slot model, project, and location
 
 - `GEMINI_MODEL`
 - `GROQ_MODEL`
 - `VERTEX_MODEL`
 
-All of them, not just the active provider's: a database override can activate any provider with no redeploy, so a provider whose model var was never pushed would read a missing value on the service.
+These are **not** Render env vars. Since the 2026-09-08 slotted-config change, the model in force -- and, for Vertex, the GCP project and location -- live per credential slot in the `slot_config` database table, so different key slots can run different models and regions with no redeploy. The values above are read from `.env.config` exactly once, as the seed for the active provider's slot 0, the first time `--sync-env` runs against a database with no row for it. After that, change them in the dashboard's Environment tab (or `uv run python -m scripts.set_override <provider> --index N --model M`) -- editing `.env.config` and redeploying does nothing.
 
 ## Provider credentials
 

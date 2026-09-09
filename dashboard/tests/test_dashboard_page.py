@@ -416,8 +416,8 @@ async def test_guided_setup_strings_exist_in_both_languages():
         assert body.count(f"{key}:") == 2, key
 
 
-async def test_dashboard_page_declares_all_16_config_panel_field_ids():
-    """The config panel's 16 fields (provider + 15 flat tunables) must all
+async def test_dashboard_page_declares_all_17_config_panel_field_ids():
+    """The config panel's 17 fields (provider + 16 flat tunables) must all
     be present in the served page, or a field silently drops out of the
     dashboard entirely."""
     client = await _client()
@@ -430,6 +430,7 @@ async def test_dashboard_page_declares_all_16_config_panel_field_ids():
         "cfgDispatcherDefaultRetryAfterSeconds",
         "cfgDispatcherFailureBaseBackoffSeconds",
         "cfgDispatcherFailureMaxBackoffSeconds",
+        "cfgDispatcherIdleSleepSeconds",
         "cfgDispatcherMaxFailureAttempts",
         "cfgDispatcherMaxNoticePostAttempts",
         "cfgDispatcherMinRetryAfterSeconds",
@@ -441,8 +442,27 @@ async def test_dashboard_page_declares_all_16_config_panel_field_ids():
 
 
 async def test_dashboard_page_declares_slot_config_rows_container():
-    """The read-only per-slot listing (Task 16) must actually be present in
-    the served page for its JS to render into."""
+    """The editable per-slot model/project/location grid must actually be
+    present in the served page for its JS to render into."""
     client = await _client()
     resp = await client.get("/")
     assert 'id="slotConfigRows"' in resp.text
+
+
+async def test_config_form_omits_blank_tuning_knob_fields_from_the_patch_body():
+    """A blank tuning-knob input must be OMITTED from the PATCH body, not
+    sent as null: these 9 have no fallback, and a NULL column stops the
+    dispatcher dead (review_queue/dispatcher_tuning_config.py)."""
+    client = await _client()
+    resp = await client.get("/")
+    body = resp.text
+    assert 'if (raw !== "")' in body
+    assert 'raw === "" ? null' not in body
+
+
+async def test_slot_config_rows_are_editable():
+    client = await _client()
+    resp = await client.get("/")
+    body = resp.text
+    assert "slot-config-save" in body
+    assert "/api/environment/slot-config" in body

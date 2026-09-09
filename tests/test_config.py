@@ -246,19 +246,25 @@ _RETIRED_CREDENTIAL_KEYS = frozenset(
         "GITHUB_APP_PRIVATE_KEY_PATH",
         "GCP_SERVICE_ACCOUNT_KEY_B64",
         "GCP_SERVICE_ACCOUNT_KEY_PATH",
+        # Retired by the 2026-09-08 env-var rename (VERTEX_ prefix grouping).
+        # A leftover line here is silently IGNORED (Settings uses
+        # extra="ignore"), so an operator who never renamed it would believe
+        # vertex is configured when it is not.
+        "GCP_SERVICE_ACCOUNT_KEY",
     }
 )
 _RETIRED_NUMBERED_RE = re.compile(
-    r"^(GCP_SERVICE_ACCOUNT_KEY_B64|GCP_SERVICE_ACCOUNT_KEY_PATH)_\d+$"
+    r"^(GCP_SERVICE_ACCOUNT_KEY|GCP_SERVICE_ACCOUNT_KEY_B64|GCP_SERVICE_ACCOUNT_KEY_PATH)_\d+$"
 )
 
 
 def test_no_legacy_credential_var_lives_in_the_secrets_file():
     """Migration checklist for the verbatim-only credential convention
-    (docs/superpowers/specs/2026-08-16-credential-convention-design.md):
-    these four names, and vertex's numbered _B64_n/_PATH_n siblings, are
-    retired and no Settings field reads them anymore. Reports NAMES only --
-    see CLAUDE.md's "Secret handling" section."""
+    (docs/superpowers/specs/2026-08-16-credential-convention-design.md) and
+    the 2026-09-08 env-var rename: these names, and vertex's numbered
+    _B64_n/_PATH_n/_n siblings, are retired and no Settings field reads them
+    anymore. Reports NAMES only -- see CLAUDE.md's "Secret handling"
+    section."""
     names = _key_names(_REPO_ROOT / ".env")
     legacy = {
         name
@@ -268,9 +274,9 @@ def test_no_legacy_credential_var_lives_in_the_secrets_file():
     assert not legacy, (
         f"retired credential var(s) still in .env, no longer read: {sorted(legacy)} -- "
         "rename GITHUB_APP_PRIVATE_KEY_B64 to GITHUB_APP_PRIVATE_KEY, "
-        "GCP_SERVICE_ACCOUNT_KEY_B64[_n] to VERTEX_GCP_SERVICE_ACCOUNT_KEY[_n] (base64-encode any "
-        "local key file first with scripts/encode_credential.py), and remove the _PATH "
-        "variants entirely"
+        "GCP_SERVICE_ACCOUNT_KEY_B64[_n] or bare GCP_SERVICE_ACCOUNT_KEY[_n] to "
+        "VERTEX_GCP_SERVICE_ACCOUNT_KEY[_n] (base64-encode any local key file first with "
+        "scripts/encode_credential.py), and remove the _PATH variants entirely"
     )
 
 

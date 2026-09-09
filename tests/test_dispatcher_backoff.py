@@ -59,3 +59,28 @@ def test_backoff_status_reports_blocked_providers():
     dispatcher._blocked_until["groq"] = until
     assert dispatcher.backoff_status() == {"groq": "2026-08-11T14:32:00+00:00"}
     dispatcher.reset_blocked_until()
+
+
+def test_compute_backoff_raises_a_named_error_on_an_empty_cache():
+    dispatcher_tuning_config.reset_override_cache()
+    with pytest.raises(dispatcher_tuning_config.TuningConfigUnavailable):
+        dispatcher.compute_backoff(1, jitter=0.0)
+
+
+def test_jitter_raises_a_named_error_on_an_empty_cache():
+    dispatcher_tuning_config.reset_override_cache()
+    with pytest.raises(dispatcher_tuning_config.TuningConfigUnavailable):
+        dispatcher._jitter()
+
+
+def test_compute_backoff_uses_an_explicitly_passed_config():
+    # Differs from whatever the autouse fixture put in the module cache --
+    # proves the explicit `config` argument wins, which is what makes it safe
+    # for process_next_due's hard-failure handler to call this from inside
+    # its own `except` block without re-reading a cache that may have
+    # changed (or emptied) since the guard at the top of the function ran.
+    passed = {
+        "dispatcher_failure_base_backoff_seconds": 10.0,
+        "dispatcher_failure_max_backoff_seconds": 999.0,
+    }
+    assert dispatcher.compute_backoff(1, jitter=0.0, config=passed) == 10.0

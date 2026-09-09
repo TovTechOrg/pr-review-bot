@@ -47,9 +47,6 @@ RUNTIME_CONFIG_COLUMNS: tuple[tuple[str, str], ...] = (
     ("gemini_key_index", "INTEGER"),
     ("groq_key_index", "INTEGER"),
     ("vertex_key_index", "INTEGER"),
-    ("gemini_model", "TEXT"),
-    ("groq_model", "TEXT"),
-    ("vertex_model", "TEXT"),
     ("key_usage_token_cap", "INTEGER"),
     ("key_usage_reset_time_utc", "TEXT"),
     ("review_draft_prs", "BOOLEAN"),
@@ -248,11 +245,13 @@ def _seed_runtime_config_defaults(conn) -> None:
     boots against a fresh database, rather than requiring a second service
     to write into this database's schema from the outside.
 
-    provider/*_key_index/*_model are deliberately left out (and therefore
-    NULL): those are live operator overrides (dashboard "switch active
-    provider/key/model without a redeploy"), not env-mirrored config with a
+    provider/*_key_index are deliberately left out (and therefore NULL):
+    those are live operator overrides (dashboard "switch active
+    provider/key without a redeploy"), not env-mirrored config with a
     meaningful default to seed -- NULL is their correct steady state, not a
-    placeholder for one.
+    placeholder for one. The model override moved off this table entirely
+    (see slot_config / providers/active_model.py) -- there is no flat
+    per-provider model column here any more.
 
     The 9 dispatcher/timeout tuning knobs (llm_request_timeout_seconds
     through dispatcher_idle_sleep_seconds) follow the exact same contract as
@@ -855,26 +854,29 @@ def dashboard_reviews(limit: int = 50) -> list[dict]:
     return reviews
 
 
-def tickets_needing_notice(now: str) -> list[Ticket]:
+def tickets_needing_notice(now: str, limit: int) -> list[Ticket]:
     """Deferred (schedule-wait, never retry-backoff since 'retrying' is a
     distinct status) tickets with a visible prior review whose schedule has
     changed since the last notice was posted (or none was posted yet).
     Excludes a ticket whose not_before has already passed -- it is about to
     be claimed for a real review, so a "scheduled" note for a time that's
-    already gone would be wrong. Capped at dispatcher_notice_sweep_batch_size
-    per call so a mass re-arm can't stall process_next_due for a whole
-    dispatcher tick; any ticket past the cap keeps its stale marker and is
-    picked up by the next call (self-healing, no new state).
+    already gone would be wrong. Capped at `limit` per call so a mass re-arm
+    can't stall process_next_due for a whole dispatcher tick; any ticket past
+    the cap keeps its stale marker and is picked up by the next call
+    (self-healing, no new state).
 
-    The cap is read live via a subquery, not a Python-side cache -- this
-    query already runs once per run_forever iteration (dispatcher.py's
-    post_pending_notices), more often than the per-claimed-ticket refresh
-    cadence every other DB-only tuning knob uses, so piggybacking the read
-    onto this existing round-trip is both simpler and fresher than adding a
-    dedicated cache/refresh for just this one value. No env fallback: if the
-    singleton row is missing, the subquery returns NULL and LIMIT NULL means
-    "no limit" in Postgres -- this should never happen once
-    _seed_runtime_config_defaults has run."""
+    `limit` is passed in by the caller (dispatcher.py's post_pending_notices,
+    resolved through dispatcher_tuning_config.require_config()) rather than
+    read live via a SQL subquery: `LIMIT (SELECT dispatcher_notice_sweep_
+    batch_size FROM runtime_config WHERE id = 1)` silently became "no limit"
+    whenever that column was NULL (a missing row, or one somehow never
+    seeded) -- exactly the unbounded pre-fix behavior config.py's
+    `gt=0` constraint on DISPATCHER_NOTICE_SWEEP_BATCH_SIZE exists to
+    prevent, and that constraint stopped applying once Settings stopped
+    being the runtime source for it. require_config() rejects a NULL or
+    non-positive value outright, so a caller that gets this far always has a
+    real, positive limit.
+    """
     with _require_pool().connection() as conn:
         rows = conn.execute(
             """
@@ -885,9 +887,9 @@ def tickets_needing_notice(now: str) -> list[Ticket]:
               AND last_reviewed_at IS NOT NULL
               AND (notice_not_before IS NULL OR notice_not_before != not_before)
             ORDER BY enqueued_at ASC, id ASC
-            LIMIT (SELECT dispatcher_notice_sweep_batch_size FROM runtime_config WHERE id = 1)
+            LIMIT %s
             """,
-            (now,),
+            (now, limit),
         ).fetchall()
         return [_row_to_ticket(row) for row in rows]
 
@@ -1042,54 +1044,6 @@ def get_all_key_index_overrides() -> dict[str, int]:
     }
 
 
-def get_model_override(provider: str) -> str | None:
-    """The model override for `provider`, or None when unset.
-
-    Synchronous like every other store function -- async callers use
-    asyncio.to_thread. An empty string normalizes to None so a cleared-to-blank
-    row and an unset one can never mean different things.
-    """
-    column = registry.MODEL_COLUMNS[provider]
-    with _require_pool().connection() as conn:
-        row = conn.execute(f"SELECT {column} FROM runtime_config WHERE id = 1").fetchone()
-    return (row or {}).get(column) or None
-
-
-def set_model_override(provider: str, model: str | None, now: str) -> None:
-    """Set the model override for `provider`, or clear it with model=None.
-
-    Upserts the singleton row -- same CHECK (id = 1) guarantee as
-    set_provider_override. `column` comes from registry.MODEL_COLUMNS, a
-    hardcoded whitelist, and is never built from `provider` directly: psycopg
-    parameterizes values but not column identifiers, so this lookup IS the
-    injection guard.
-    """
-    column = registry.MODEL_COLUMNS[provider]
-    with _require_pool().connection() as conn:
-        conn.execute(
-            f"INSERT INTO runtime_config (id, {column}, updated_at) VALUES (1, %s, %s) "
-            f"ON CONFLICT (id) DO UPDATE SET {column} = EXCLUDED.{column}, "
-            "updated_at = EXCLUDED.updated_at",
-            (model, now),
-        )
-
-
-def get_all_model_overrides() -> dict[str, str]:
-    """{provider: model} for every provider with a non-empty override.
-
-    One query reading all three columns -- the dispatcher calls this once per
-    claimed ticket, not once per provider (mirrors
-    get_all_key_index_overrides).
-    """
-    columns = registry.MODEL_COLUMNS
-    select = ", ".join(columns.values())
-    with _require_pool().connection() as conn:
-        row = conn.execute(f"SELECT {select} FROM runtime_config WHERE id = 1").fetchone()
-    if row is None:
-        return {}
-    return {provider: row[column] for provider, column in columns.items() if row[column]}
-
-
 def get_slot_config(provider: str, slot_index: int) -> dict | None:
     """This slot's durable config (model, and for vertex, project/location),
     or None if never configured. Independent of *_key_index (which slot is
@@ -1164,18 +1118,24 @@ def get_all_slot_configs() -> dict[tuple[str, int], dict]:
 
 
 def get_dispatcher_tuning_config() -> dict:
-    """The 9 tuning-knob values in force. All 9 keys always present; a value
-    is None only if the singleton row itself doesn't exist yet (should never
-    happen once _seed_runtime_config_defaults has run) -- see
-    review_queue/dispatcher_tuning_config.py for the no-fallback policy this
-    feeds."""
+    """The 9 tuning-knob values in force, plus dispatcher_idle_sleep_seconds
+    (10 keys total). All keys always present; a value is None only if the
+    singleton row itself doesn't exist yet (should never happen once
+    _seed_runtime_config_defaults has run) -- see
+    review_queue/dispatcher_tuning_config.py for the no-fallback policy the
+    first 9 feed. dispatcher_idle_sleep_seconds is included here purely so
+    the dashboard config panel has one editable surface for all 10 DB-only
+    knobs; run_forever's own throttled read still goes through
+    get_idle_sleep_seconds(), not this function -- dispatcher_tuning_config's
+    require_config()/problems() deliberately do NOT validate this key, since
+    it isn't read through that cache."""
     with _require_pool().connection() as conn:
         row = conn.execute(
             "SELECT llm_request_timeout_seconds, dispatcher_default_retry_after_seconds,"
             "    dispatcher_failure_base_backoff_seconds, dispatcher_failure_max_backoff_seconds,"
             "    dispatcher_max_failure_attempts, dispatcher_max_notice_post_attempts,"
             "    dispatcher_min_retry_after_seconds, dispatcher_backoff_jitter_seconds,"
-            "    dispatcher_notice_sweep_batch_size "
+            "    dispatcher_notice_sweep_batch_size, dispatcher_idle_sleep_seconds "
             "FROM runtime_config WHERE id = 1"
         ).fetchone()
     keys = (
@@ -1183,7 +1143,7 @@ def get_dispatcher_tuning_config() -> dict:
         "dispatcher_failure_base_backoff_seconds", "dispatcher_failure_max_backoff_seconds",
         "dispatcher_max_failure_attempts", "dispatcher_max_notice_post_attempts",
         "dispatcher_min_retry_after_seconds", "dispatcher_backoff_jitter_seconds",
-        "dispatcher_notice_sweep_batch_size",
+        "dispatcher_notice_sweep_batch_size", "dispatcher_idle_sleep_seconds",
     )
     if row is None:
         return {k: None for k in keys}
@@ -1201,13 +1161,14 @@ def set_dispatcher_tuning_config(
     dispatcher_min_retry_after_seconds: float | None,
     dispatcher_backoff_jitter_seconds: float | None,
     dispatcher_notice_sweep_batch_size: int | None,
+    dispatcher_idle_sleep_seconds: float | None,
     now: str,
 ) -> None:
     """Write-side counterpart to get_dispatcher_tuning_config -- upserts the
     singleton row, same CHECK (id = 1) guarantee as set_cooldown_override.
-    Writes exactly the 9 values it's given; a caller applying a PARTIAL
+    Writes exactly the 10 values it's given; a caller applying a PARTIAL
     update (e.g. the config panel's PATCH endpoint) is responsible for
-    reading the current 9 via get_dispatcher_tuning_config() and merging
+    reading the current 10 via get_dispatcher_tuning_config() and merging
     first, mirroring set_cooldown_override's own contract."""
     with _require_pool().connection() as conn:
         conn.execute(
@@ -1216,8 +1177,8 @@ def set_dispatcher_tuning_config(
             "    dispatcher_failure_base_backoff_seconds, dispatcher_failure_max_backoff_seconds,"
             "    dispatcher_max_failure_attempts, dispatcher_max_notice_post_attempts,"
             "    dispatcher_min_retry_after_seconds, dispatcher_backoff_jitter_seconds,"
-            "    dispatcher_notice_sweep_batch_size, updated_at"
-            ") VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+            "    dispatcher_notice_sweep_batch_size, dispatcher_idle_sleep_seconds, updated_at"
+            ") VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
             "ON CONFLICT (id) DO UPDATE SET "
             "llm_request_timeout_seconds = EXCLUDED.llm_request_timeout_seconds, "
             "dispatcher_default_retry_after_seconds = "
@@ -1231,6 +1192,7 @@ def set_dispatcher_tuning_config(
             "dispatcher_min_retry_after_seconds = EXCLUDED.dispatcher_min_retry_after_seconds, "
             "dispatcher_backoff_jitter_seconds = EXCLUDED.dispatcher_backoff_jitter_seconds, "
             "dispatcher_notice_sweep_batch_size = EXCLUDED.dispatcher_notice_sweep_batch_size, "
+            "dispatcher_idle_sleep_seconds = EXCLUDED.dispatcher_idle_sleep_seconds, "
             "updated_at = EXCLUDED.updated_at",
             (
                 llm_request_timeout_seconds,
@@ -1242,6 +1204,7 @@ def set_dispatcher_tuning_config(
                 dispatcher_min_retry_after_seconds,
                 dispatcher_backoff_jitter_seconds,
                 dispatcher_notice_sweep_batch_size,
+                dispatcher_idle_sleep_seconds,
                 now,
             ),
         )
