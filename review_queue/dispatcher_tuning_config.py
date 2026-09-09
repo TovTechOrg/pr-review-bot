@@ -3,10 +3,11 @@
 env fallback. Mirrors review_queue/cooldown_config.py's cache-refresh shape
 exactly, minus the fallback branch: see docs/superpowers/specs/2026-09-08-
 slotted-config-and-db-delegation-design.md section 10.4 for why the
-fallback was removed (the singleton row is guaranteed seeded by
-store._seed_runtime_config_defaults on first boot, so "missing" no longer
-needs a graceful degrade -- it would only ever mean a genuine setup bug,
-which should be visible, not papered over).
+fallback was removed (a missing/incomplete row means a genuine setup bug,
+which should be visible, not papered over -- store.py no longer seeds any
+default values into runtime_config at boot; main.py's lifespan instead
+refuses to start at all unless the row is already complete, whoever wrote
+it -- see store.init_pool()'s docstring).
 
 Every read goes through effective_config(). The DB read lives in the
 dispatcher (asyncio.to_thread convention); pushed in via set_override_cache,

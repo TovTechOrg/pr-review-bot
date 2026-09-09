@@ -37,6 +37,25 @@ def _env(db, monkeypatch):
         "gemini", 0, model="gemini-2.5-flash",
         vertex_gcp_project=None, vertex_gcp_location=None, now=now,
     )
+    # The 9 dispatcher tuning knobs are DB-only, no env fallback -- store.py
+    # no longer seeds any default for them (that was the mechanism a
+    # pre-existing provisioned row silently defeated, see store.init_pool()'s
+    # docstring), so lifespan now refuses to start without a complete, valid
+    # row. Every test that isn't specifically exercising that check needs
+    # one seeded, same reasoning as provider/slot_config above.
+    store.set_dispatcher_tuning_config(
+        llm_request_timeout_seconds=120.0,
+        dispatcher_default_retry_after_seconds=5.0,
+        dispatcher_failure_base_backoff_seconds=10.0,
+        dispatcher_failure_max_backoff_seconds=600.0,
+        dispatcher_max_failure_attempts=5,
+        dispatcher_max_notice_post_attempts=3,
+        dispatcher_min_retry_after_seconds=1.0,
+        dispatcher_backoff_jitter_seconds=2.0,
+        dispatcher_notice_sweep_batch_size=50,
+        dispatcher_idle_sleep_seconds=5.0,
+        now=now,
+    )
     # Same reasoning again for GITHUB_TARGET_REPO, which lost its implicit
     # "act on every repo" meaning for an empty value -- "*" is now the
     # explicit spelling of that, and lifespan refuses to start with a plain
@@ -218,6 +237,24 @@ async def test_lifespan_refuses_to_start_without_a_slot_config_row(monkeypatch):
     store.set_provider_override("groq", now)
     store.delete_slot_config("groq", 0)
     with pytest.raises(RuntimeError, match="no slot_config row"):
+        async with main.lifespan(main.app):
+            pass
+
+
+async def test_lifespan_refuses_to_start_with_incomplete_dispatcher_tuning_config(
+    monkeypatch, db_exec
+):
+    """A provider + slot_config are valid, but the dispatcher's own 9 tuning
+    knobs are missing (e.g. a provisioning step wrote runtime_config's
+    provider/key_index and nothing else -- exactly what left a real
+    deployment stuck forever behind "Dispatcher configuration issue" on
+    every PR, since store.init_pool() no longer seeds any default for these).
+    Startup must refuse loudly rather than let the dispatcher discover this
+    per-ticket."""
+    monkeypatch.setattr(settings, "github_app_installation_id", 12345)
+    monkeypatch.setattr(main.github_app, "discover_installation_id_for_app", lambda: 12345)
+    db_exec("UPDATE runtime_config SET llm_request_timeout_seconds = NULL WHERE id = 1")
+    with pytest.raises(RuntimeError, match="dispatcher tuning knobs"):
         async with main.lifespan(main.app):
             pass
 

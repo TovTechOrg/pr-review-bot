@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import pytest
 
-from config import settings
 from review_queue import cooldown_config, store
 
 T0 = "2026-01-01T12:00:00+00:00"
@@ -615,45 +614,23 @@ def test_effective_cooldown_uses_a_configured_factor():
     assert store.effective_cooldown(3) == 300.0  # 810 -> capped
 
 
-def test_init_pool_seeds_runtime_config_defaults_on_a_fresh_table(db_query):
-    """The `db` fixture already truncated runtime_config after its own
-    init_pool() call -- re-calling it here simulates a genuinely fresh
-    database (a first boot against a brand-new project), which is the case
-    this seeding exists for."""
+def test_init_pool_does_not_seed_any_runtime_config_row(db_query):
+    """init_pool() used to seed runtime_config's singleton row with
+    Settings-derived defaults on a genuinely fresh table (`ON CONFLICT (id)
+    DO NOTHING`) -- removed because a provisioning step (e.g. the onboarding
+    wizard) that creates that row *before* this service's own first boot,
+    to satisfy the provider/slot_config boot check below, made that
+    `ON CONFLICT` branch a permanent, silent no-op for every column the
+    provisioning step didn't itself write (ISSUES.md). runtime_config is now
+    DB-only, single source of truth with no bot-side default-filling at
+    all: the `db` fixture already truncated runtime_config after its own
+    init_pool() call, so re-calling it here simulates a genuinely fresh
+    database, and it must stay empty."""
     store.init_pool()
-    row = db_query(
-        "SELECT cooldown_base_seconds, cooldown_max_seconds, cooldown_factor, "
-        "key_usage_token_cap, key_usage_reset_time_utc, review_draft_prs, "
-        "llm_request_timeout_seconds, dispatcher_default_retry_after_seconds, "
-        "dispatcher_failure_base_backoff_seconds, dispatcher_failure_max_backoff_seconds, "
-        "dispatcher_max_failure_attempts, dispatcher_max_notice_post_attempts, "
-        "dispatcher_min_retry_after_seconds, dispatcher_backoff_jitter_seconds, "
-        "dispatcher_notice_sweep_batch_size, dispatcher_idle_sleep_seconds "
-        "FROM runtime_config WHERE id = 1"
-    )
-    assert row == [
-        (
-            settings.dispatcher_rereview_cooldown_seconds,
-            settings.dispatcher_rereview_cooldown_max_seconds,
-            settings.dispatcher_rereview_cooldown_factor,
-            settings.key_usage_token_cap,
-            settings.key_usage_reset_time_utc.isoformat(),
-            settings.review_draft_prs,
-            settings.llm_request_timeout_seconds,
-            settings.dispatcher_default_retry_after_seconds,
-            settings.dispatcher_failure_base_backoff_seconds,
-            settings.dispatcher_failure_max_backoff_seconds,
-            settings.dispatcher_max_failure_attempts,
-            settings.dispatcher_max_notice_post_attempts,
-            settings.dispatcher_min_retry_after_seconds,
-            settings.dispatcher_backoff_jitter_seconds,
-            settings.dispatcher_notice_sweep_batch_size,
-            settings.dispatcher_idle_sleep_seconds,
-        )
-    ]
+    assert db_query("SELECT count(*) FROM runtime_config")[0][0] == 0
 
 
-def test_init_pool_does_not_overwrite_an_existing_runtime_config_row(db_query):
+def test_init_pool_does_not_touch_an_existing_runtime_config_row(db_query):
     store.set_cooldown_override(base=30.0, cap=600.0, factor=1.5, now=T0)
     store.init_pool()
     assert store.get_cooldown_overrides() == (30.0, 600.0, 1.5)

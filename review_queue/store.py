@@ -206,6 +206,19 @@ def init_pool() -> None:
     (design spec section 11) -- RuntimeError matches _require_pool()'s convention
     and main.py's lifespan already documents it as the fail-loudly path. The
     message never includes settings.database_url, which carries the password.
+
+    Deliberately does NOT seed runtime_config with any default values (it
+    used to -- ON CONFLICT (id) DO NOTHING against a row a provisioning step
+    had already created for provider/key_index left every other column
+    permanently NULL, since a later real first boot's own seed attempt was
+    always a no-op against that pre-existing row). runtime_config is DB-only,
+    single source of truth: whoever provisions the database (this wizard's
+    onboarding flow, scripts/deploy.py --sync-config-db, or an operator by
+    hand) is responsible for writing a complete, valid row before this
+    service ever boots against it. main.py's lifespan enforces that
+    explicitly and fails loudly (RuntimeError) if the row is missing or
+    incomplete, rather than this function silently inventing values for
+    whatever wasn't written.
     """
     global _pool
     if _pool is None:
@@ -220,79 +233,10 @@ def init_pool() -> None:
     try:
         with _pool.connection() as conn:
             conn.execute(_SCHEMA)
-            _seed_runtime_config_defaults(conn)
     except PoolTimeout as exc:
         raise RuntimeError(
             _FIRST_CONNECT_HELP.format(timeout=_POOL_TIMEOUT_SECONDS)
         ) from exc
-
-
-def _seed_runtime_config_defaults(conn) -> None:
-    """Give the runtime_config singleton row (id=1) explicit default values on
-    first boot, so the row exists and reads back the same values effective_
-    config()/get_cooldown_overrides() etc. already fall back to when it's
-    missing -- this changes visibility (e.g. a future dashboard config view),
-    not runtime behavior, since every DB-synced getter already treats a
-    missing row identically to an all-NULL one.
-
-    ON CONFLICT (id) DO NOTHING, not a SELECT-then-INSERT: atomic (no race
-    with a concurrent seed) and, more importantly, never overwrites a row an
-    operator or scripts/deploy.py --sync-config-db already populated --
-    seeding only ever fills a genuinely empty table.
-
-    This is what lets a fresh setup skip a separate config-sync step
-    entirely -- the bot now populates its own defaults the moment it first
-    boots against a fresh database, rather than requiring a second service
-    to write into this database's schema from the outside.
-
-    provider/*_key_index are deliberately left out (and therefore NULL):
-    those are live operator overrides (dashboard "switch active
-    provider/key without a redeploy"), not env-mirrored config with a
-    meaningful default to seed -- NULL is their correct steady state, not a
-    placeholder for one. The model override moved off this table entirely
-    (see slot_config / providers/active_model.py) -- there is no flat
-    per-provider model column here any more.
-
-    The 9 dispatcher/timeout tuning knobs (llm_request_timeout_seconds
-    through dispatcher_idle_sleep_seconds) follow the exact same contract as
-    the 6 columns above: seeded from Settings on first boot, then DB-only --
-    Settings is never read for them again at runtime (see
-    docs/superpowers/specs/2026-09-08-slotted-config-and-db-delegation-
-    design.md section 5).
-    """
-    conn.execute(
-        "INSERT INTO runtime_config ("
-        "    id, updated_at, cooldown_base_seconds, cooldown_max_seconds,"
-        "    cooldown_factor, key_usage_token_cap, key_usage_reset_time_utc,"
-        "    review_draft_prs, llm_request_timeout_seconds,"
-        "    dispatcher_default_retry_after_seconds,"
-        "    dispatcher_failure_base_backoff_seconds,"
-        "    dispatcher_failure_max_backoff_seconds, dispatcher_max_failure_attempts,"
-        "    dispatcher_max_notice_post_attempts, dispatcher_min_retry_after_seconds,"
-        "    dispatcher_backoff_jitter_seconds, dispatcher_notice_sweep_batch_size,"
-        "    dispatcher_idle_sleep_seconds"
-        ") VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
-        "ON CONFLICT (id) DO NOTHING",
-        (
-            datetime.now(timezone.utc).isoformat(),
-            settings.dispatcher_rereview_cooldown_seconds,
-            settings.dispatcher_rereview_cooldown_max_seconds,
-            settings.dispatcher_rereview_cooldown_factor,
-            settings.key_usage_token_cap,
-            settings.key_usage_reset_time_utc.isoformat(),
-            settings.review_draft_prs,
-            settings.llm_request_timeout_seconds,
-            settings.dispatcher_default_retry_after_seconds,
-            settings.dispatcher_failure_base_backoff_seconds,
-            settings.dispatcher_failure_max_backoff_seconds,
-            settings.dispatcher_max_failure_attempts,
-            settings.dispatcher_max_notice_post_attempts,
-            settings.dispatcher_min_retry_after_seconds,
-            settings.dispatcher_backoff_jitter_seconds,
-            settings.dispatcher_notice_sweep_batch_size,
-            settings.dispatcher_idle_sleep_seconds,
-        ),
-    )
 
 
 def close_pool() -> None:
@@ -1120,10 +1064,12 @@ def get_all_slot_configs() -> dict[tuple[str, int], dict]:
 def get_dispatcher_tuning_config() -> dict:
     """The 9 tuning-knob values in force, plus dispatcher_idle_sleep_seconds
     (10 keys total). All keys always present; a value is None only if the
-    singleton row itself doesn't exist yet (should never happen once
-    _seed_runtime_config_defaults has run) -- see
-    review_queue/dispatcher_tuning_config.py for the no-fallback policy the
-    first 9 feed. dispatcher_idle_sleep_seconds is included here purely so
+    singleton row itself doesn't exist yet, or a provisioning step wrote it
+    without this column (should never happen once main.py's lifespan boot
+    gate has passed -- it refuses to start unless every one of the first 9
+    is present and in-range) -- see review_queue/dispatcher_tuning_config.py
+    for the no-fallback policy the first 9 feed. dispatcher_idle_sleep_seconds
+    is included here purely so
     the dashboard config panel has one editable surface for all 10 DB-only
     knobs; run_forever's own throttled read still goes through
     get_idle_sleep_seconds(), not this function -- dispatcher_tuning_config's

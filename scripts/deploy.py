@@ -1366,8 +1366,9 @@ def sync_config_db() -> int:
 
 
 def _seed_slot_zero_config_if_missing(provider: str) -> None:
-    """The slot_config equivalent of store._seed_runtime_config_defaults,
-    scoped to sync_env()'s slot-0 setup rather than first-boot -- slot_config
+    """Seeds slot_config's slot 0 the first time --sync-env runs for a
+    provider, scoped to sync_env()'s slot-0 setup rather than first-boot --
+    slot_config
     has no universal default (only whichever slots actually have credentials
     need rows), so this seeds `provider`'s slot 0 the first time --sync-env
     runs, mirroring what Settings already has for it.
