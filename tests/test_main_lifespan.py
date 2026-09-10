@@ -241,22 +241,30 @@ async def test_lifespan_refuses_to_start_without_a_slot_config_row(monkeypatch):
             pass
 
 
-async def test_lifespan_refuses_to_start_with_incomplete_dispatcher_tuning_config(
+async def test_lifespan_refuses_to_start_with_a_present_but_invalid_tuning_knob(
     monkeypatch, db_exec
 ):
-    """A provider + slot_config are valid, but the dispatcher's own 9 tuning
-    knobs are missing (e.g. a provisioning step wrote runtime_config's
-    provider/key_index and nothing else -- exactly what left a real
-    deployment stuck forever behind "Dispatcher configuration issue" on
-    every PR, since store.init_pool() no longer seeds any default for these).
-    Startup must refuse loudly rather than let the dispatcher discover this
-    per-ticket."""
+    """Backfill only fills NULLs -- a present-but-invalid value (e.g. written
+    by an older release, or by hand) must still fail the boot gate loudly,
+    exactly as an absent one does."""
     monkeypatch.setattr(settings, "github_app_installation_id", 12345)
     monkeypatch.setattr(main.github_app, "discover_installation_id_for_app", lambda: 12345)
-    db_exec("UPDATE runtime_config SET llm_request_timeout_seconds = NULL WHERE id = 1")
+    db_exec("UPDATE runtime_config SET llm_request_timeout_seconds = -5 WHERE id = 1")
     with pytest.raises(RuntimeError, match="dispatcher tuning knobs"):
         async with main.lifespan(main.app):
             pass
+
+
+async def test_lifespan_starts_when_a_missing_tuning_knob_is_backfilled(monkeypatch, db_exec):
+    """The direct regression test for the 2026-09-09 incident this design
+    fixes: a provisioner-created row missing every tuning knob must now
+    boot successfully, backfilled by store.init_pool() itself."""
+    monkeypatch.setattr(dispatcher, "run_forever", _hang_forever)
+    monkeypatch.setattr(settings, "github_app_installation_id", 12345)
+    monkeypatch.setattr(main.github_app, "discover_installation_id_for_app", lambda: 12345)
+    db_exec("UPDATE runtime_config SET llm_request_timeout_seconds = NULL WHERE id = 1")
+    async with main.lifespan(main.app):
+        pass
 
 
 async def test_lifespan_fails_loudly_when_webhook_secret_is_empty(monkeypatch):

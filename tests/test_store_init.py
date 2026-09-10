@@ -15,7 +15,7 @@ import pytest
 from psycopg_pool import PoolTimeout
 
 from config import settings
-from review_queue import store
+from review_queue import dispatcher_tuning_config, store
 
 SENTINEL_PASSWORD = "sentinel-pw-must-not-appear"
 DEAD_URL = (
@@ -166,3 +166,84 @@ def test_init_pool_widening_is_idempotent(db_url, db_exec, monkeypatch):
     store.close_pool()
     store.init_pool()  # second boot: every column already present
     store.close_pool()
+
+
+@pytest.mark.db
+def test_init_pool_backfills_null_columns_from_declared_defaults(
+    db_url, db_exec, monkeypatch, caplog
+):
+    """The 2026-09-09 chronology, fixed: a provisioner writes the row with
+    only provider/key_index/updated_at, then this service boots. Every
+    tuning column it left NULL must come back filled, so the boot gate
+    passes and the dispatcher has a usable config."""
+    monkeypatch.setattr(settings, "database_url", db_url)
+    db_exec("DROP TABLE IF EXISTS runtime_config CASCADE")
+    db_exec(
+        "CREATE TABLE runtime_config ("
+        "  id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),"
+        "  provider TEXT, groq_key_index INTEGER, updated_at TEXT NOT NULL"
+        ")"
+    )
+    db_exec("INSERT INTO runtime_config (id, provider, groq_key_index, updated_at) "
+            "VALUES (1, 'groq', 0, '2026-09-10T00:00:00+00:00')")
+
+    with caplog.at_level("WARNING"):
+        store.init_pool()
+    try:
+        config = store.get_dispatcher_tuning_config()
+        tokens, reset = store.get_usage_cap_overrides()
+        base, cap, factor = store.get_cooldown_overrides()
+    finally:
+        store.close_pool()
+
+    assert dispatcher_tuning_config.problems(config) == []
+    assert (base, cap, factor) == (300.0, 3600.0, 2.0)
+    assert reset == "04:00:00"
+    # NULL is this column's declared default -- "cap intentionally
+    # disabled" is a valid state, so the backfill must leave it alone.
+    assert tokens is None
+    # Names only, never values -- these are operational settings, but the
+    # convention is uniform.
+    assert "cooldown_base_seconds" in caplog.text
+    assert "key_usage_token_cap" not in caplog.text
+
+
+@pytest.mark.db
+def test_init_pool_backfill_never_overwrites_an_existing_value(db_url, db_exec, monkeypatch):
+    """COALESCE, not ON CONFLICT DO NOTHING and not an unconditional write:
+    a value a provisioner, the CLI, or the dashboard deliberately set must
+    survive every subsequent boot untouched."""
+    monkeypatch.setattr(settings, "database_url", db_url)
+    db_exec("DROP TABLE IF EXISTS runtime_config CASCADE")
+    store.init_pool()
+    store.set_cooldown_override(11.0, 22.0, 3.0, "2026-09-10T00:00:00+00:00")
+    store.close_pool()
+
+    store.init_pool()
+    try:
+        assert store.get_cooldown_overrides() == (11.0, 22.0, 3.0)
+    finally:
+        store.close_pool()
+
+
+@pytest.mark.db
+def test_init_pool_backfill_creates_the_row_when_absent(
+    db_url, db_exec, monkeypatch, caplog
+):
+    """No provisioner ran at all: the row must be created with defaults, so
+    the only thing main.py's gate then complains about is `provider`, which
+    the bot genuinely cannot invent. This is the loudest case, not the
+    quietest -- every backfillable column is reported as filled."""
+    monkeypatch.setattr(settings, "database_url", db_url)
+    db_exec("DROP TABLE IF EXISTS runtime_config CASCADE")
+    with caplog.at_level("WARNING"):
+        store.init_pool()
+    assert "cooldown_base_seconds" in caplog.text
+    assert "dispatcher_notice_sweep_batch_size" in caplog.text
+    try:
+        assert dispatcher_tuning_config.problems(
+            store.get_dispatcher_tuning_config()
+        ) == []
+        assert store.get_provider_override() is None
+    finally:
+        store.close_pool()

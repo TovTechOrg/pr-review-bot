@@ -614,20 +614,19 @@ def test_effective_cooldown_uses_a_configured_factor():
     assert store.effective_cooldown(3) == 300.0  # 810 -> capped
 
 
-def test_init_pool_does_not_seed_any_runtime_config_row(db_query):
-    """init_pool() used to seed runtime_config's singleton row with
-    Settings-derived defaults on a genuinely fresh table (`ON CONFLICT (id)
-    DO NOTHING`) -- removed because a provisioning step (e.g. the onboarding
-    wizard) that creates that row *before* this service's own first boot,
-    to satisfy the provider/slot_config boot check below, made that
-    `ON CONFLICT` branch a permanent, silent no-op for every column the
-    provisioning step didn't itself write (ISSUES.md). runtime_config is now
-    DB-only, single source of truth with no bot-side default-filling at
-    all: the `db` fixture already truncated runtime_config after its own
-    init_pool() call, so re-calling it here simulates a genuinely fresh
-    database, and it must stay empty."""
+def test_init_pool_backfills_a_genuinely_fresh_runtime_config_row(db_query):
+    """init_pool() used to leave a genuinely fresh runtime_config table
+    completely empty (no seeding at all, see the 2026-09-09 incident this
+    project's CLAUDE.md documents) -- superseded by the 2026-09-10
+    bot-owned-defaults design (store.py's own init_pool() docstring):
+    init_pool() now backfills every column it can derive a default for via
+    COALESCE, which for a genuinely fresh table means creating the row with
+    every backfillable column filled. `provider` is the one column the bot
+    cannot invent -- it stays NULL, which is exactly what main.py's boot
+    gate still fails loudly on."""
     store.init_pool()
-    assert db_query("SELECT count(*) FROM runtime_config")[0][0] == 0
+    assert db_query("SELECT count(*) FROM runtime_config")[0][0] == 1
+    assert store.get_provider_override() is None
 
 
 def test_init_pool_does_not_touch_an_existing_runtime_config_row(db_query):

@@ -14,6 +14,7 @@ page (``dashboard/router.py``) via the ``dashboard_*`` read helpers below.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 
@@ -23,8 +24,10 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 
 from config import settings
 from providers import registry
-from review_queue import cooldown_config
+from review_queue import cooldown_config, runtime_config_defaults
 from specialists.schemas import ReviewResult
+
+logger = logging.getLogger(__name__)
 
 # (name, SQL type + constraints) for every runtime_config column, in DDL
 # order. The single source of truth for that table's shape: _SCHEMA below
@@ -198,6 +201,52 @@ def _widen_statements(conn) -> list[str]:
     return statements
 
 
+def _backfill_runtime_config(conn) -> list[str]:
+    """Fill every runtime_config column that is NULL with this repo's
+    declared default, and return the names of the ones actually filled.
+
+    NOT the seeding that was removed in 2026-09-09. That one used
+    `INSERT ... ON CONFLICT (id) DO NOTHING`, which asks "does row 1
+    exist?" and skips EVERY column when it does -- so a provisioning step
+    that created the row first for provider/key_index left the other 18
+    columns permanently NULL, and every PR review on that deployment stuck
+    behind a "Dispatcher configuration issue" comment forever (ISSUES.md
+    2026-09-09, both repos).
+
+    `DO UPDATE SET col = COALESCE(runtime_config.col, EXCLUDED.col)` asks
+    the right question per column instead: it creates the row when absent,
+    fills only NULLs when present, and can never overwrite a value the
+    onboarding wizard, scripts/deploy.py --sync-config-db, or the
+    dashboard's config panel deliberately wrote.
+
+    A column whose declared default is None is omitted entirely rather than
+    COALESCE'd against NULL -- see runtime_config_defaults.NO_DEFAULT_BY_DESIGN.
+    """
+    defaults = runtime_config_defaults.declared_defaults()
+    columns = tuple(defaults)
+    row = conn.execute(
+        f"SELECT {', '.join(columns)} FROM runtime_config WHERE id = 1"
+    ).fetchone()
+    if row is None:
+        # No row at all: the INSERT below creates the whole thing. Reported
+        # as every column rather than none, so "nothing provisioned this
+        # database" is the loudest case in the log rather than the quietest.
+        was_null = list(columns)
+    else:
+        was_null = [name for name, value in row.items() if value is None]
+    placeholders = ", ".join(["%s"] * len(columns))
+    assignments = ", ".join(
+        f"{c} = COALESCE(runtime_config.{c}, EXCLUDED.{c})" for c in columns
+    )
+    conn.execute(
+        f"INSERT INTO runtime_config (id, {', '.join(columns)}, updated_at) "
+        f"VALUES (1, {placeholders}, %s) "
+        f"ON CONFLICT (id) DO UPDATE SET {assignments}",
+        (*(defaults[c] for c in columns), datetime.now(timezone.utc).isoformat()),
+    )
+    return was_null
+
+
 _pool: ConnectionPool | None = None
 
 # Explicit rather than relying on psycopg_pool's default (same value), so a test
@@ -260,18 +309,22 @@ def init_pool() -> None:
     and main.py's lifespan already documents it as the fail-loudly path. The
     message never includes settings.database_url, which carries the password.
 
-    Deliberately does NOT seed runtime_config with any default values (it
-    used to -- ON CONFLICT (id) DO NOTHING against a row a provisioning step
-    had already created for provider/key_index left every other column
-    permanently NULL, since a later real first boot's own seed attempt was
-    always a no-op against that pre-existing row). runtime_config is DB-only,
-    single source of truth: whoever provisions the database (this wizard's
-    onboarding flow, scripts/deploy.py --sync-config-db, or an operator by
-    hand) is responsible for writing a complete, valid row before this
-    service ever boots against it. main.py's lifespan enforces that
-    explicitly and fails loudly (RuntimeError) if the row is missing or
-    incomplete, rather than this function silently inventing values for
-    whatever wasn't written.
+    Backfills every NULL runtime_config column with this repo's OWN declared
+    default via COALESCE -- this is NOT the seeding removed in 2026-09-09.
+    That one used `INSERT ... ON CONFLICT (id) DO NOTHING`, which asks "does
+    row 1 exist?" and skips EVERY column when it does -- so a provisioning
+    step that created the row first for provider/key_index left the other 18
+    columns permanently NULL, and every PR review on that deployment stuck
+    behind a "Dispatcher configuration issue" comment forever (ISSUES.md
+    2026-09-09, both repos). `DO UPDATE SET col = COALESCE(runtime_config.col,
+    EXCLUDED.col)` asks the right question per column instead, and can never
+    overwrite a value someone else wrote -- see _backfill_runtime_config()'s
+    own docstring for the full mechanism.
+
+    What this function still will NOT invent: `provider` and the matching
+    `slot_config` row. Those are the wizard's/operator's own unique promise,
+    not something this repo could derive -- main.py's lifespan still fails
+    loudly (RuntimeError) if either is missing, exactly as before.
     """
     global _pool
     if _pool is None:
@@ -288,6 +341,16 @@ def init_pool() -> None:
             conn.execute(_SCHEMA)
             for statement in _widen_statements(conn):
                 conn.execute(statement)
+            filled = _backfill_runtime_config(conn)
+            if filled:
+                logger.warning(
+                    "runtime_config was incomplete at boot; filled %d column(s) "
+                    "with this release's declared defaults: %s. Whoever "
+                    "provisioned this database should write a complete row "
+                    "(`uv run python -m scripts.deploy --sync-config-db`).",
+                    len(filled),
+                    ", ".join(filled),
+                )
     except PoolTimeout as exc:
         raise RuntimeError(
             _FIRST_CONNECT_HELP.format(timeout=_POOL_TIMEOUT_SECONDS)
