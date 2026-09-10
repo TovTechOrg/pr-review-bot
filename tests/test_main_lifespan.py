@@ -250,7 +250,7 @@ async def test_lifespan_refuses_to_start_with_a_present_but_invalid_tuning_knob(
     monkeypatch.setattr(settings, "github_app_installation_id", 12345)
     monkeypatch.setattr(main.github_app, "discover_installation_id_for_app", lambda: 12345)
     db_exec("UPDATE runtime_config SET llm_request_timeout_seconds = -5 WHERE id = 1")
-    with pytest.raises(RuntimeError, match="dispatcher tuning knobs"):
+    with pytest.raises(RuntimeError, match="llm_request_timeout_seconds"):
         async with main.lifespan(main.app):
             pass
 
@@ -263,6 +263,45 @@ async def test_lifespan_starts_when_a_missing_tuning_knob_is_backfilled(monkeypa
     monkeypatch.setattr(settings, "github_app_installation_id", 12345)
     monkeypatch.setattr(main.github_app, "discover_installation_id_for_app", lambda: 12345)
     db_exec("UPDATE runtime_config SET llm_request_timeout_seconds = NULL WHERE id = 1")
+    async with main.lifespan(main.app):
+        pass
+
+
+@pytest.mark.db
+async def test_lifespan_refuses_to_start_on_an_invalid_cooldown_triple(monkeypatch):
+    """Backfill only fills NULLs. A present-but-invalid value -- reachable
+    from the dashboard's config panel before this change -- must surface as
+    a boot failure, not survive reboots invisibly while every re-review
+    defers."""
+    monkeypatch.setattr(settings, "github_app_installation_id", 12345)
+    monkeypatch.setattr(main.github_app, "discover_installation_id_for_app", lambda: 12345)
+    store.set_cooldown_override(300.0, 3600.0, 0.5, "2026-09-10T00:00:00+00:00")
+
+    with pytest.raises(RuntimeError, match="cooldown_factor"):
+        async with main.lifespan(main.app):
+            pass
+
+
+@pytest.mark.db
+async def test_lifespan_refuses_to_start_on_an_unparseable_reset_time(monkeypatch):
+    monkeypatch.setattr(settings, "github_app_installation_id", 12345)
+    monkeypatch.setattr(main.github_app, "discover_installation_id_for_app", lambda: 12345)
+    store.set_usage_cap_override(100_000, "4pm", "2026-09-10T00:00:00+00:00")
+
+    with pytest.raises(RuntimeError, match="key_usage_reset_time_utc"):
+        async with main.lifespan(main.app):
+            pass
+
+
+@pytest.mark.db
+async def test_lifespan_starts_with_a_null_token_cap(monkeypatch):
+    """A null cap is "intentionally disabled", a valid configured state --
+    it must not be mistaken for an incomplete row."""
+    monkeypatch.setattr(dispatcher, "run_forever", _hang_forever)
+    monkeypatch.setattr(settings, "github_app_installation_id", 12345)
+    monkeypatch.setattr(main.github_app, "discover_installation_id_for_app", lambda: 12345)
+    store.set_usage_cap_override(None, "04:00:00", "2026-09-10T00:00:00+00:00")
+
     async with main.lifespan(main.app):
         pass
 

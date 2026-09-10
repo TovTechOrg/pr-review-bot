@@ -11,7 +11,13 @@ from fastapi.staticfiles import StaticFiles
 import github_app
 from config import settings
 from providers import registry
-from review_queue import dispatcher, dispatcher_tuning_config, store
+from review_queue import (
+    cooldown_config,
+    dispatcher,
+    dispatcher_tuning_config,
+    store,
+    usage_cap_config,
+)
 from webhook import router as webhook_router
 from dashboard.auth import SessionRequired, require_session
 from dashboard.auth import router as auth_router
@@ -120,24 +126,40 @@ async def lifespan(app: FastAPI):
             f"-- refusing to start. Configure a model with "
             f"`uv run python -m scripts.set_override {_provider} --model <name>`."
         )
-    # The 9 dispatcher/timeout tuning knobs are DB-only, no env fallback (see
-    # docs/superpowers/specs/2026-09-08-slotted-config-and-db-delegation-
-    # design.md section 10.4) and store.init_pool() no longer seeds them --
-    # whoever provisioned this database (an onboarding wizard, an operator
-    # via `scripts/deploy.py --sync-config-db`, or by hand) must have written
-    # a complete, in-range row before this service is ever booted against it.
-    # Checked here, at the same fail-loudly boundary as provider/slot_config
-    # above, rather than left for the dispatcher to discover per-ticket: a
-    # missing/incomplete tuning config used to surface only as an indefinite
-    # "queued, will retry automatically" PR comment with no visible signal
-    # that it never will, on its own, resolve.
-    _tuning_problems = dispatcher_tuning_config.problems(store.get_dispatcher_tuning_config())
-    if _tuning_problems:
+    # Backfill (store.init_pool) fills what this repo can derive; it cannot
+    # fix a value that is PRESENT and invalid. Those reach the database from
+    # the dashboard's config panel, from an older release, or by hand -- and
+    # every one of them degrades silently at read time rather than raising:
+    # dispatcher_tuning_config raises TuningConfigUnavailable per tick,
+    # cooldown_config discards the whole triple (every re-review defers),
+    # usage_cap_config discards the whole pair (the cap fails OPEN). None of
+    # those is visible at boot, which is why all three are checked here, at
+    # the same fail-loudly boundary as provider/slot_config above.
+    _config_problems = [
+        *dispatcher_tuning_config.problems(store.get_dispatcher_tuning_config()),
+        *cooldown_config.problems(
+            dict(
+                zip(
+                    ("cooldown_base_seconds", "cooldown_max_seconds", "cooldown_factor"),
+                    store.get_cooldown_overrides(),
+                )
+            )
+        ),
+        *usage_cap_config.problems(
+            dict(
+                zip(
+                    ("key_usage_token_cap", "key_usage_reset_time_utc"),
+                    store.get_usage_cap_overrides(),
+                )
+            )
+        ),
+    ]
+    if _config_problems:
         raise RuntimeError(
-            "runtime_config's dispatcher tuning knobs are missing or invalid -- "
-            "refusing to start: " + "; ".join(_tuning_problems) + ". Set them with "
-            "`uv run python -m scripts.deploy --sync-config-db` or via the "
-            "dashboard's config panel."
+            "runtime_config is missing or invalid -- refusing to start: "
+            + "; ".join(_config_problems)
+            + ". Set them with `uv run python -m scripts.deploy --sync-config-db` "
+            "or via the dashboard's config panel."
         )
     store.recover_on_startup(datetime.now(timezone.utc).isoformat())
     task = asyncio.create_task(dispatcher.run_forever())
