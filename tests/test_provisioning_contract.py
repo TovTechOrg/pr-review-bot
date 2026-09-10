@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 from config import OPERATIONAL_KEYS, settings
 from providers import registry
@@ -275,3 +276,98 @@ def test_the_committed_contract_carries_the_do_not_edit_marker():
 def test_main_writes_and_reports(tmp_path, capsys):
     assert gen_contract.main(["--root", str(tmp_path)]) == 0
     assert gen_contract.CONTRACT_PATH in capsys.readouterr().out
+
+
+def test_no_bot_backfilled_column_is_also_provisioner_required():
+    """The contract's central claim. A column this repository fills at boot
+    must never be presented to a provisioner as its responsibility -- that
+    is how the wizard came to hand-copy 15 default values whose only guard
+    was a pinned test in the other repo (spec section 1)."""
+    block = _committed_contract()["runtime_config"]
+    backfilled = {entry["column"] for entry in block["bot_backfilled"]}
+    overlap = backfilled & set(block["provisioner_required"])
+    assert not overlap, f"claimed as the provisioner's but backfilled here: {sorted(overlap)}"
+
+
+def test_provisioner_required_is_exactly_the_boot_gate_s_three_columns():
+    """main.py's lifespan refuses to start on exactly one runtime_config
+    VALUE it cannot derive -- `provider` (main.py:109-116), because the bot
+    cannot invent which provider a visitor chose. `id` and `updated_at` are
+    the row's own identity: `id` is the CHECK-pinned singleton primary key,
+    and `updated_at` is NOT NULL with no DEFAULT, so whoever INSERTs the row
+    writes both in that same statement or the INSERT fails.
+
+    The behavioural halves of this assertion live in
+    tests/test_main_lifespan.py, where the lifespan harness already is:
+    test_lifespan_refuses_to_start_without_provider (necessity) and
+    test_a_row_with_only_the_contract_required_columns_boots (sufficiency).
+    """
+    block = _committed_contract()["runtime_config"]
+    assert block["provisioner_required"] == ["id", "provider", "updated_at"]
+    assert "provider" in block["provisioner_required"]
+
+
+def test_the_boot_gate_reads_the_provider_and_slot_columns_the_contract_names():
+    """A cheap staleness guard on the docstring above: if main.py's gate
+    stops reading the provider override or the slot_config row, the claim
+    that provisioner_required mirrors it has quietly become false."""
+    source = (_REPO_ROOT / "main.py").read_text(encoding="utf-8")
+    assert "store.get_provider_override()" in source
+    assert "store.get_slot_config(" in source
+
+
+def test_every_declared_column_the_contract_does_not_require_can_be_added_later():
+    """store.init_pool() widens a live table with ADD COLUMN IF NOT EXISTS,
+    which fails outright against a non-empty table for a NOT NULL column
+    carrying no DEFAULT. The provisioner_required columns are exempt because
+    they are never absent -- whoever creates the row writes them in the same
+    statement (spec section 3.1). Anchored on the contract's derived list
+    rather than a hand-typed one, so a new column added without a default
+    fails here instead of at a customer's boot."""
+    required = set(_committed_contract()["runtime_config"]["provisioner_required"])
+    for name, sql_type in store.RUNTIME_CONFIG_COLUMNS:
+        if name in required:
+            continue
+        upper = sql_type.upper()
+        assert "NOT NULL" not in upper or "DEFAULT" in upper, (
+            f"{name} is NOT NULL with no DEFAULT and is not provisioner_required -- "
+            "ADD COLUMN IF NOT EXISTS cannot add it to a table that already has rows"
+        )
+
+
+def test_no_db_only_key_has_a_render_yaml_entry():
+    """A db_only key with a Render env var is a second source of truth for a
+    value the dispatcher only ever reads from runtime_config -- an operator
+    edits the Render var, redeploys, and cannot explain the non-effect
+    (ISSUES.md 2026-08-17, "two sources of truth")."""
+    render_yaml = yaml.safe_load((_REPO_ROOT / "render.yaml").read_text(encoding="utf-8"))
+    declared = {
+        var["key"]
+        for service in render_yaml["services"]
+        for var in service.get("envVars", [])
+    }
+    assert declared, "render.yaml declares no env vars -- this check would be vacuous"
+    db_only = {
+        name
+        for name, entry in _committed_contract()["env_vars"].items()
+        if entry["placement"] == "db_only"
+    }
+    assert db_only, "the contract lists no db_only keys -- this check would be vacuous"
+    overlap = declared & db_only
+    assert not overlap, f"db_only keys must never be Render env vars: {sorted(overlap)}"
+
+
+def test_the_always_synced_placement_matches_deploys_own_tuple():
+    """The mirror of the check above, so the placement labels are
+    load-bearing in both directions: the COMMITTED file (not just the
+    generator) must still agree with _ALWAYS_SYNCED. Deliberately not
+    compared against render.yaml -- render.yaml declares only the subset
+    Render needs pre-declared, while _wanted_env() pushes more
+    (GITHUB_APP_INSTALLATION_ID, the active provider's credential), so a
+    render.yaml equality check here would be false by design."""
+    always = {
+        name
+        for name, entry in _committed_contract()["env_vars"].items()
+        if entry["placement"] == "always_synced"
+    }
+    assert always == set(deploy._ALWAYS_SYNCED)
