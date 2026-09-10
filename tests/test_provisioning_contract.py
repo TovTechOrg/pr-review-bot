@@ -317,13 +317,16 @@ def test_the_boot_gate_reads_the_provider_and_slot_columns_the_contract_names():
 
 
 def test_every_declared_column_the_contract_does_not_require_can_be_added_later():
-    """store.init_pool() widens a live table with ADD COLUMN IF NOT EXISTS,
-    which fails outright against a non-empty table for a NOT NULL column
-    carrying no DEFAULT. The provisioner_required columns are exempt because
-    they are never absent -- whoever creates the row writes them in the same
-    statement (spec section 3.1). Anchored on the contract's derived list
-    rather than a hand-typed one, so a new column added without a default
-    fails here instead of at a customer's boot."""
+    """store._widening_safe_sql_type already strips a bare NOT NULL for
+    EVERY column ADD COLUMN IF NOT EXISTS widens (Stage 1), so this specific
+    NotNullViolation cannot actually reach a live database any more -- this
+    test instead pins the DECLARATION-level invariant that specific
+    workaround exists to make unnecessary: a column outside
+    provisioner_required should never need a NOT-NULL-no-DEFAULT type in the
+    first place, since nothing guarantees the provisioner wrote it. Anchored
+    on the contract's derived list rather than a hand-typed one, so a new
+    column added this way is flagged here rather than only being silently
+    rescued by the widening relaxation."""
     required = set(_committed_contract()["runtime_config"]["provisioner_required"])
     for name, sql_type in store.RUNTIME_CONFIG_COLUMNS:
         if name in required:

@@ -166,6 +166,20 @@ def runtime_config() -> dict[str, object]:
     three *_key_index columns is written -- whichever provider the visitor
     chose. The other two are legitimately NULL, so a flat required-list
     would be wrong in both directions (spec section 6.1).
+
+    `id` and `updated_at` land in provisioner_required by this subtraction
+    even though store._backfill_runtime_config's own INSERT ... ON CONFLICT
+    DO NOTHING-turned-DO-UPDATE statement technically supplies both when the
+    row is entirely absent (id=1 literal, updated_at=now()). That fallback
+    exists only for a database with no runtime_config row at all; the
+    documented, expected chronology is still "the provisioner creates the
+    row -- writing id, provider, the chosen *_key_index, and updated_at --
+    before the bot ever boots against it" (spec section 2's two arrows), and
+    a row the bot itself originates this way still has provider=NULL, so
+    main.py's boot gate refuses to start regardless. Deliberately kept as
+    provisioner_required (spec section 3.1: "with updated_at and id
+    documented as the provisioner's responsibility instead"), not derived
+    away by teaching this function about that fallback insert.
     """
     by_name = dict(store.RUNTIME_CONFIG_COLUMNS)
     defaults = runtime_config_defaults.declared_defaults()
