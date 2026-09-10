@@ -2125,10 +2125,14 @@ def test_sync_config_db_refuses_a_base_above_the_cap(monkeypatch, capsys):
     assert "refusing to sync" in capsys.readouterr().err
 
 
-def test_sync_config_db_refuses_a_non_positive_base(monkeypatch, capsys):
+def test_sync_config_db_refuses_a_negative_base(monkeypatch, capsys):
+    """A base of exactly 0 is VALID (immediate re-review, no wait) -- see
+    cooldown_config.problems()'s own bounds. Only a negative base is
+    rejected; this is now the shared predicate's bound, not a hand-copied
+    inline one that used to disagree with it."""
     monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
     monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(None))
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 0.0)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", -1.0)
     assert deploy.sync_config_db() == 2
     assert "refusing to sync" in capsys.readouterr().err
 
@@ -2145,7 +2149,7 @@ def test_sync_config_db_never_reaches_the_database_when_invalid(monkeypatch, cap
     """The guard runs before any connection attempt -- mirrors sync_env()'s
     own 'refuse before touching anything' guards."""
     monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
-    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 0.0)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", -1.0)
     called = []
     monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: called.append(1))
     assert deploy.sync_config_db() == 2
@@ -2166,6 +2170,35 @@ def test_sync_config_db_writes_settings_values_into_runtime_config(
         "FROM runtime_config WHERE id = 1"
     )[0]
     assert row == (45.0, 900.0, 1.5, 20000, "04:00:00")
+
+
+def test_sync_config_db_refuses_an_unparseable_reset_time(monkeypatch, capsys):
+    """The usage-cap pair had NO guard on this path -- only Settings' own
+    `time` coercion, which an already-stored bad value bypasses entirely."""
+    monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
+    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(None))
+    monkeypatch.setattr(deploy.settings, "key_usage_reset_time_utc", "4pm", raising=False)
+    assert deploy.sync_config_db() == 2
+    assert "key_usage_reset_time_utc" in capsys.readouterr().err
+
+
+def test_sync_config_db_cooldown_guard_uses_the_shared_predicate(monkeypatch, capsys):
+    monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
+    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(None))
+    monkeypatch.setattr(deploy.settings, "dispatcher_rereview_cooldown_factor", 0.5)
+    assert deploy.sync_config_db() == 2
+    err = capsys.readouterr().err
+    assert "cooldown_factor" in err
+
+
+def test_db_synced_columns_are_all_in_the_shared_mapping():
+    from review_queue import runtime_config_defaults as rcd
+
+    unmapped = set(deploy._DB_SYNCED_COLUMNS) - set(rcd.COLUMN_TO_SETTING)
+    assert not unmapped, (
+        "a --sync-config-db column with no COLUMN_TO_SETTING entry: "
+        f"{sorted(unmapped)}"
+    )
 
 
 def test_sync_config_db_writes_every_tuning_knob_into_runtime_config(

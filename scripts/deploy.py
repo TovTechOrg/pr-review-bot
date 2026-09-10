@@ -34,7 +34,13 @@ import github_app
 import render_client as _render
 from config import settings
 from providers import pricing, registry
-from review_queue import dispatcher_tuning_config, store
+from review_queue import (
+    cooldown_config,
+    dispatcher_tuning_config,
+    runtime_config_defaults,
+    store,
+    usage_cap_config,
+)
 from scripts import _override
 from scripts._prereqs import _looks_like_local_test_db
 
@@ -1274,42 +1280,37 @@ def sync_config_db() -> int:
             file=sys.stderr,
         )
         return 2
-    base = settings.dispatcher_rereview_cooldown_seconds
-    cap = settings.dispatcher_rereview_cooldown_max_seconds
-    factor = settings.dispatcher_rereview_cooldown_factor
-    if factor < 1.0 or base > cap or base <= 0 or cap <= 0:
-        print(
-            f"refusing to sync: cooldown would resolve to base={base} cap={cap} "
-            f"factor={factor}, which effective_config() discards entirely (needs "
-            "factor >= 1.0, 0 < base <= cap) -- fix .env.config first",
-            file=sys.stderr,
-        )
-        return 2
-    tokens = settings.key_usage_token_cap
-    reset = settings.key_usage_reset_time_utc.isoformat()
-
-    tuning = {
-        "llm_request_timeout_seconds": settings.llm_request_timeout_seconds,
-        "dispatcher_default_retry_after_seconds": settings.dispatcher_default_retry_after_seconds,
-        "dispatcher_failure_base_backoff_seconds":
-            settings.dispatcher_failure_base_backoff_seconds,
-        "dispatcher_failure_max_backoff_seconds":
-            settings.dispatcher_failure_max_backoff_seconds,
-        "dispatcher_max_failure_attempts": settings.dispatcher_max_failure_attempts,
-        "dispatcher_max_notice_post_attempts": settings.dispatcher_max_notice_post_attempts,
-        "dispatcher_min_retry_after_seconds": settings.dispatcher_min_retry_after_seconds,
-        "dispatcher_backoff_jitter_seconds": settings.dispatcher_backoff_jitter_seconds,
-        "dispatcher_notice_sweep_batch_size": settings.dispatcher_notice_sweep_batch_size,
+    # `settings` (the instance), not Settings' declared class defaults, is
+    # correct here and deliberately different from Task 1's
+    # runtime_config_defaults.declared_defaults() rule: this command's whole
+    # job is to push .env.config's own resolved values, not this repo's
+    # shipped defaults.
+    seed = {
+        column: getattr(settings, field_name)
+        for column, field_name in runtime_config_defaults.COLUMN_TO_SETTING.items()
+        if column in _DB_SYNCED_COLUMNS
     }
-    # Same shared validator the dispatcher itself uses for a live config
-    # (review_queue/dispatcher_tuning_config.py), so this CLI and the running
-    # service can never disagree about what a usable tuning config is --
-    # mirrors how _runtime_config_schema_problem is shared with
+    # The column is TEXT; usage_cap_config parses it back with
+    # time.fromisoformat. Guarded with hasattr rather than isinstance(...,
+    # datetime.time) so a test double that stores the raw wire string
+    # directly is validated by problems() below instead of crashing here.
+    raw_reset = seed["key_usage_reset_time_utc"]
+    seed["key_usage_reset_time_utc"] = (
+        raw_reset.isoformat() if hasattr(raw_reset, "isoformat") else raw_reset
+    )
+
+    # One shared predicate per field group -- the CLI, the dashboard PATCH,
+    # and the boot gate can never disagree about what counts as usable.
+    # Mirrors how _runtime_config_schema_problem is shared with
     # check_runtime_config_schema.
-    invalid = dispatcher_tuning_config.problems(tuning)
+    invalid = [
+        *cooldown_config.problems(seed),
+        *usage_cap_config.problems(seed),
+        *dispatcher_tuning_config.problems(seed),
+    ]
     if invalid:
         print(
-            "refusing to sync: dispatcher tuning config would be unusable -- "
+            "refusing to sync: .env.config would write an unusable config -- "
             + "; ".join(invalid)
             + " -- fix .env.config first",
             file=sys.stderr,
@@ -1324,16 +1325,6 @@ def sync_config_db() -> int:
         )
         return 2
 
-    seed = {
-        "cooldown_base_seconds": base,
-        "cooldown_max_seconds": cap,
-        "cooldown_factor": factor,
-        "key_usage_token_cap": tokens,
-        "key_usage_reset_time_utc": reset,
-        "review_draft_prs": settings.review_draft_prs,
-        "dispatcher_idle_sleep_seconds": settings.dispatcher_idle_sleep_seconds,
-        **tuning,
-    }
     wanted = tuple(seed[column] for column in _DB_SYNCED_COLUMNS)
 
     # A column store.py's schema declares but the live table never got (CREATE
