@@ -2191,14 +2191,15 @@ def test_sync_config_db_cooldown_guard_uses_the_shared_predicate(monkeypatch, ca
     assert "cooldown_factor" in err
 
 
-def test_db_synced_columns_are_all_in_the_shared_mapping():
+def test_db_synced_columns_exactly_match_the_shared_mapping():
+    """Equality, not one-directional containment: sync_config_db() builds
+    `seed` by filtering COLUMN_TO_SETTING down to _DB_SYNCED_COLUMNS, then
+    reads every _DB_SYNCED_COLUMNS entry back out of `seed` -- a column
+    present in COLUMN_TO_SETTING but missing from _DB_SYNCED_COLUMNS would
+    silently never reach the database via this CLI, with no error."""
     from review_queue import runtime_config_defaults as rcd
 
-    unmapped = set(deploy._DB_SYNCED_COLUMNS) - set(rcd.COLUMN_TO_SETTING)
-    assert not unmapped, (
-        "a --sync-config-db column with no COLUMN_TO_SETTING entry: "
-        f"{sorted(unmapped)}"
-    )
+    assert set(deploy._DB_SYNCED_COLUMNS) == set(rcd.COLUMN_TO_SETTING)
 
 
 def test_sync_config_db_writes_every_tuning_knob_into_runtime_config(
