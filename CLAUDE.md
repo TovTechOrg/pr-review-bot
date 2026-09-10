@@ -228,12 +228,14 @@ a blocking check -- see the `## Conventions` note below.
 
 **A store-layer docstring that asserts a caller-set invariant ("the only
 caller always writes the full pair") is a validation gap waiting for its
-second caller.** This has now cost two incidents in `store.py`: the
-2026-09-09 seeding assumption above, and `set_cooldown_override`/
+second caller.** This has now cost one incident and one live silent-failure
+path found before it caused harm, both in `store.py`: the 2026-09-09 seeding
+assumption above (a real production incident), and `set_cooldown_override`/
 `set_usage_cap_override`'s "there is no partial-field write to merge with",
 which `dashboard/environment.py::_apply_config_patch` had already falsified
 -- leaving a UI path that wrote an unusable cooldown triple or a
-never-parsing usage-cap reset time and reported it as `applied`. Validate in
+never-parsing usage-cap reset time and reported it as `applied`, caught by
+review rather than by a visitor hitting it. Validate in
 one shared predicate every writer calls (`cooldown_config.problems()`,
 `usage_cap_config.problems()`, `dispatcher_tuning_config.problems()`,
 consumed by `deploy.py --sync-config-db`, the dashboard PATCH, and the boot
