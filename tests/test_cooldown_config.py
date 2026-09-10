@@ -67,3 +67,58 @@ def test_clearing_the_cache_returns_to_the_not_yet_refreshed_shape():
     cooldown_config.set_override_cache(30.0, 600.0, 1.5)
     cooldown_config.reset_override_cache()
     assert cooldown_config.effective_config() == (None, None, None)
+
+
+def test_problems_empty_for_a_usable_triple():
+    assert cooldown_config.problems(
+        {"cooldown_base_seconds": 300.0, "cooldown_max_seconds": 3600.0,
+         "cooldown_factor": 2.0}
+    ) == []
+
+
+def test_problems_accepts_a_base_of_exactly_zero():
+    # 0 is immediate re-review with no wait -- valid, per effective_config's
+    # docstring. Only a NEGATIVE base is rejected.
+    assert cooldown_config.problems(
+        {"cooldown_base_seconds": 0.0, "cooldown_max_seconds": 3600.0,
+         "cooldown_factor": 2.0}
+    ) == []
+
+
+def test_problems_names_each_unusable_field():
+    found = cooldown_config.problems(
+        {"cooldown_base_seconds": -1.0, "cooldown_max_seconds": 0.0,
+         "cooldown_factor": 0.5}
+    )
+    joined = "; ".join(found)
+    assert "cooldown_base_seconds" in joined
+    assert "cooldown_max_seconds" in joined
+    assert "cooldown_factor" in joined
+
+
+def test_problems_reports_base_above_cap():
+    found = cooldown_config.problems(
+        {"cooldown_base_seconds": 9000.0, "cooldown_max_seconds": 3600.0,
+         "cooldown_factor": 2.0}
+    )
+    assert any("exceeds" in reason for reason in found)
+
+
+def test_problems_reports_a_missing_or_null_field_as_not_set():
+    found = cooldown_config.problems(
+        {"cooldown_base_seconds": 300.0, "cooldown_max_seconds": None}
+    )
+    assert "cooldown_max_seconds is not set" in found
+    assert "cooldown_factor is not set" in found
+
+
+def test_effective_config_delegates_to_problems():
+    # One definition of "unusable", not two. A triple problems() rejects
+    # must read back as the discarded whole-triple sentinel.
+    cooldown_config.set_override_cache(300.0, 3600.0, 0.5)
+    assert cooldown_config.problems(
+        {"cooldown_base_seconds": 300.0, "cooldown_max_seconds": 3600.0,
+         "cooldown_factor": 0.5}
+    ) != []
+    assert cooldown_config.effective_config() == (None, None, None)
+    cooldown_config.reset_override_cache()

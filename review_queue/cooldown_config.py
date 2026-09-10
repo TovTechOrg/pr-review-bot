@@ -21,28 +21,63 @@ stale override in another field.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 _base: float | None = None
 _cap: float | None = None
 _factor: float | None = None
+
+# (key, predicate, description). The single definition of "this cooldown
+# triple is unusable", shared by effective_config() below, scripts/deploy.py's
+# --sync-config-db guard, dashboard/environment.py's config PATCH, and
+# main.py's boot gate -- so no writer can disagree with the reader about
+# what it is allowed to store. Mirrors dispatcher_tuning_config._BOUNDS.
+#
+# A base of exactly 0 is VALID (immediate re-review, no wait); only a
+# negative base is rejected. A non-positive cap is not, since it would make
+# every escalated wait collapse to it.
+_BOUNDS: tuple[tuple[str, Callable[[float], bool], str], ...] = (
+    ("cooldown_base_seconds", lambda v: v >= 0, "must be >= 0"),
+    ("cooldown_max_seconds", lambda v: v > 0, "must be > 0"),
+    ("cooldown_factor", lambda v: v >= 1.0, "must be >= 1.0"),
+)
+
+
+def problems(config: dict) -> list[str]:
+    """Every reason `config` is an unusable cooldown triple, as
+    human-readable strings. Empty list means usable."""
+    found = []
+    for key, predicate, description in _BOUNDS:
+        if key not in config or config[key] is None:
+            found.append(f"{key} is not set")
+        elif not predicate(config[key]):
+            found.append(f"{key}={config[key]!r} {description}")
+    base = config.get("cooldown_base_seconds")
+    cap = config.get("cooldown_max_seconds")
+    if base is not None and cap is not None and base > cap:
+        found.append(f"cooldown base {base} exceeds cooldown max {cap}")
+    return found
 
 
 def effective_config() -> tuple[float | None, float | None, float | None]:
     """(base, cap, factor) as cached -- None values mean "not yet refreshed
     this process", not "use a default": DB is the sole source of truth, per
     docs/superpowers/specs/2026-09-08-slotted-config-and-db-delegation-design.md
-    section 10.4. An override that reads back invalid (factor < 1, base >
-    cap, non-positive base/cap) is discarded as a whole triple -- (None,
-    None, None) -- same as an unrefreshed cache, so a caller can't tell "bad
-    data" from "not refreshed yet" and must treat both the same way (defer
-    the ticket, don't guess). A base of exactly 0 is valid (immediate
-    re-review, no wait) -- only a negative base is rejected; this differs
-    from the plan/spec's literal `base <= 0` snippet, which was copied from
-    the pre-refactor fallback branch where it was a no-op (that branch
-    always returned the same settings-derived base regardless), not an
-    intentional "0 is invalid" design decision."""
-    if _base is None or _cap is None or _factor is None:
-        return (None, None, None)
-    if _factor < 1.0 or _base > _cap or _base < 0 or _cap <= 0:
+    section 10.4. An override that problems() rejects is discarded as a
+    WHOLE triple -- (None, None, None), same as an unrefreshed cache -- so a
+    caller can't tell "bad data" from "not refreshed yet" and must treat both
+    the same way (defer the ticket, don't guess).
+
+    The predicate itself lives in problems() above, not here, so the writers
+    that validate before storing and this reader that discards after reading
+    can never drift apart (see that function's comment).
+    """
+    config = {
+        "cooldown_base_seconds": _base,
+        "cooldown_max_seconds": _cap,
+        "cooldown_factor": _factor,
+    }
+    if problems(config):
         return (None, None, None)
     return (_base, _cap, _factor)
 
