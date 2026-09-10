@@ -62,28 +62,6 @@ CONTRACT_VERSION = 1
 
 GENERATED_BY = "scripts.gen_contract -- do not edit by hand"
 
-# The five sync destinations scripts/deploy.py partitions OPERATIONAL_KEYS
-# across, in the same order tests/test_deploy_script.py's
-# test_operational_keys_partition_cleanly_across_every_sync_destination
-# checks them. Derived from deploy's own constants, never re-typed: a
-# key moved from one group to another there changes this file's output on
-# the next run, which is the whole point of the freshness gate.
-#
-# slot_zero_seed is the one group with no constant of its own in deploy.py
-# -- the three model vars reach the database exactly once, via
-# _seed_slot_zero_config_if_missing(), rather than being pushed on every
-# sync like every other group. Derived from registry.PROVIDERS so a fourth
-# provider is picked up automatically.
-_SLOT_ZERO_SEEDED = frozenset(model_var for _credential, model_var in registry.PROVIDERS.values())
-
-_PLACEMENTS: tuple[tuple[str, frozenset[str]], ...] = (
-    ("always_synced", frozenset(deploy._ALWAYS_SYNCED)),
-    ("generic_operational", frozenset(deploy._GENERIC_OPERATIONAL_ENV_ATTRS)),
-    ("slot_zero_seed", _SLOT_ZERO_SEEDED),
-    ("db_only", frozenset(deploy._DB_SYNCED_OPERATIONAL_KEYS)),
-    ("never_synced", frozenset(deploy._NEVER_SYNCED_OPERATIONAL_KEYS)),
-)
-
 # slot_config columns a provisioner may legitimately leave NULL: the two
 # Vertex-only overrides. Both are meaningless for gemini/groq (deploy.py's
 # _seed_slot_zero_config_if_missing writes NULL for them unless the provider
@@ -100,6 +78,49 @@ _PLACEMENTS: tuple[tuple[str, frozenset[str]], ...] = (
 _SLOT_CONFIG_OPTIONAL: tuple[str, ...] = ("vertex_gcp_project", "vertex_gcp_location")
 
 
+def _slot_zero_seeded() -> frozenset[str]:
+    """The model vars that reach the database as slot 0's seed.
+
+    slot_zero_seed is the one sync destination with no constant of its own
+    in deploy.py -- the three model vars are written exactly once, by
+    _seed_slot_zero_config_if_missing(), rather than being pushed on every
+    sync like every other group. Derived from registry.PROVIDERS, read at
+    CALL time (see _placements), so a fourth provider is picked up
+    automatically.
+    """
+    return frozenset(model_var for _credential, model_var in registry.PROVIDERS.values())
+
+
+def _placements() -> tuple[tuple[str, frozenset[str]], ...]:
+    """The five sync destinations scripts/deploy.py partitions OPERATIONAL_KEYS
+    across, in the same order tests/test_deploy_script.py's
+    test_operational_keys_partition_cleanly_across_every_sync_destination
+    checks them.
+
+    Derived from deploy's own constants, never re-typed: a key moved from
+    one group to another there changes this file's output on the next run,
+    which is the whole point of the freshness gate.
+
+    A FUNCTION rather than a module-level constant so that every derivation
+    in this module reads deploy/registry at CALL time -- the same freshness
+    env_vars() already has from reading deploy._ALWAYS_SYNCED inline. Frozen
+    at import time these groups would disagree with that live read the
+    moment anything patched one of deploy's constants: the patched name
+    would be in env_vars()'s name set but in none of the placement groups,
+    surfacing as a confusing "lands in 0 sync destination(s)" from
+    _placement() that has nothing to do with what was actually being
+    exercised. Rebuilding five small frozensets per lookup costs nothing at
+    this scale, and the generator runs once.
+    """
+    return (
+        ("always_synced", frozenset(deploy._ALWAYS_SYNCED)),
+        ("generic_operational", frozenset(deploy._GENERIC_OPERATIONAL_ENV_ATTRS)),
+        ("slot_zero_seed", _slot_zero_seeded()),
+        ("db_only", frozenset(deploy._DB_SYNCED_OPERATIONAL_KEYS)),
+        ("never_synced", frozenset(deploy._NEVER_SYNCED_OPERATIONAL_KEYS)),
+    )
+
+
 def _placement(name: str) -> str:
     """Which of the five sync destinations `name` belongs to.
 
@@ -110,7 +131,7 @@ def _placement(name: str) -> str:
     way, emitting a contract for it would publish a claim this repository
     cannot honour.
     """
-    found = [label for label, members in _PLACEMENTS if name in members]
+    found = [label for label, members in _placements() if name in members]
     if len(found) != 1:
         raise ValueError(
             f"{name} lands in {len(found)} sync destination(s) "
