@@ -91,3 +91,78 @@ def test_init_pool_does_not_mask_a_non_timeout_failure(monkeypatch):
 
     with pytest.raises(psycopg.errors.InsufficientPrivilege):
         store.init_pool()
+
+
+@pytest.mark.db
+def test_init_pool_widens_a_narrower_pre_provisioned_runtime_config(
+    db_url, db_exec, db_query, monkeypatch
+):
+    """The wizard-provisioning chronology: something else created the table
+    first, narrower than this repo declares. CREATE TABLE IF NOT EXISTS is a
+    no-op against it, so init_pool() must ADD the missing columns or the
+    bot's own INSERT/SELECT hits UndefinedColumn."""
+    monkeypatch.setattr(settings, "database_url", db_url)
+    db_exec("DROP TABLE IF EXISTS runtime_config CASCADE")
+    db_exec(
+        "CREATE TABLE runtime_config ("
+        "  id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),"
+        "  provider TEXT,"
+        "  updated_at TEXT NOT NULL"
+        ")"
+    )
+    db_exec("INSERT INTO runtime_config (id, provider, updated_at) "
+            "VALUES (1, 'groq', '2026-09-10T00:00:00+00:00')")
+
+    store.init_pool()
+    try:
+        live = {
+            name
+            for (name,) in db_query(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = 'runtime_config'"
+            )
+        }
+    finally:
+        store.close_pool()
+    declared = {name for name, _sql_type in store.RUNTIME_CONFIG_COLUMNS}
+    assert declared <= live, f"init_pool did not widen: {sorted(declared - live)}"
+
+
+@pytest.mark.db
+def test_init_pool_widens_a_narrower_pre_provisioned_slot_config(
+    db_url, db_exec, monkeypatch
+):
+    monkeypatch.setattr(settings, "database_url", db_url)
+    db_exec("DROP TABLE IF EXISTS slot_config CASCADE")
+    db_exec(
+        "CREATE TABLE slot_config ("
+        "  provider TEXT NOT NULL,"
+        "  slot_index INTEGER NOT NULL,"
+        "  model TEXT,"
+        "  updated_at TEXT NOT NULL,"
+        "  PRIMARY KEY (provider, slot_index)"
+        ")"
+    )
+    db_exec("INSERT INTO slot_config (provider, slot_index, model, updated_at) "
+            "VALUES ('groq', 0, 'llama-3.3-70b-versatile', "
+            "'2026-09-10T00:00:00+00:00')")
+
+    store.init_pool()
+    try:
+        row = store.get_slot_config("groq", 0)
+    finally:
+        store.close_pool()
+    # get_slot_config SELECTs vertex_gcp_project/_location by name -- this
+    # would raise UndefinedColumn without the widening.
+    assert row["model"] == "llama-3.3-70b-versatile"
+    assert row["vertex_gcp_project"] is None
+
+
+@pytest.mark.db
+def test_init_pool_widening_is_idempotent(db_url, db_exec, monkeypatch):
+    monkeypatch.setattr(settings, "database_url", db_url)
+    db_exec("DROP TABLE IF EXISTS runtime_config, slot_config CASCADE")
+    store.init_pool()
+    store.close_pool()
+    store.init_pool()  # second boot: every column already present
+    store.close_pool()

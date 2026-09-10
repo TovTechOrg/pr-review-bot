@@ -157,6 +157,47 @@ ALTER TABLE reviews ENABLE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS reviews_created_at_idx ON reviews (created_at DESC);
 """
 
+_WIDENED_TABLES: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
+    ("runtime_config", RUNTIME_CONFIG_COLUMNS),
+    ("slot_config", SLOT_CONFIG_COLUMNS),
+)
+
+
+def _widen_statements(conn) -> list[str]:
+    """`ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for every declared column
+    the live tables lack, in declared order.
+
+    CREATE TABLE IF NOT EXISTS is a no-op against a table that already
+    exists, so a column added to this file after a database was provisioned
+    -- by an onboarding wizard, by an operator, by an older release of this
+    service -- never reaches it on its own. That gap is what left a real
+    deployment's runtime_config missing review_draft_prs.
+
+    ADD COLUMN IF NOT EXISTS only ever ADDs, and is idempotent and
+    declarative in exactly the way ENABLE ROW LEVEL SECURITY already is
+    above -- not a column-shape migration, which this schema still does not
+    do (see RUNTIME_CONFIG_COLUMNS's "Declared, not migrated" note). No
+    ALTER COLUMN, no DROP COLUMN, no type change, ever.
+    """
+    statements: list[str] = []
+    for table, columns in _WIDENED_TABLES:
+        live = {
+            row["column_name"]
+            for row in conn.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = %s",
+                (table,),
+            ).fetchall()
+        }
+        by_name = dict(columns)
+        statements.extend(
+            f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {name} {by_name[name]};"
+            for name, _sql_type in columns
+            if name not in live
+        )
+    return statements
+
+
 _pool: ConnectionPool | None = None
 
 # Explicit rather than relying on psycopg_pool's default (same value), so a test
@@ -245,6 +286,8 @@ def init_pool() -> None:
     try:
         with _pool.connection() as conn:
             conn.execute(_SCHEMA)
+            for statement in _widen_statements(conn):
+                conn.execute(statement)
     except PoolTimeout as exc:
         raise RuntimeError(
             _FIRST_CONNECT_HELP.format(timeout=_POOL_TIMEOUT_SECONDS)
