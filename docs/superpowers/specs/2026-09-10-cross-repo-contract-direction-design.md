@@ -582,6 +582,52 @@ gate goes red until regenerated, (c) the advisory job reports the wizard
 as lagging. Then discard the branch. The superseded design's rollout
 proved only that the plumbing ran on an unchanged schema.
 
+**Validated 2026-09-10.** Run on a throwaway branch that added
+`dispatcher_probe_interval_seconds DOUBLE PRECISION` (declared default
+`11.0`) to `RUNTIME_CONFIG_COLUMNS`, with the four hand-maintained lists a
+new column must reach: `config.py`'s `Settings`,
+`store.RUNTIME_CONFIG_COLUMNS`, `runtime_config_defaults.COLUMN_TO_SETTING`,
+and `deploy._DB_SYNCED_COLUMNS`, plus a fifth Step 3 did not name:
+`tests/test_store_schema.py::EXPECTED_COLUMNS["runtime_config"]`, a
+hardcoded lock-down of the *live* Postgres schema that guards against
+unintended drift from the "declared, not migrated" refactor -- distinct
+in kind from the other four because it isn't part of the published
+contract, but a column that widens the live table via `ALTER` trips it
+too.
+
+- **(a) The bot stays green and self-heals a pre-provisioned database.**
+  `uv run pytest -v` and `ruff check .` passed (1429 passed, clean) once
+  the fifth touchpoint above was fixed -- the first run failed exactly
+  there (1 failed, 1428 passed) and nowhere else, confirming the five-list
+  count rather than a coincidental break elsewhere. The proof that matters
+  is cross-repo: with the new contract vendored into the wizard,
+  `test_wizard_seed_leaves_bot_boot_ready` passed -- the wizard provisions
+  a six-column table that has never heard of the new column, and after the
+  bot's own `init_pool()` the column reads back non-NULL at its declared
+  default, with `dispatcher_tuning_config.problems()` empty. (The as-is
+  run, with the wizard's vendored contract left unchanged, also passed but
+  does not cover the new column -- it only confirms the known columns
+  still work with a wider bot schema in play. Both runs were performed;
+  only the second is evidence for the new column.)
+- **(b) The freshness gate goes red until regenerated.** CI's two `docs`-job
+  steps exited 1 against the stale committed contract -- the printed diff
+  added a `bot_backfilled` entry naming `dispatcher_probe_interval_seconds`,
+  `sql_type: "DOUBLE PRECISION"`, `default: 11.0` -- and exited 0 after
+  `gen_contract` was re-run and the change committed.
+- **(c) The advisory job reports the consumer as lagging.**
+  `check_consumer_contract` returned `LAGGING`/exit 1, naming
+  `runtime_config.bot_backfilled[dispatcher_probe_interval_seconds]`'s
+  `.default` and `.sql_type` as missing from the consumer's copy. The
+  consumer's pin was unchanged throughout (`3fee149...`), confirming the
+  verdict is driven by the vendored contract and not by pin age.
+
+The branch was discarded; both repositories returned to `IN_SYNC` with clean
+trees and byte-identical regenerated artifacts.
+
+(§10 step 5's "delete the superseded spec" was a no-op: the reciprocal-pin
+design was never committed to either repository. §1 and §11 keep the record
+of why it was discarded.)
+
 ## 11. Why the reciprocal-pin design was discarded
 
 Both repos asserting **exact set equality** against a pinned sibling
