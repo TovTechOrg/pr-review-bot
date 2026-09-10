@@ -1,0 +1,226 @@
+{
+  "generated_by": "scripts.gen_contract -- do not edit by hand",
+  "contract_version": 1,
+  "env_vars": {
+    "DASHBOARD_PASSWORD": {
+      "placement": "always_synced"
+    },
+    "DASHBOARD_SESSION_SECRET": {
+      "placement": "always_synced"
+    },
+    "DASHBOARD_USERNAME": {
+      "placement": "always_synced"
+    },
+    "DATABASE_URL": {
+      "placement": "always_synced"
+    },
+    "DISPATCHER_BACKOFF_JITTER_SECONDS": {
+      "placement": "db_only"
+    },
+    "DISPATCHER_DEFAULT_RETRY_AFTER_SECONDS": {
+      "placement": "db_only"
+    },
+    "DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS": {
+      "placement": "db_only"
+    },
+    "DISPATCHER_FAILURE_MAX_BACKOFF_SECONDS": {
+      "placement": "db_only"
+    },
+    "DISPATCHER_IDLE_SLEEP_SECONDS": {
+      "placement": "db_only"
+    },
+    "DISPATCHER_MAX_FAILURE_ATTEMPTS": {
+      "placement": "db_only"
+    },
+    "DISPATCHER_MAX_NOTICE_POST_ATTEMPTS": {
+      "placement": "db_only"
+    },
+    "DISPATCHER_MIN_RETRY_AFTER_SECONDS": {
+      "placement": "db_only"
+    },
+    "DISPATCHER_NOTICE_SWEEP_BATCH_SIZE": {
+      "placement": "db_only"
+    },
+    "DISPATCHER_REREVIEW_COOLDOWN_FACTOR": {
+      "placement": "db_only"
+    },
+    "DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS": {
+      "placement": "db_only"
+    },
+    "DISPATCHER_REREVIEW_COOLDOWN_SECONDS": {
+      "placement": "db_only"
+    },
+    "GEMINI_MODEL": {
+      "placement": "slot_zero_seed"
+    },
+    "GITHUB_APP_ID": {
+      "placement": "always_synced"
+    },
+    "GITHUB_APP_INSTALLATION_ID": {
+      "placement": "always_synced"
+    },
+    "GITHUB_APP_PRIVATE_KEY": {
+      "placement": "always_synced"
+    },
+    "GITHUB_TARGET_REPO": {
+      "placement": "always_synced"
+    },
+    "GITHUB_WEBHOOK_SECRET": {
+      "placement": "always_synced"
+    },
+    "GROQ_MODEL": {
+      "placement": "slot_zero_seed"
+    },
+    "KEY_USAGE_RESET_TIME_UTC": {
+      "placement": "db_only"
+    },
+    "KEY_USAGE_TOKEN_CAP": {
+      "placement": "db_only"
+    },
+    "LLM_REQUEST_TIMEOUT_SECONDS": {
+      "placement": "db_only"
+    },
+    "PUBLIC_BASE_URL": {
+      "placement": "never_synced"
+    },
+    "RENDER_API_KEY": {
+      "placement": "always_synced"
+    },
+    "RENDER_SERVICE_NAME": {
+      "placement": "never_synced"
+    },
+    "REVIEW_DRAFT_PRS": {
+      "placement": "db_only"
+    },
+    "VERTEX_GCP_LOCATION": {
+      "placement": "db_only"
+    },
+    "VERTEX_GCP_PROJECT": {
+      "placement": "db_only"
+    },
+    "VERTEX_MODEL": {
+      "placement": "slot_zero_seed"
+    }
+  },
+  "providers": {
+    "gemini": {
+      "credential_var": "GEMINI_API_KEY",
+      "model_var": "GEMINI_MODEL",
+      "key_index_column": "gemini_key_index"
+    },
+    "groq": {
+      "credential_var": "GROQ_API_KEY",
+      "model_var": "GROQ_MODEL",
+      "key_index_column": "groq_key_index"
+    },
+    "vertex": {
+      "credential_var": "VERTEX_GCP_SERVICE_ACCOUNT_KEY",
+      "model_var": "VERTEX_MODEL",
+      "key_index_column": "vertex_key_index"
+    }
+  },
+  "runtime_config": {
+    "provisioner_required": [
+      "id",
+      "provider",
+      "updated_at"
+    ],
+    "provisioner_required_one_of": [
+      "gemini_key_index",
+      "groq_key_index",
+      "vertex_key_index"
+    ],
+    "bot_backfilled": [
+      {
+        "column": "cooldown_base_seconds",
+        "sql_type": "DOUBLE PRECISION",
+        "default": 300.0
+      },
+      {
+        "column": "cooldown_max_seconds",
+        "sql_type": "DOUBLE PRECISION",
+        "default": 3600.0
+      },
+      {
+        "column": "cooldown_factor",
+        "sql_type": "DOUBLE PRECISION",
+        "default": 2.0
+      },
+      {
+        "column": "key_usage_reset_time_utc",
+        "sql_type": "TEXT",
+        "default": "04:00:00"
+      },
+      {
+        "column": "review_draft_prs",
+        "sql_type": "BOOLEAN",
+        "default": false
+      },
+      {
+        "column": "llm_request_timeout_seconds",
+        "sql_type": "DOUBLE PRECISION",
+        "default": 45.0
+      },
+      {
+        "column": "dispatcher_default_retry_after_seconds",
+        "sql_type": "DOUBLE PRECISION",
+        "default": 60.0
+      },
+      {
+        "column": "dispatcher_failure_base_backoff_seconds",
+        "sql_type": "DOUBLE PRECISION",
+        "default": 2.0
+      },
+      {
+        "column": "dispatcher_failure_max_backoff_seconds",
+        "sql_type": "DOUBLE PRECISION",
+        "default": 300.0
+      },
+      {
+        "column": "dispatcher_max_failure_attempts",
+        "sql_type": "INTEGER",
+        "default": 5
+      },
+      {
+        "column": "dispatcher_max_notice_post_attempts",
+        "sql_type": "INTEGER",
+        "default": 3
+      },
+      {
+        "column": "dispatcher_min_retry_after_seconds",
+        "sql_type": "DOUBLE PRECISION",
+        "default": 1.0
+      },
+      {
+        "column": "dispatcher_backoff_jitter_seconds",
+        "sql_type": "DOUBLE PRECISION",
+        "default": 0.0
+      },
+      {
+        "column": "dispatcher_notice_sweep_batch_size",
+        "sql_type": "INTEGER",
+        "default": 20
+      },
+      {
+        "column": "dispatcher_idle_sleep_seconds",
+        "sql_type": "DOUBLE PRECISION",
+        "default": 1.0
+      }
+    ],
+    "no_default_by_design": [
+      "key_usage_token_cap"
+    ]
+  },
+  "slot_config": {
+    "provisioner_required": [
+      "provider",
+      "slot_index",
+      "model",
+      "updated_at"
+    ],
+    "optional": [
+      "vertex_gcp_project",
+      "vertex_gcp_location"
+    ]
+  }
+}

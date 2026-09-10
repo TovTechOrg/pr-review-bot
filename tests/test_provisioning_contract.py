@@ -13,6 +13,9 @@ sections 5 and 6.1.
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from config import OPERATIONAL_KEYS, settings
@@ -21,6 +24,12 @@ from review_queue import runtime_config_defaults, store
 from scripts import deploy, gen_contract
 
 SENTINEL = "SENTINEL-3f0c71ba9d42e6c8-MUST-NOT-BE-VENDORED"
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _committed_contract() -> dict:
+    path = _REPO_ROOT / gen_contract.CONTRACT_PATH
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def test_env_vars_covers_every_operational_key_and_every_always_synced_var():
@@ -186,3 +195,83 @@ def test_gen_contract_module_does_not_import_the_settings_instance():
             assert "settings" not in imported, (
                 f"line {node.lineno} imports the settings instance from {node.module}"
             )
+
+
+def test_render_round_trips_through_json_and_ends_with_a_newline():
+    text = gen_contract.render()
+    assert text.endswith("\n")
+    assert json.loads(text) == gen_contract.build_contract()
+
+
+def test_render_is_deterministic_byte_for_byte():
+    assert gen_contract.render() == gen_contract.render()
+
+
+def test_write_contract_writes_exactly_one_file_at_the_fixed_path(tmp_path):
+    written = gen_contract.write_contract(tmp_path)
+    assert written == tmp_path / gen_contract.CONTRACT_PATH
+    produced = {p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file()}
+    assert produced == {gen_contract.CONTRACT_PATH}
+
+
+def test_write_contract_is_idempotent_byte_for_byte(tmp_path):
+    """The CI freshness job compares bytes, so a second run that differs at
+    all -- a timestamp, a reordered set -- is a permanent red build."""
+    first = gen_contract.write_contract(tmp_path).read_bytes()
+    second = gen_contract.write_contract(tmp_path).read_bytes()
+    assert first == second
+
+
+def test_the_written_file_uses_lf_endings(tmp_path):
+    """.gitattributes pins the working tree to LF. A CRLF write on Windows
+    would fail the freshness check on that operator's machine and nowhere
+    else."""
+    assert b"\r\n" not in gen_contract.write_contract(tmp_path).read_bytes()
+
+
+def test_every_file_call_in_gen_contract_declares_encoding_and_newline():
+    """A missing explicit encoding= falls back to the OS locale encoding
+    (cp1252 on Windows) and a missing newline= on a write falls back to
+    CRLF there -- either fails the byte-for-byte freshness check on that
+    operator's machine only. Parsed with ast, so a multi-line call or
+    different quoting still gets caught. Mirrors the same guard in
+    tests/test_gen_docs.py."""
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(gen_contract))
+    calls = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        if name in {"open", "read_text", "write_text"}:
+            calls.append((name, node))
+    assert calls, "expected at least one open/read_text/write_text call to check"
+    for name, node in calls:
+        kwargs = {kw.arg for kw in node.keywords if kw.arg}
+        assert "encoding" in kwargs, f"{name}() at gen_contract.py:{node.lineno} has no encoding="
+        if name == "write_text":
+            assert "newline" in kwargs, f"{name}() at gen_contract.py:{node.lineno} has no newline="
+
+
+def test_the_committed_contract_is_byte_identical_to_what_the_generator_produces():
+    """Spec section 6.1's first blocking bot-side check, run locally so a
+    stale contract fails `pytest` and not only CI. If this fails, run:
+    uv run python -m scripts.gen_contract"""
+    committed = (_REPO_ROOT / gen_contract.CONTRACT_PATH).read_text(encoding="utf-8")
+    assert committed == gen_contract.render(), (
+        f"{gen_contract.CONTRACT_PATH} is stale -- run scripts.gen_contract"
+    )
+
+
+def test_the_committed_contract_carries_the_do_not_edit_marker():
+    contract = _committed_contract()
+    assert contract["generated_by"] == gen_contract.GENERATED_BY
+    assert contract["contract_version"] == gen_contract.CONTRACT_VERSION
+
+
+def test_main_writes_and_reports(tmp_path, capsys):
+    assert gen_contract.main(["--root", str(tmp_path)]) == 0
+    assert gen_contract.CONTRACT_PATH in capsys.readouterr().out
