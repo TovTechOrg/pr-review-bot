@@ -416,8 +416,14 @@ def main(argv: list[str] | None = None) -> int:
     print(_annotation(report.verdict, report.headline))
 
     if args.summary:
-        with open(args.summary, "a", encoding="utf-8") as handle:
-            handle.write(rendered)
+        try:
+            with open(args.summary, "a", encoding="utf-8") as handle:
+                handle.write(rendered)
+        except OSError as exc:
+            # The report was already printed to stdout above; a failure to
+            # ALSO append it to the step summary must not crash a script
+            # whose entire job is to never traceback out.
+            print(f"::warning::could not write the report to {args.summary}: {exc!r}")
 
     if args.never_fail:
         return 0
@@ -432,7 +438,12 @@ def _build_report(args: argparse.Namespace) -> Report:
     bot_text = args.bot_contract
     if bot_text is None:
         bot_text = gen_contract.render()
-        if committed_text is not None and committed_text != bot_text:
+        if committed_text is None:
+            return Report(
+                verdict=UNCHECKABLE,
+                headline=f"this repository's committed {args.committed_contract} is missing",
+            )
+        if committed_text != bot_text:
             return Report(
                 verdict=UNCHECKABLE,
                 headline=(

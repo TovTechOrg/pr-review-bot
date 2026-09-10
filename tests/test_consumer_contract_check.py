@@ -292,6 +292,21 @@ def test_a_stale_committed_contract_in_this_repo_is_uncheckable(tmp_path):
     assert "stale" in (tmp_path / "summary.md").read_text(encoding="utf-8")
 
 
+def test_a_missing_committed_contract_in_this_repo_is_uncheckable(tmp_path):
+    """Distinct from staleness: nothing to cross-check against at all is its
+    own UNCHECKABLE reason, not a silently-skipped check. Only reachable
+    when --bot-contract is NOT given, since a caller-supplied override has
+    no committed file to cross-check against by construction."""
+    _write_consumer(tmp_path / "consumer", _contract(), None)
+    exit_code = ccc.main([
+        "--consumer-root", str(tmp_path / "consumer"),
+        "--committed-contract", str(tmp_path / "does-not-exist.json"),
+        "--summary", str(tmp_path / "summary.md"),
+    ])
+    assert exit_code == 2
+    assert "missing" in (tmp_path / "summary.md").read_text(encoding="utf-8")
+
+
 def test_main_writes_markdown_to_the_summary_path(tmp_path):
     summary_path = tmp_path / "summary.md"
     ccc.main([
@@ -302,6 +317,22 @@ def test_main_writes_markdown_to_the_summary_path(tmp_path):
     ])
     written = summary_path.read_text(encoding="utf-8")
     assert ccc.CONSUMER_REPO in written
+
+
+def test_main_never_raises_when_the_summary_path_is_unwritable(tmp_path):
+    """The report was already printed to stdout; failing to ALSO append it
+    to an unwritable summary path must not crash a script whose whole job
+    is to always produce a report."""
+    contract = _contract()
+    _write_consumer(tmp_path / "consumer", contract, None)
+    unwritable_summary = tmp_path / "no-such-directory" / "summary.md"
+    exit_code = ccc.main([
+        "--consumer-root", str(tmp_path / "consumer"),
+        "--bot-contract", _text(contract),
+        "--committed-contract", str(tmp_path / "nonexistent.json"),
+        "--summary", str(unwritable_summary),
+    ])
+    assert exit_code == 0
 
 
 def test_main_never_raises_on_garbage_input(tmp_path):

@@ -172,6 +172,36 @@ accidentally exercise the refusal path instead of the real one._
 - **Why parked:** not in this plan's (docs/superpowers/specs/2026-09-08-slotted-config-and-db-delegation-design.md) file list for any task -- fixing it properly means redesigning the CLI's `--model` flag to be slot-aware (does it target the currently-active slot for that provider, or take an explicit `--index`?), which is a real CLI-UX decision this plan never made, not a mechanical follow-through.
 - **Follow-up:** decide the CLI shape (most likely: `--model` targets `--index`'s slot if given, else the provider's currently-active slot) and switch the write/read to `store.set_slot_config`/`store.get_slot_config`, mirroring how `dashboard/environment.py`'s guided-setup apply flow (this plan's Task 12) already writes slot_config.
 
+### `scripts/check_consumer_contract.py`'s `--bot-contract` override silently skips the committed-contract staleness/missing cross-check
+- **Found during:** 2026-09-10 Stage 4 (advisory consumer-lag job) implementation, per-task `code-review` pass on `scripts/check_consumer_contract.py`
+- **What:** `_build_report()` only evaluates the committed-vs-generated staleness/missing check when `--bot-contract` is NOT supplied (`if bot_text is None: ...`). A caller that passes both `--bot-contract` and a real `--committed-contract` gets no cross-check at all, and this combination is untested.
+- **Why parked:** `--bot-contract` exists only for the unit tests to inject a fixed contract text; the real workflow (`.github/workflows/consumer-contract-lag.yml`) never passes it, so the gap has no production reach today. Making the two flags interact correctly is a small CLI-semantics decision (does `--bot-contract` mean "also compare this against `--committed-contract`", or "skip that check entirely"?) that the Stage 4 plan didn't specify, not a mechanical fix.
+- **Follow-up:** if `--bot-contract` ever gains a real caller beyond tests, decide and document the interaction, then add a test exercising both flags together.
+
+### `scripts/check_consumer_contract.py`'s `_flatten()` silently collapses duplicate `column` keys in a consumer's vendored contract
+- **Found during:** 2026-09-10 Stage 4 implementation, per-task `code-review` pass
+- **What:** the dotted-path flattener keys a `bot_backfilled`-shaped list by its `column` field via `dict.update`, so two list entries sharing the same `column` value overwrite each other with no warning — the diff would then compare only the surviving entry.
+- **Why parked:** only reachable from a malformed *consumer-vendored* file (this repo's own `gen_contract.py` output can't produce duplicate columns, and `tests/test_provisioning_contract.py` already pins that). A malformed consumer file already produces a degraded-but-safe result (`LAGGING`, not a crash or a false `IN_SYNC` on real data) via other paths (e.g. a genuinely differing entry among the duplicates would still usually surface as *some* difference); the specific case where duplicates hide a real diff is a narrow, self-inflicted-by-the-consumer edge case.
+- **Follow-up:** have `_flatten()` raise/report on a duplicate `column` value within the same list instead of silently keeping the last one, surfacing it as its own `UNCHECKABLE`-flavored detail rather than a silent drop.
+
+### `scripts/check_consumer_contract.py`'s generic-diff framing has exactly one hardcoded identity key (`"column"`)
+- **Found during:** 2026-09-10 Stage 4 implementation, per-task `code-review` pass
+- **What:** `_flatten()`'s docstring and the Stage 4 plan frame the list-diffing as generic ("the contract's shape is versioned and will grow blocks"), but only one field name (`"column"`) is recognized as a list-of-dicts identity key; a future block identity-keyed by a different field (e.g. a per-slot list keyed by `slot_index`) would silently fall through to whole-value leaf comparison, reproducing the index-shift problem the `"column"` case exists to avoid.
+- **Why parked:** today's contract has exactly one such list (`runtime_config.bot_backfilled`), so generalizing the key name now has no concrete second case to validate against and would be speculative.
+- **Follow-up:** if `contract_version` bumps to add a second identity-keyed list, generalize `_flatten()` to accept a set of recognized identity-key field names (or thread the key name through per-block) at that point, with a test for the new block.
+
+### `scripts/check_consumer_contract.py`'s `_flatten()` can't distinguish an empty block from a missing one
+- **Found during:** 2026-09-10 Stage 4 implementation, per-task `code-review` pass
+- **What:** an empty dict (`{}`) or empty column-keyed list at some path flattens to zero leaf entries, identical to that key being entirely absent — so a block going from `{}` to missing (or vice versa) across a schema change is invisible to `differences()`.
+- **Why parked:** none of today's four top-level contract blocks are ever legitimately empty, so this has no live trigger; would need a real future contract shape to test against.
+- **Follow-up:** if a future block can legitimately be empty, add an explicit `"<path> (present, empty)"` sentinel leaf for empty dicts/lists so presence and emptiness are both represented.
+
+### `scripts/check_consumer_contract.py`'s `differences()`/`compare()` do some redundant work
+- **Found during:** 2026-09-10 Stage 4 implementation, per-task `code-review` pass
+- **What:** `differences()` fully formats every changed detail line before `compare()`'s 50-line cap discards the rest, and recomputes `set(bot_flat)`/`set(consumer_flat)` multiple times; `compare()` also duplicates the `contract_version` extraction and the `differences(bot, consumer)` call across its version-mismatch and normal branches instead of computing each once.
+- **Why parked:** pure efficiency/duplication, no output difference; the contract is small (tens of fields) so the redundant work costs microseconds even on a full `contract_version` bump, and this job runs once a day.
+- **Follow-up:** compute the two key sets once and short-circuit formatting past `_MAX_DETAIL_LINES + 1` entries; hoist the shared `differences()` call and version extraction above the version-mismatch branch.
+
 _Everything closed as of 2026-09-06 (the standalone-repo restructure's doc/
 cosmetic gaps, every onboarding-frame parked item — all mooted by the
 2026-09-05 removal of `onboarding/` into its own repo, the dashboard
