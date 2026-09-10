@@ -214,6 +214,12 @@ accidentally exercise the refusal path instead of the real one._
 - **Why parked:** low severity — the test fails loudly and immediately (not a silent gap), so a future column addition would be caught in the same pytest run, just with one extra red test to diagnose. Fixing the missing pointer is a one-line comment change with no code/behavior implications, out of scope for a documentation-only stage whose task list didn't include it.
 - **Follow-up:** add a comment to `EXPECTED_COLUMNS` (and/or to `RUNTIME_CONFIG_COLUMNS`/`SLOT_CONFIG_COLUMNS`'s own docstrings) cross-referencing the other, so a column addition's failure here is expected rather than surprising.
 
+### A persistent local test Postgres container is a leak hazard for any future throwaway-schema drill like Stage 5 Task 1's
+- **Found during:** 2026-09-10 Stage 5 final whole-branch review (Opus), verifying Task 1's validation restored baseline
+- **What:** this dev environment's test Postgres (container `pr-review-test-pg`) is long-lived across sessions rather than a fresh `testcontainers` instance per run. `conftest.py`'s `db` fixture only `TRUNCATE`s between tests, never drops/recreates the schema, so a throwaway `ALTER TABLE ... ADD COLUMN` run against it during a schema drill (as Task 1 did) would persist in that container after the drill's branch is discarded, permanently red-ing `test_schema_declares_every_expected_column`'s set-equality check on every future run until someone thought to drop/recreate the container by hand.
+- **Why parked:** no action needed here -- verified live (read-only query against the container) that Task 1's throwaway column did **not** leak: `runtime_config` has exactly its expected 22 columns, no `dispatcher_probe_interval_seconds`. The restore happened correctly this time. This is a recorded hazard for the *next* schema drill, not a defect in this one.
+- **Follow-up:** if a future validation intentionally alters live schema on a throwaway branch, either drop/recreate the test container afterward or verify column-set restoration the same way this review did (a direct `information_schema` query) before declaring the drill's tree "restored."
+
 _Everything closed as of 2026-09-06 (the standalone-repo restructure's doc/
 cosmetic gaps, every onboarding-frame parked item — all mooted by the
 2026-09-05 removal of `onboarding/` into its own repo, the dashboard
