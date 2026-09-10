@@ -115,6 +115,23 @@ def test_every_declared_column_is_nullable_or_defaulted_or_provisioner_written()
             )
 
 
+def test_widening_safe_sql_type_relaxes_a_bare_not_null():
+    assert store._widening_safe_sql_type("TEXT    NOT NULL") == "TEXT"
+    assert store._widening_safe_sql_type("INTEGER NOT NULL") == "INTEGER"
+
+
+def test_widening_safe_sql_type_leaves_a_defaulted_column_untouched():
+    # NOT NULL DEFAULT 0 is safe to ADD to a non-empty table as-is -- every
+    # existing row gets the default, not NULL, so there's nothing to relax.
+    assert store._widening_safe_sql_type("INTEGER NOT NULL DEFAULT 0") == (
+        "INTEGER NOT NULL DEFAULT 0"
+    )
+
+
+def test_widening_safe_sql_type_is_a_no_op_for_an_already_nullable_column():
+    assert store._widening_safe_sql_type("DOUBLE PRECISION") == "DOUBLE PRECISION"
+
+
 def test_est_cost_usd_is_nullable(db, db_query):
     # db_query (not db_exec) is this file's actual raw-query fixture --
     # tests/conftest.py's db_exec only executes/commits, it returns nothing to

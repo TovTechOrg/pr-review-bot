@@ -15,6 +15,7 @@ page (``dashboard/router.py``) via the ``dashboard_*`` read helpers below.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 
@@ -166,6 +167,31 @@ _WIDENED_TABLES: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
 )
 
 
+def _widening_safe_sql_type(sql_type: str) -> str:
+    """`sql_type` (a RUNTIME_CONFIG_COLUMNS/SLOT_CONFIG_COLUMNS declared
+    type) with a bare `NOT NULL` (no `DEFAULT`) relaxed to nullable.
+
+    `updated_at`/`provider`/`slot_index` are declared `NOT NULL` with no
+    `DEFAULT` -- correct for CREATE TABLE, where the provisioner always
+    writes them in the same INSERT that creates the row. But
+    `ADD COLUMN IF NOT EXISTS` widens an ALREADY-POPULATED live table one
+    column at a time; Postgres fills every existing row's new column with
+    NULL, and `ADD COLUMN ... NOT NULL` with no DEFAULT fails outright
+    against any non-empty table (NotNullViolation) -- unconditionally,
+    regardless of which column it is or who eventually intends to populate
+    it. A column being "provisioner-written" describes the value in a row
+    the provisioner writes; it says nothing about whether the *column*
+    itself is already present on a narrower sibling-provisioned table, which
+    is exactly the case this widening exists to handle. This kept the
+    widening ADD from ever failing that way -- CREATE TABLE (a fresh
+    install) still declares the real NOT NULL from RUNTIME_CONFIG_COLUMNS/
+    SLOT_CONFIG_COLUMNS untouched.
+    """
+    if "DEFAULT" in sql_type.upper():
+        return sql_type
+    return re.sub(r"\s*NOT\s+NULL\s*", " ", sql_type, flags=re.IGNORECASE).strip()
+
+
 def _widen_statements(conn) -> list[str]:
     """`ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for every declared column
     the live tables lack, in declared order.
@@ -180,7 +206,9 @@ def _widen_statements(conn) -> list[str]:
     declarative in exactly the way ENABLE ROW LEVEL SECURITY already is
     above -- not a column-shape migration, which this schema still does not
     do (see RUNTIME_CONFIG_COLUMNS's "Declared, not migrated" note). No
-    ALTER COLUMN, no DROP COLUMN, no type change, ever.
+    ALTER COLUMN, no DROP COLUMN, no type change, ever. See
+    _widening_safe_sql_type() for why a widened column's NOT NULL is
+    relaxed regardless of which one it is.
     """
     statements: list[str] = []
     for table, columns in _WIDENED_TABLES:
@@ -194,7 +222,8 @@ def _widen_statements(conn) -> list[str]:
         }
         by_name = dict(columns)
         statements.extend(
-            f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {name} {by_name[name]};"
+            f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {name} "
+            f"{_widening_safe_sql_type(by_name[name])};"
             for name, _sql_type in columns
             if name not in live
         )

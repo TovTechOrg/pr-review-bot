@@ -588,13 +588,17 @@ def _alter_statements(
     """One `ALTER TABLE <table> ADD COLUMN IF NOT EXISTS` line per name in
     `missing`, in the type each is declared with in `columns`.
 
-    Only ever ADDs. A NOT NULL column with no DEFAULT cannot be added to a
-    table that already has rows -- tests/test_store_schema.py pins that
-    every declared column is nullable, defaulted, or provisioner-written.
+    Only ever ADDs. A bare NOT NULL (no DEFAULT) is relaxed to nullable via
+    store._widening_safe_sql_type -- see that function's docstring for why:
+    ADD COLUMN NOT NULL fails outright against any non-empty table
+    regardless of which column it is. This is the same text
+    store.init_pool() executes automatically; this function only exists so
+    an operator has the exact SQL to hand when they'd rather run it by hand.
     """
     by_name = dict(columns)
     return "\n".join(
-        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {name} {by_name[name]};"
+        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {name} "
+        f"{store._widening_safe_sql_type(by_name[name])};"
         for name in missing
     )
 

@@ -169,6 +169,38 @@ def test_init_pool_widening_is_idempotent(db_url, db_exec, monkeypatch):
 
 
 @pytest.mark.db
+def test_init_pool_widens_a_slot_config_missing_updated_at(db_url, db_exec, monkeypatch):
+    """RUNTIME_CONFIG_COLUMNS/SLOT_CONFIG_COLUMNS declare updated_at,
+    provider, and slot_index as NOT NULL with no DEFAULT -- correct for a
+    fresh CREATE TABLE, where the provisioner always writes them in the same
+    INSERT. But _widen_statements ADDs a column to an already-provisioned,
+    non-empty table, where a bare `ADD COLUMN ... NOT NULL` fails outright
+    (psycopg.errors.NotNullViolation) regardless of who eventually intends
+    to populate it. A narrower sibling-provisioned slot_config missing
+    updated_at entirely must still widen successfully, not crash-loop boot
+    forever."""
+    monkeypatch.setattr(settings, "database_url", db_url)
+    db_exec("DROP TABLE IF EXISTS slot_config CASCADE")
+    db_exec(
+        "CREATE TABLE slot_config ("
+        "  provider TEXT NOT NULL,"
+        "  slot_index INTEGER NOT NULL,"
+        "  model TEXT,"
+        "  PRIMARY KEY (provider, slot_index)"
+        ")"
+    )
+    db_exec("INSERT INTO slot_config (provider, slot_index, model) "
+            "VALUES ('groq', 0, 'llama-3.3-70b-versatile')")
+
+    store.init_pool()
+    try:
+        row = store.get_slot_config("groq", 0)
+    finally:
+        store.close_pool()
+    assert row["model"] == "llama-3.3-70b-versatile"
+
+
+@pytest.mark.db
 def test_init_pool_backfills_null_columns_from_declared_defaults(
     db_url, db_exec, monkeypatch, caplog
 ):
