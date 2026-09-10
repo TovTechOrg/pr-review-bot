@@ -1053,6 +1053,21 @@ def test_runtime_config_schema_ignores_a_same_named_table_in_another_schema(
     assert "review_draft_prs" in result.detail
 
 
+def test_alter_statements_generalize_to_any_table():
+    columns = (("alpha", "TEXT"), ("beta", "INTEGER NOT NULL DEFAULT 0"))
+    sql = deploy._alter_statements("some_table", columns, ["beta"])
+    assert sql == (
+        "ALTER TABLE some_table ADD COLUMN IF NOT EXISTS beta INTEGER NOT NULL DEFAULT 0;"
+    )
+
+
+def test_runtime_config_alter_statements_still_wraps_the_generic_helper():
+    sql = deploy._runtime_config_alter_statements(["review_draft_prs"])
+    assert sql == (
+        "ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS review_draft_prs BOOLEAN;"
+    )
+
+
 RENDER_SERVICES = "https://api.render.com/v1/services"
 
 

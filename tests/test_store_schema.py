@@ -82,6 +82,39 @@ def test_runtime_config_has_no_cost_cap_column(db, db_query):
     assert "key_usage_cost_cap_usd" not in _columns(db_query, "runtime_config")
 
 
+def test_slot_config_columns_build_the_schema_ddl():
+    # Same single-source-of-truth shape runtime_config already has: the
+    # CREATE TABLE text is generated from the tuple, so they cannot drift.
+    from review_queue.store import SLOT_CONFIG_COLUMNS, _SCHEMA
+
+    assert [name for name, _sql_type in SLOT_CONFIG_COLUMNS] == [
+        "provider", "slot_index", "model",
+        "vertex_gcp_project", "vertex_gcp_location", "updated_at",
+    ]
+    for name, sql_type in SLOT_CONFIG_COLUMNS:
+        assert f"{name:<25} {sql_type}" in _SCHEMA
+
+
+def test_every_declared_column_is_nullable_or_defaulted_or_provisioner_written():
+    """store.init_pool() widens a live table with ADD COLUMN IF NOT EXISTS,
+    which fails against a non-empty table for a NOT NULL column carrying no
+    DEFAULT. The provisioner-written columns are exempt because they are
+    never absent: whoever creates the row writes them in the same statement.
+    """
+    from review_queue.store import RUNTIME_CONFIG_COLUMNS, SLOT_CONFIG_COLUMNS
+
+    provisioner_written = {"id", "provider", "slot_index", "updated_at"}
+    for columns in (RUNTIME_CONFIG_COLUMNS, SLOT_CONFIG_COLUMNS):
+        for name, sql_type in columns:
+            if name in provisioner_written:
+                continue
+            upper = sql_type.upper()
+            assert "NOT NULL" not in upper or "DEFAULT" in upper, (
+                f"{name} is NOT NULL with no DEFAULT -- ADD COLUMN IF NOT EXISTS "
+                "cannot add it to a table that already has rows"
+            )
+
+
 def test_est_cost_usd_is_nullable(db, db_query):
     # db_query (not db_exec) is this file's actual raw-query fixture --
     # tests/conftest.py's db_exec only executes/commits, it returns nothing to

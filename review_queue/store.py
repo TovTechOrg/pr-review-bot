@@ -62,6 +62,21 @@ RUNTIME_CONFIG_COLUMNS: tuple[tuple[str, str], ...] = (
     ("dispatcher_idle_sleep_seconds", "DOUBLE PRECISION"),
 )
 
+# (name, SQL type + constraints) for every slot_config column, in DDL order
+# -- the same single-source-of-truth shape RUNTIME_CONFIG_COLUMNS above has,
+# and for the same reason: init_pool() widens a live table from this tuple
+# with ADD COLUMN IF NOT EXISTS, and get_slot_config()/set_slot_config()
+# name these columns explicitly, so a table narrower than this raises
+# UndefinedColumn from the bot's own read path.
+SLOT_CONFIG_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("provider", "TEXT    NOT NULL"),
+    ("slot_index", "INTEGER NOT NULL"),
+    ("model", "TEXT"),
+    ("vertex_gcp_project", "TEXT"),
+    ("vertex_gcp_location", "TEXT"),
+    ("updated_at", "TEXT    NOT NULL"),
+)
+
 # Declared, not migrated: this is the final shape, provisioned in one pass on
 # first boot. No column/type ALTER statements -- a fresh clone carries no
 # migration code (design spec 2026-08-18 section 6d), and an existing
@@ -117,12 +132,9 @@ CREATE TABLE IF NOT EXISTS runtime_config (
 );
 ALTER TABLE runtime_config ENABLE ROW LEVEL SECURITY;
 CREATE TABLE IF NOT EXISTS slot_config (
-    provider            TEXT    NOT NULL,
-    slot_index          INTEGER NOT NULL,
-    model               TEXT,
-    vertex_gcp_project  TEXT,
-    vertex_gcp_location TEXT,
-    updated_at          TEXT    NOT NULL,
+""" + ",\n".join(
+    f"    {name:<25} {sql_type}" for name, sql_type in SLOT_CONFIG_COLUMNS
+) + """,
     PRIMARY KEY (provider, slot_index)
 );
 ALTER TABLE slot_config ENABLE ROW LEVEL SECURITY;

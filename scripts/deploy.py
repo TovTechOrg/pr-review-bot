@@ -551,11 +551,52 @@ def check_database() -> CheckResult:
     return CheckResult(name, "PASS", "connected; tickets present")
 
 
+def _missing_columns(
+    table: str, columns: tuple[tuple[str, str], ...]
+) -> list[str] | None:
+    """Names from `columns` absent from the live `table`, in declared order
+    -- or None if the table itself doesn't exist yet, a distinct situation
+    from "every column is missing".
+
+    Raises psycopg.Error on a connection failure -- callers already have
+    their own way of reporting that.
+    """
+    with psycopg.connect(settings.database_url, connect_timeout=_DB_CONNECT_TIMEOUT) as conn:
+        row = conn.execute("SELECT to_regclass(%s)", (f"public.{table}",)).fetchone()
+        if (row[0] if row else None) is None:
+            return None
+        live = {
+            name
+            for (name,) in conn.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = %s",
+                (table,),
+            ).fetchall()
+        }
+    return [name for name, _sql_type in columns if name not in live]
+
+
+def _alter_statements(
+    table: str, columns: tuple[tuple[str, str], ...], missing: list[str]
+) -> str:
+    """One `ALTER TABLE <table> ADD COLUMN IF NOT EXISTS` line per name in
+    `missing`, in the type each is declared with in `columns`.
+
+    Only ever ADDs. A NOT NULL column with no DEFAULT cannot be added to a
+    table that already has rows -- tests/test_store_schema.py pins that
+    every declared column is nullable, defaulted, or provisioner-written.
+    """
+    by_name = dict(columns)
+    return "\n".join(
+        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {name} {by_name[name]};"
+        for name in missing
+    )
+
+
 def _missing_runtime_config_columns() -> list[str] | None:
-    """Names from store.RUNTIME_CONFIG_COLUMNS absent from the live
-    runtime_config table, in declared order -- or None if the table itself
-    doesn't exist yet, a distinct situation from "every column is missing"
-    (see check_runtime_config_schema).
+    """runtime_config's missing columns -- see _missing_columns(). Kept as a
+    named wrapper because check_runtime_config_schema() and its operator-facing
+    message are runtime_config-specific.
 
     store.py's schema is declared, not migrated (CREATE TABLE IF NOT EXISTS
     is a no-op against a table that already exists), so a column added there
@@ -563,34 +604,13 @@ def _missing_runtime_config_columns() -> list[str] | None:
     on its own -- this is exactly the gap that left review_draft_prs missing
     against the real Render database and made sync_config_db() crash with a
     raw UndefinedColumn instead of naming the problem.
-
-    Raises psycopg.Error on a connection failure -- callers already have
-    their own way of reporting that.
     """
-    with psycopg.connect(settings.database_url, connect_timeout=_DB_CONNECT_TIMEOUT) as conn:
-        row = conn.execute("SELECT to_regclass('public.runtime_config')").fetchone()
-        if (row[0] if row else None) is None:
-            return None
-        live = {
-            row[0]
-            for row in conn.execute(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_schema = 'public' AND table_name = 'runtime_config'"
-            ).fetchall()
-        }
-    return [name for name, _ in store.RUNTIME_CONFIG_COLUMNS if name not in live]
+    return _missing_columns("runtime_config", store.RUNTIME_CONFIG_COLUMNS)
 
 
 def _runtime_config_alter_statements(missing: list[str]) -> str:
-    """One `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` line per name in
-    `missing`, in the type each is declared with in
-    store.RUNTIME_CONFIG_COLUMNS -- the exact, ready-to-run fix for the
-    no-migration-code gap _missing_runtime_config_columns() documents."""
-    by_name = dict(store.RUNTIME_CONFIG_COLUMNS)
-    return "\n".join(
-        f"ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS {name} {by_name[name]};"
-        for name in missing
-    )
+    """The ready-to-run fix for runtime_config -- see _alter_statements()."""
+    return _alter_statements("runtime_config", store.RUNTIME_CONFIG_COLUMNS, missing)
 
 
 def check_runtime_config_schema() -> CheckResult:
