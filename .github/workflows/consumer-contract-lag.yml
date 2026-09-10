@@ -59,8 +59,12 @@ jobs:
           # in sync if none of those commits touched the contract.
           fetch-depth: 0
 
-      # NO `token:` HERE, DELIBERATELY. Both repositories are public, so
-      # actions/checkout reads the sibling anonymously.
+      # NO `token:` HERE, DELIBERATELY. Not "anonymous" -- actions/checkout
+      # still defaults to this workflow's own automatic GITHUB_TOKEN as the
+      # fetch credential -- but that token is scoped to THIS repository only
+      # and grants nothing on the sibling, so a public sibling checkout works
+      # regardless. persist-credentials: false below also keeps that token
+      # out of the checked-out consumer/.git/config.
       #
       # THE DAY EITHER REPOSITORY GOES PRIVATE, THIS STEP BREAKS -- and adding
       # a token is not a one-line fix. This workflow's automatic GITHUB_TOKEN
@@ -103,9 +107,15 @@ jobs:
       # Exit codes: 0 in sync, 1 the consumer is lagging (expected and
       # transient), 2 the check could not be performed. The full report is
       # written to the step summary in all three cases.
+      # actions/checkout creates its target directory (and runs `git init` in
+      # it) BEFORE it can fail on a private/renamed/deleted repository, so an
+      # unreachable sibling is not reliably distinguishable from "hasn't
+      # vendored a contract yet" by inspecting the directory alone -- the
+      # step's own recorded outcome is what actually tells them apart.
       - name: Compare the consumer's vendored contract against this repo's
         run: |
           uv run python -m scripts.check_consumer_contract \
             --consumer-root consumer \
             --bot-repo-root . \
+            --consumer-checkout-outcome "${{ steps.consumer.outcome }}" \
             --summary "$GITHUB_STEP_SUMMARY"

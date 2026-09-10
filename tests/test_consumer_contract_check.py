@@ -382,6 +382,49 @@ def test_pin_context_resolves_a_real_reachable_commit():
     assert "behind main" in result
 
 
+def test_a_failed_consumer_checkout_outcome_is_uncheckable_even_with_a_populated_looking_root(
+    tmp_path,
+):
+    """actions/checkout creates its target directory (and git-inits it)
+    BEFORE it can fail on a private/renamed/deleted repository, so a real
+    checkout failure can still leave a directory that load_consumer alone
+    cannot tell apart from 'not vendored yet'. --consumer-checkout-outcome
+    is the actual signal, and it must be checked before anything else."""
+    consumer_root = tmp_path / "consumer"
+    _write_consumer(consumer_root, _contract(), None)  # looks perfectly fine
+    exit_code = ccc.main([
+        "--consumer-root", str(consumer_root),
+        "--bot-contract", _text(_contract()),
+        "--committed-contract", str(tmp_path / "nonexistent.json"),
+        "--consumer-checkout-outcome", "failure",
+        "--summary", str(tmp_path / "summary.md"),
+    ])
+    assert exit_code == 2
+    assert "did not succeed" in (tmp_path / "summary.md").read_text(encoding="utf-8")
+
+
+def test_a_broken_pin_context_never_overrides_an_otherwise_valid_verdict(monkeypatch, tmp_path):
+    """The pin is report context only -- a failure resolving it (e.g. an
+    undecodable git commit message) must not destroy an otherwise-valid
+    IN_SYNC/LAGGING result by falling through to main()'s blanket
+    UNCHECKABLE handler."""
+    contract = _contract()
+    consumer_root = tmp_path / "consumer"
+    _write_consumer(consumer_root, contract, "e" * 40)
+
+    def _boom(*args, **kwargs):
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad byte")
+
+    monkeypatch.setattr(ccc, "pin_context", _boom)
+    exit_code = ccc.main([
+        "--consumer-root", str(consumer_root),
+        "--bot-contract", _text(contract),
+        "--committed-contract", str(tmp_path / "nonexistent.json"),
+        "--summary", str(tmp_path / "summary.md"),
+    ])
+    assert exit_code == 0
+
+
 def test_the_pin_is_absent_from_the_verdict_but_present_in_the_report(tmp_path):
     contract = _contract()
     consumer_root = tmp_path / "consumer"

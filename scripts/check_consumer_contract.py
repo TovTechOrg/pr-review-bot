@@ -325,10 +325,14 @@ def load_consumer(root: Path) -> tuple[str | None, str | None, str | None]:
 def pin_context(sha: str, repo_root: Path) -> str | None:
     """A human-readable sentence about where `sha` sits relative to HEAD.
 
-    The pin is REPORT CONTEXT ONLY -- see the module docstring -- so any
-    failure here (bad format, sha not found, git error) returns None rather
-    than raising: it must never abort the comparison the rest of this module
-    exists to perform.
+    The pin is REPORT CONTEXT ONLY -- see the module docstring. This never
+    RAISES on a bad format or a git failure (the caller in _build_report()
+    also wraps this call in its own try/except as a second guarantee, since
+    the pin must never be able to override an otherwise-valid verdict): a
+    malformed sha or an unreachable commit still return an explanatory
+    STRING rather than None, so the report can say what went wrong; None is
+    returned only when the sha itself resolves but a later `git` call
+    (rev-list/show) fails for an unrelated reason.
 
     The sha is validated against spec section 5.5's exact pinned format
     (40 lowercase hex characters) BEFORE it reaches subprocess, with a fixed
@@ -375,6 +379,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--consumer-root", required=True, help="checkout directory for the consumer repository"
+    )
+    parser.add_argument(
+        "--consumer-checkout-outcome",
+        default="success",
+        help=(
+            "the outcome of the workflow step that checked out --consumer-root "
+            "(e.g. GitHub Actions' steps.<id>.outcome). A non-'success' value is "
+            "UNCHECKABLE regardless of what --consumer-root contains -- actions/checkout "
+            "creates its target directory (and runs `git init` in it) before it can fail "
+            "on a private/renamed/deleted repository, so an unreachable sibling is NOT "
+            "reliably distinguishable from 'not vendored yet' by inspecting the directory "
+            "alone. Left at its default when running this script outside that workflow."
+        ),
     )
     parser.add_argument(
         "--bot-repo-root",
@@ -452,12 +469,30 @@ def _build_report(args: argparse.Namespace) -> Report:
                 ),
             )
 
+    if args.consumer_checkout_outcome != "success":
+        return Report(
+            verdict=UNCHECKABLE,
+            headline=(
+                f"the consumer checkout step did not succeed (outcome="
+                f"{args.consumer_checkout_outcome!r}) -- the sibling repository may be "
+                "private, renamed, or deleted; see spec section 6.2"
+            ),
+        )
+
     consumer_root = Path(args.consumer_root)
     contract_text, pin_sha, unreachable_reason = load_consumer(consumer_root)
     if unreachable_reason is not None:
         return Report(verdict=UNCHECKABLE, headline=unreachable_reason)
 
-    context = pin_context(pin_sha, Path(args.bot_repo_root)) if pin_sha else None
+    # The pin is report CONTEXT ONLY (see module docstring) -- a failure resolving
+    # its commit context (e.g. an undecodable `git show` message) must never
+    # override an otherwise-valid comparison result with UNCHECKABLE.
+    context = None
+    if pin_sha:
+        try:
+            context = pin_context(pin_sha, Path(args.bot_repo_root))
+        except Exception:  # noqa: BLE001 -- pin context is never allowed to affect the verdict
+            context = None
     return compare(bot_text, contract_text, pin=pin_sha, pin_context=context)
 
 

@@ -90,6 +90,18 @@ def test_the_compare_step_invokes_the_module_the_unit_tests_cover():
     assert f"--consumer-root {consumer_path}" in commands
 
 
+def test_the_compare_step_passes_the_consumer_checkout_s_own_recorded_outcome():
+    """actions/checkout creates its target directory before it can fail on a
+    private/renamed/deleted repository, so the checkout step's own outcome --
+    not just whatever load_consumer finds on disk -- is what actually
+    distinguishes an unreachable sibling from one that simply hasn't
+    vendored a contract yet."""
+    commands = " ".join(step.get("run", "") for step in _steps())
+    consumer_step_id = _consumer_checkout_step()["id"]
+    assert "--consumer-checkout-outcome" in commands
+    assert f"steps.{consumer_step_id}.outcome" in commands
+
+
 def test_the_blocking_workflow_is_untouched_and_still_names_no_sibling():
     text = _CI_WORKFLOW.read_text(encoding="utf-8")
     assert "onboarding-wizard" not in text
