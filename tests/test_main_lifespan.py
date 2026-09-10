@@ -409,3 +409,56 @@ async def test_lifespan_fails_loudly_when_dashboard_session_secret_is_too_short(
     with pytest.raises(RuntimeError, match="DASHBOARD_SESSION_SECRET"):
         async with main.lifespan(main.app):
             pass
+
+
+async def test_a_row_with_only_the_contract_required_columns_boots(
+    monkeypatch, db_exec, db_query
+):
+    """Sufficiency half of contracts/provisioning.json's central claim: a
+    runtime_config row carrying ONLY provisioner_required plus one
+    provisioner_required_one_of column -- exactly what the contract tells a
+    provisioner to write, and nothing more -- must boot. If it does not, the
+    contract is understating what the provisioner owes and the 2026-09-09
+    incident (18 of 22 columns NULL forever) is reachable again.
+
+    The necessity half is test_lifespan_refuses_to_start_without_provider
+    above; the static half is
+    tests/test_provisioning_contract.py::test_provisioner_required_is_exactly_
+    the_boot_gate_s_three_columns.
+    """
+    import json
+    from pathlib import Path
+
+    contract = json.loads(
+        (Path(__file__).resolve().parent.parent / "contracts" / "provisioning.json")
+        .read_text(encoding="utf-8")
+    )
+    required = contract["runtime_config"]["provisioner_required"]
+    assert required == ["id", "provider", "updated_at"]
+    one_of = contract["runtime_config"]["provisioner_required_one_of"]
+    assert "gemini_key_index" in one_of
+
+    monkeypatch.setattr(dispatcher, "run_forever", _hang_forever)
+    monkeypatch.setattr(settings, "github_app_installation_id", 12345)
+    monkeypatch.setattr(main.github_app, "discover_installation_id_for_app", lambda: 12345)
+
+    # Exactly what a minimal provisioner writes: the required columns plus
+    # the chosen provider's key-slot index. Every other column is left
+    # absent, i.e. NULL, for store.init_pool()'s backfill to fill.
+    db_exec("DELETE FROM runtime_config WHERE id = 1")
+    db_exec(
+        "INSERT INTO runtime_config (id, provider, updated_at, gemini_key_index) "
+        "VALUES (1, 'gemini', '2026-01-01T00:00:00+00:00', 0)"
+    )
+
+    async with main.lifespan(main.app):
+        pass
+
+    # Distinguishes a working backfill from a row that was never actually
+    # narrow: every bot_backfilled column must have come back non-NULL.
+    # key_usage_token_cap is correctly absent from that list -- it is in
+    # no_default_by_design, and a NULL cap is "intentionally disabled".
+    backfilled = [entry["column"] for entry in contract["runtime_config"]["bot_backfilled"]]
+    row = db_query(f"SELECT {', '.join(backfilled)} FROM runtime_config WHERE id = 1")[0]
+    still_null = [name for name, value in zip(backfilled, row) if value is None]
+    assert not still_null, f"backfill left these NULL: {still_null}"

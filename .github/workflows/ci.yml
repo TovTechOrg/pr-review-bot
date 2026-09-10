@@ -52,8 +52,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --dev
 
-      # No Postgres service: gen_docs reads class metadata and module
-      # constants only, never the database and never a configured value.
+      # No Postgres service: gen_docs and gen_contract both read class
+      # metadata and module constants only, never the database and never a
+      # configured value.
       - name: Regenerate reference docs
         run: uv run python -m scripts.gen_docs
 
@@ -61,6 +62,19 @@ jobs:
         run: |
           git add -A guide/reference/
           git diff --cached --exit-code guide/reference/
+
+      # The provisioning contract is vendored verbatim into the sibling
+      # provisioning repository, so a stale copy here silently misinforms
+      # the other repo's parity tests. This check is purely local -- no
+      # sibling checkout, no pinned ref, no network -- because the producer
+      # must never be blocked on the consumer.
+      - name: Regenerate the provisioning contract
+        run: uv run python -m scripts.gen_contract
+
+      - name: Fail if the provisioning contract is stale
+        run: |
+          git add -A contracts/
+          git diff --cached --exit-code contracts/
 
   pages:
     needs: [lint-and-test, docs]
