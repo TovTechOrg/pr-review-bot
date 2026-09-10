@@ -50,6 +50,40 @@ def effective_caps() -> tuple[int | None, time | None]:
     return (_tokens, reset)
 
 
+def problems(config: dict) -> list[str]:
+    """Every reason `config` is an unusable usage-cap pair, as
+    human-readable strings. Empty list means usable.
+
+    For WRITERS -- scripts/deploy.py's --sync-config-db guard,
+    dashboard/environment.py's config PATCH, main.py's boot gate. The read
+    path (effective_caps below) deliberately does NOT call this: its
+    contract is to degrade to (None, None) rather than raise, so a bad row
+    already in the database cannot take a dispatcher tick down. This
+    function exists so a bad row stops getting written in the first place.
+
+    A None cap is valid ("cap intentionally disabled", see the module
+    docstring), so only a non-positive one is rejected -- matching
+    config.py's `gt=0` on the same field, which stopped applying the moment
+    Settings stopped being this value's runtime source.
+    """
+    found = []
+    cap = config.get("key_usage_token_cap")
+    if cap is not None and cap <= 0:
+        found.append(f"key_usage_token_cap={cap!r} must be > 0 (or null for no cap)")
+    reset = config.get("key_usage_reset_time_utc")
+    if reset is None:
+        found.append("key_usage_reset_time_utc is not set")
+    else:
+        try:
+            time.fromisoformat(reset)
+        except (TypeError, ValueError):
+            found.append(
+                f"key_usage_reset_time_utc={reset!r} is not an HH:MM or "
+                "HH:MM:SS wall-clock time"
+            )
+    return found
+
+
 def set_override_cache(tokens: int | None, reset: str | None) -> None:
     """`reset` is the raw "HH:MM"/"HH:MM:SS" text as stored; parsing (and
     rejecting garbage) happens in effective_caps, so a malformed value degrades

@@ -57,3 +57,53 @@ def test_effective_caps_returns_a_token_cap_and_a_reset_time():
     tokens, reset = usage_cap_config.effective_caps()
     assert tokens == 20_000
     assert reset == time(4, 0)
+
+
+def test_problems_empty_for_a_usable_pair():
+    assert usage_cap_config.problems(
+        {"key_usage_token_cap": 100_000, "key_usage_reset_time_utc": "04:00:00"}
+    ) == []
+
+
+def test_problems_accepts_the_two_part_reset_form():
+    assert usage_cap_config.problems(
+        {"key_usage_token_cap": 100_000, "key_usage_reset_time_utc": "04:00"}
+    ) == []
+
+
+def test_problems_accepts_a_null_cap_as_intentionally_disabled():
+    # A None cap with a real reset time is a valid configured state, not
+    # "unset" -- see this module's own docstring.
+    assert usage_cap_config.problems(
+        {"key_usage_token_cap": None, "key_usage_reset_time_utc": "04:00:00"}
+    ) == []
+
+
+def test_problems_rejects_an_unparseable_reset_time():
+    found = usage_cap_config.problems(
+        {"key_usage_token_cap": 100_000, "key_usage_reset_time_utc": "4pm"}
+    )
+    assert any("key_usage_reset_time_utc" in reason for reason in found)
+
+
+def test_problems_rejects_a_non_positive_cap():
+    for cap in (0, -5):
+        found = usage_cap_config.problems(
+            {"key_usage_token_cap": cap, "key_usage_reset_time_utc": "04:00:00"}
+        )
+        assert any("key_usage_token_cap" in reason for reason in found), cap
+
+
+def test_problems_reports_a_missing_reset_time_as_not_set():
+    assert "key_usage_reset_time_utc is not set" in usage_cap_config.problems(
+        {"key_usage_token_cap": 100_000, "key_usage_reset_time_utc": None}
+    )
+
+
+def test_effective_caps_still_disables_rather_than_raising_on_a_bad_pair():
+    # problems() is for WRITERS. The read path's contract is unchanged: it
+    # degrades, never raises, so a bad row already in the database cannot
+    # take the dispatcher down mid-tick.
+    usage_cap_config.set_override_cache(100_000, "4pm")
+    assert usage_cap_config.effective_caps() == (None, None)
+    usage_cap_config.reset_override_cache()
