@@ -2172,14 +2172,27 @@ def test_sync_config_db_writes_settings_values_into_runtime_config(
     assert row == (45.0, 900.0, 1.5, 20000, "04:00:00")
 
 
-def test_sync_config_db_refuses_an_unparseable_reset_time(monkeypatch, capsys):
-    """The usage-cap pair had NO guard on this path -- only Settings' own
-    `time` coercion, which an already-stored bad value bypasses entirely."""
+def test_sync_config_db_consults_the_usage_cap_predicate(monkeypatch, capsys):
+    """Asserts the WIRING, not a fabricated Settings state.
+
+    This path writes FROM Settings, whose own `time` typing and `gt=0`
+    bound make an invalid usage-cap pair unreachable from .env.config -- so
+    monkeypatching the field to a raw "4pm" (as an earlier version of this
+    test did) tests a state that cannot occur, and forced deploy.py to
+    duck-type a field whose type is guaranteed. What is worth pinning is
+    that the shared predicate is consulted at all and its reasons reach the
+    operator: defense in depth for the day Settings' types loosen or a
+    third caller appears.
+    """
     monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
     monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(None))
-    monkeypatch.setattr(deploy.settings, "key_usage_reset_time_utc", "4pm", raising=False)
+    monkeypatch.setattr(
+        deploy.usage_cap_config,
+        "problems",
+        lambda config: ["key_usage_reset_time_utc is unusable"],
+    )
     assert deploy.sync_config_db() == 2
-    assert "key_usage_reset_time_utc" in capsys.readouterr().err
+    assert "key_usage_reset_time_utc is unusable" in capsys.readouterr().err
 
 
 def test_sync_config_db_cooldown_guard_uses_the_shared_predicate(monkeypatch, capsys):

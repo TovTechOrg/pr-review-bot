@@ -1295,13 +1295,12 @@ def sync_config_db() -> int:
         if column in _DB_SYNCED_COLUMNS
     }
     # The column is TEXT; usage_cap_config parses it back with
-    # time.fromisoformat. Guarded with hasattr rather than isinstance(...,
-    # datetime.time) so a test double that stores the raw wire string
-    # directly is validated by problems() below instead of crashing here.
-    raw_reset = seed["key_usage_reset_time_utc"]
-    seed["key_usage_reset_time_utc"] = (
-        raw_reset.isoformat() if hasattr(raw_reset, "isoformat") else raw_reset
-    )
+    # time.fromisoformat. Unconditional: Settings types this field as
+    # `time`, so it always has .isoformat() -- the same guarantee
+    # review_queue/runtime_config_defaults.py relies on for the class
+    # default. Duck-typing it would only accommodate a Settings state that
+    # cannot occur.
+    seed["key_usage_reset_time_utc"] = settings.key_usage_reset_time_utc.isoformat()
 
     # One shared predicate per field group -- the CLI, the dashboard PATCH,
     # and the boot gate can never disagree about what counts as usable.
