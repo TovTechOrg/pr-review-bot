@@ -1,0 +1,111 @@
+name: Consumer contract lag (advisory)
+
+# ADVISORY ONLY -- this workflow must never gate a push, a pull request, or a
+# deploy (spec section 6.2: "a bot push must not be gated on a landed wizard
+# commit"). The mechanism is the trigger list below: `schedule` and
+# `workflow_dispatch`, and nothing else. Because it never runs on a commit or
+# a PR it can never produce a check run against one, which in turn means it
+# cannot be selected as a required status check in branch protection -- the
+# property is structural, not a convention someone has to remember.
+#
+# The BLOCKING half of the contract lives entirely in ci.yml's `docs` job and
+# is purely local: no sibling checkout, no pin, no network (spec 5.4).
+# tests/test_ci_workflow.py asserts ci.yml never even names the consumer
+# repository, which is why this job is a separate file rather than a job there.
+#
+# A RED RUN HERE MEANS THE CONSUMER HAS NOT CAUGHT UP YET. That is a normal,
+# transient state between a contract change landing here and the consumer's
+# update_bot_contract.py run landing there. It is NOT covered by CLAUDE.md's
+# "never push with a red suite" rule, which is about pytest/ruff and the
+# blocking CI job. Exit 2 -- not 1 -- is the "this check could not run at
+# all" signal worth actual alarm.
+on:
+  schedule:
+    # Daily. The lag this reports is closed by a human running a script in
+    # the other repository, so an hourly cadence would multiply the noise
+    # without shortening that response, while a weekly one would let a
+    # contract change sit unpropagated for up to seven days -- exactly the
+    # window in which a freshly provisioned deployment is misconfigured (the
+    # 2026-09-09 incident's shape). Actions minutes are free on public
+    # repositories, so daily costs nothing.
+    #
+    # :17 rather than :00 because GitHub's scheduler is heavily oversubscribed
+    # on the hour and delays runs queued there.
+    #
+    # GitHub disables scheduled workflows in a repository with no activity
+    # for 60 days. If this silently stops running, check that first.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+# Least privilege: this job reads two repositories and writes a step
+# summary. It needs no write scope at all.
+permissions:
+  contents: read
+
+concurrency:
+  group: consumer-contract-lag
+  cancel-in-progress: true
+
+jobs:
+  consumer-contract-lag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@v7
+        with:
+          # Full history so the consumer's pinned bot sha can be measured
+          # against main. The pin is REPORT CONTEXT ONLY and never affects
+          # the verdict: a pin can be forty commits old and still perfectly
+          # in sync if none of those commits touched the contract.
+          fetch-depth: 0
+
+      # NO `token:` HERE, DELIBERATELY. Both repositories are public, so
+      # actions/checkout reads the sibling anonymously.
+      #
+      # THE DAY EITHER REPOSITORY GOES PRIVATE, THIS STEP BREAKS -- and adding
+      # a token is not a one-line fix. This workflow's automatic GITHUB_TOKEN
+      # is scoped to THIS repository only and grants nothing on the sibling,
+      # so a private sibling would need a PAT or a GitHub App installation
+      # token: a new secret, with everything CLAUDE.md's secret-handling
+      # section implies. Treat a sudden auth failure here as that event, not
+      # a flake.
+      #
+      # continue-on-error so an unreachable sibling still produces a written
+      # report (verdict UNCHECKABLE, exit 2) rather than an opaque action
+      # failure with an empty step summary.
+      - name: Check out the consumer's vendored copy
+        id: consumer
+        continue-on-error: true
+        uses: actions/checkout@v7
+        with:
+          repository: TovTechOrg/onboarding-wizard
+          ref: main
+          path: consumer
+          persist-credentials: false
+          sparse-checkout: |
+            contracts/provisioning.json
+            .ci/pr-review-bot-ref
+          sparse-checkout-cone-mode: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.0.1
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      # No Postgres service: gen_contract reads class metadata and module
+      # constants only, never the database and never a configured value --
+      # the same constraint ci.yml's docs job documents.
+      #
+      # Exit codes: 0 in sync, 1 the consumer is lagging (expected and
+      # transient), 2 the check could not be performed. The full report is
+      # written to the step summary in all three cases.
+      - name: Compare the consumer's vendored contract against this repo's
+        run: |
+          uv run python -m scripts.check_consumer_contract \
+            --consumer-root consumer \
+            --bot-repo-root . \
+            --summary "$GITHUB_STEP_SUMMARY"
