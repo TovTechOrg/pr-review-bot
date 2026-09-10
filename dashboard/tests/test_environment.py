@@ -164,11 +164,11 @@ async def test_patch_environment_config_sets_provider_override(db):
 
 
 async def test_patch_environment_config_partial_cooldown_merges_with_current_values(db):
-    store.set_cooldown_override(1.0, 2.0, 3.0, "2026-01-01T00:00:00+00:00")
+    store.set_cooldown_override(1.0, 200.0, 3.0, "2026-01-01T00:00:00+00:00")
     client = await _client()
     resp = await client.patch("/api/environment/config", json={"cooldown_base_seconds": 9.0})
     assert resp.status_code == 200
-    assert store.get_cooldown_overrides() == (9.0, 2.0, 3.0)
+    assert store.get_cooldown_overrides() == (9.0, 200.0, 3.0)
 
 
 async def test_get_environment_config_reflects_tuning_knob_overrides(db):
@@ -357,6 +357,69 @@ async def test_get_environment_config_includes_idle_sleep_seconds(db):
     client = await _client()
     resp = await client.get("/api/environment/config")
     assert "dispatcher_idle_sleep_seconds" in resp.json()
+
+
+async def test_config_patch_rejects_an_unparseable_reset_time(db):
+    """Before this, "4pm" was stored and silently disabled the usage cap
+    forever, with a 200 and the field reported as applied."""
+    client = await _client()
+    resp = await client.patch(
+        "/api/environment/config", json={"usage_cap_reset": "4pm"}
+    )
+    body = resp.json()
+    assert "usage_cap_reset" not in body["applied"]
+    assert any(f["key"] == "usage_cap_reset" for f in body["failed"])
+
+
+async def test_config_patch_rejects_a_non_positive_token_cap(db):
+    client = await _client()
+    resp = await client.patch(
+        "/api/environment/config", json={"usage_cap_tokens": 0}
+    )
+    body = resp.json()
+    assert "usage_cap_tokens" not in body["applied"]
+    assert any(f["key"] == "usage_cap_tokens" for f in body["failed"])
+
+
+async def test_config_patch_rejects_a_cooldown_factor_below_one(db):
+    """effective_config() discards the whole triple on factor < 1, and its
+    callers must defer -- so this silently stalled every re-review."""
+    client = await _client()
+    resp = await client.patch(
+        "/api/environment/config", json={"cooldown_factor": 0.5}
+    )
+    body = resp.json()
+    assert "cooldown_factor" not in body["applied"]
+    assert any(f["key"] == "cooldown_factor" for f in body["failed"])
+
+
+async def test_config_patch_rejects_a_partial_cooldown_that_breaks_the_triple(db):
+    """The merge is against CURRENT values, so a single field can make the
+    stored triple unusable. Validation must run on the merged result, not
+    on the submitted field alone."""
+    client = await _client()
+    await client.patch(
+        "/api/environment/config",
+        json={"cooldown_base_seconds": 300.0, "cooldown_max_seconds": 3600.0,
+              "cooldown_factor": 2.0},
+    )
+    resp = await client.patch(
+        "/api/environment/config", json={"cooldown_base_seconds": 9000.0}
+    )
+    body = resp.json()
+    assert "cooldown_base_seconds" not in body["applied"]
+
+
+async def test_config_patch_still_accepts_a_null_token_cap(db):
+    # A null cap is only a valid *configured* state when paired with a real
+    # reset time (see usage_cap_config's own docstring) -- seed one first,
+    # since the `db` fixture's TRUNCATE leaves no row at all for this test.
+    store.set_usage_cap_override(100_000, "04:00:00", "2026-01-01T00:00:00+00:00")
+    client = await _client()
+    resp = await client.patch(
+        "/api/environment/config", json={"usage_cap_tokens": None}
+    )
+    assert "usage_cap_tokens" in resp.json()["applied"]
 
 
 async def test_slot_config_patch_sets_a_model_for_a_spare_slot(db):

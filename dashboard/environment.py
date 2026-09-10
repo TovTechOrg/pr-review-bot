@@ -23,7 +23,7 @@ import render_client
 from config_deps import CREDENTIAL_FAMILIES, MAX_CREDENTIAL_SLOTS, credential_slot_vars
 from providers import catalog, credentials, registry, vertex_credentials
 from providers.registry import slot_env_name
-from review_queue import dispatcher_tuning_config, store
+from review_queue import cooldown_config, dispatcher_tuning_config, store, usage_cap_config
 
 logger = logging.getLogger(__name__)
 
@@ -775,11 +775,35 @@ def _apply_config_patch(payload: EnvironmentConfigPatch) -> dict:
     if cooldown_fields:
         try:
             current_base, current_cap, current_factor = store.get_cooldown_overrides()
-            base = cooldown_fields.get("cooldown_base_seconds", current_base)
-            cap = cooldown_fields.get("cooldown_max_seconds", current_cap)
-            factor = cooldown_fields.get("cooldown_factor", current_factor)
-            store.set_cooldown_override(base, cap, factor, now)
-            applied.extend(cooldown_fields.keys())
+            merged = {
+                "cooldown_base_seconds": cooldown_fields.get(
+                    "cooldown_base_seconds", current_base),
+                "cooldown_max_seconds": cooldown_fields.get(
+                    "cooldown_max_seconds", current_cap),
+                "cooldown_factor": cooldown_fields.get(
+                    "cooldown_factor", current_factor),
+            }
+            # Validated as a whole group against the MERGED result, not the
+            # submitted field alone: this endpoint merges partial input with
+            # current values, so one field can make the stored triple
+            # unusable on its own. Rejected together and never partially
+            # written -- the same shape the 9 tuning knobs below use, and for
+            # the same reason (cooldown_config.effective_config() discards an
+            # invalid triple whole, which makes every re-review defer with no
+            # boot-time signal).
+            invalid = cooldown_config.problems(merged)
+            if invalid:
+                failed.extend(
+                    {"key": k, "error": "; ".join(invalid)} for k in cooldown_fields
+                )
+            else:
+                store.set_cooldown_override(
+                    merged["cooldown_base_seconds"],
+                    merged["cooldown_max_seconds"],
+                    merged["cooldown_factor"],
+                    now,
+                )
+                applied.extend(cooldown_fields.keys())
         except Exception as exc:  # noqa: BLE001
             failed.extend({"key": k, "error": type(exc).__name__} for k in cooldown_fields)
 
@@ -790,8 +814,18 @@ def _apply_config_patch(payload: EnvironmentConfigPatch) -> dict:
             current_tokens, current_reset = store.get_usage_cap_overrides()
             tokens = usage_fields.get("usage_cap_tokens", current_tokens)
             reset = usage_fields.get("usage_cap_reset", current_reset)
-            store.set_usage_cap_override(tokens, reset, now)
-            applied.extend(usage_fields.keys())
+            # This endpoint's field names are usage_cap_*; the predicate is
+            # keyed by COLUMN name, so translate rather than duplicating it.
+            invalid = usage_cap_config.problems(
+                {"key_usage_token_cap": tokens, "key_usage_reset_time_utc": reset}
+            )
+            if invalid:
+                failed.extend(
+                    {"key": k, "error": "; ".join(invalid)} for k in usage_fields
+                )
+            else:
+                store.set_usage_cap_override(tokens, reset, now)
+                applied.extend(usage_fields.keys())
         except Exception as exc:  # noqa: BLE001
             failed.extend({"key": k, "error": type(exc).__name__} for k in usage_fields)
 

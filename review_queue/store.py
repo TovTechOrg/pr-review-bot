@@ -1038,10 +1038,20 @@ def set_cooldown_override(
     """Set the (base, cap, factor) override triple, or clear a field with None.
 
     Upserts the singleton row -- same CHECK (id = 1) guarantee as
-    set_provider_override. Writes exactly the three values it's given; the
-    only caller, scripts/deploy.py::sync_config_db(), always writes the full
-    triple straight from .env.config's resolved Settings values -- there is
-    no partial-field write to merge with a current value for.
+    set_provider_override. Writes exactly the three values it's given.
+
+    Two callers: scripts/deploy.py::sync_config_db(), which writes the full
+    triple from .env.config's resolved Settings values, and
+    dashboard/environment.py::_apply_config_patch(), which merges PARTIAL
+    input against the current row. Neither may call this without first
+    passing the merged result through cooldown_config.problems() -- this
+    function does not validate, and an invalid triple stored here is
+    discarded whole at read time, deferring every re-review with no
+    boot-time signal until main.py's gate catches it on the next restart.
+    An earlier version of this docstring claimed a single caller that always
+    wrote complete values; that assumption is what left this write path
+    unvalidated (see the 2026-09-10 cross-repo-contract-direction design,
+    section 4.2).
     """
     with _require_pool().connection() as conn:
         conn.execute(
@@ -1309,10 +1319,19 @@ def set_usage_cap_override(tokens: int | None, reset: str | None, now: str) -> N
     None.
 
     Upserts the singleton row -- same CHECK (id = 1) guarantee as
-    set_provider_override. Writes exactly the two values it's given; the
-    only caller, scripts/deploy.py::sync_config_db(), always writes the full
-    pair straight from .env.config's resolved Settings values -- there is no
-    partial-field write to merge with a current value for.
+    set_provider_override. Writes exactly the two values it's given.
+
+    Two callers: scripts/deploy.py::sync_config_db(), which writes the full
+    pair from .env.config's resolved Settings values, and
+    dashboard/environment.py::_apply_config_patch(), which merges PARTIAL
+    input against the current row. Neither may call this without first
+    passing the merged result through usage_cap_config.problems() -- this
+    function does not validate, and an invalid pair stored here is
+    discarded whole at read time (the cap fails OPEN) until main.py's gate
+    catches it on the next restart. An earlier version of this docstring
+    claimed a single caller that always wrote complete values; that
+    assumption is what left this write path unvalidated (see the
+    2026-09-10 cross-repo-contract-direction design, section 4.2).
     """
     with _require_pool().connection() as conn:
         conn.execute(
