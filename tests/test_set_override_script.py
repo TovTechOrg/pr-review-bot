@@ -33,8 +33,15 @@ def _temp_db(db, monkeypatch):
     set_override.py's own local-DB guard exists to refuse. Bypass it here for
     every ordinary test, without weakening the guard itself for the
     operator-mistake scenario it protects against in production; the guard's
-    own refusal behavior is exercised directly below, without this fixture."""
+    own refusal behavior is exercised directly below, without this fixture.
+
+    Also defaults every model probe (both the --model write path and the
+    activation-arming path) to a clean pass: most tests in this file activate
+    or configure a provider without caring about live entitlement at all, and
+    none of them run against a real credential. TestModelProbe overrides this
+    per-test where the probe's own behavior is what's under test."""
     monkeypatch.setattr(set_override, "_looks_like_local_test_db", lambda url: False)
+    monkeypatch.setattr(set_override.model_check, "problems", lambda *a, **k: [])
     yield
 
 
@@ -502,3 +509,114 @@ def test_still_accepts_a_real_remote_database_url(monkeypatch, capsys):
     """The guard must not fire on a normal hosted DATABASE_URL."""
     assert set_override.main(["groq"]) == 0
     assert "refusing to write" not in capsys.readouterr().err
+
+
+class TestModelProbe:
+    def test_uncallable_model_refuses_and_writes_nothing(self, monkeypatch, capsys):
+        monkeypatch.setattr(set_override.store, "init_pool", lambda: None)
+        monkeypatch.setattr(set_override, "_refuse_local_test_db", lambda: False)
+        monkeypatch.setattr(
+            set_override._override, "verify_render_slot", lambda p, i: (True, "ok")
+        )
+        monkeypatch.setattr(set_override.store, "get_key_index_override", lambda p: 0)
+        monkeypatch.setattr(set_override.store, "get_slot_config", lambda *a: {})
+
+        def _never(*a, **k):
+            raise AssertionError("must not write a refused model")
+
+        monkeypatch.setattr(set_override.store, "set_slot_config", _never)
+        monkeypatch.setattr(
+            set_override.model_check, "problems", lambda *a, **k: ["model_not_callable"]
+        )
+
+        code = set_override.main(["vertex", "--model", "gemini-3.1-flash-lite"])
+
+        assert code == 2
+        assert "model_not_callable" in capsys.readouterr().err
+
+    def test_skip_probe_writes_without_probing(self, monkeypatch, capsys):
+        written = []
+        monkeypatch.setattr(set_override.store, "init_pool", lambda: None)
+        monkeypatch.setattr(set_override, "_refuse_local_test_db", lambda: False)
+        monkeypatch.setattr(
+            set_override._override, "verify_render_slot", lambda p, i: (True, "ok")
+        )
+        monkeypatch.setattr(set_override.store, "get_key_index_override", lambda p: 0)
+        monkeypatch.setattr(set_override.store, "get_slot_config", lambda *a: {})
+        monkeypatch.setattr(set_override.store, "set_provider_override", lambda *a: None)
+        monkeypatch.setattr(
+            set_override.store, "set_slot_config", lambda *a, **k: written.append(k)
+        )
+
+        def _never(*a, **k):
+            raise AssertionError("--skip-probe must not probe")
+
+        monkeypatch.setattr(set_override.model_check, "problems", _never)
+
+        code = set_override.main(
+            ["vertex", "--model", "gemini-2.5-flash", "--skip-probe"]
+        )
+
+        assert code == 0
+        assert written
+        assert "skipped" in capsys.readouterr().err.lower()
+
+    def test_force_does_not_override_a_failed_probe(self, monkeypatch):
+        """--force governs the credential-presence check only. A model that
+        404s cannot be forced into production -- every review under it fails."""
+        monkeypatch.setattr(set_override.store, "init_pool", lambda: None)
+        monkeypatch.setattr(set_override, "_refuse_local_test_db", lambda: False)
+        monkeypatch.setattr(
+            set_override._override, "verify_render_slot", lambda p, i: (True, "ok")
+        )
+        monkeypatch.setattr(set_override.store, "get_key_index_override", lambda p: 0)
+        monkeypatch.setattr(set_override.store, "get_slot_config", lambda *a: {})
+        monkeypatch.setattr(
+            set_override.model_check, "problems", lambda *a, **k: ["model_not_callable"]
+        )
+
+        assert set_override.main(
+            ["vertex", "--model", "gemini-3.1-flash-lite", "--force"]
+        ) == 2
+
+    def test_activation_probes_the_target_slots_stored_model(self, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(set_override.store, "init_pool", lambda: None)
+        monkeypatch.setattr(set_override, "_refuse_local_test_db", lambda: False)
+        monkeypatch.setattr(
+            set_override._override, "verify_render_slot", lambda p, i: (True, "ok")
+        )
+        monkeypatch.setattr(set_override.store, "get_key_index_override", lambda p: 0)
+        monkeypatch.setattr(
+            set_override.store, "get_slot_config", lambda *a: {"model": "stored-model"}
+        )
+        monkeypatch.setattr(set_override.store, "set_key_index_override", lambda *a: None)
+        monkeypatch.setattr(set_override.store, "set_provider_override", lambda *a: None)
+        monkeypatch.setattr(
+            set_override.model_check,
+            "problems",
+            lambda provider, slot, model, **k: seen.update(
+                {"provider": provider, "slot": slot, "model": model}
+            ) or [],
+        )
+
+        assert set_override.main(["vertex", "--index", "1"]) == 0
+        assert seen == {"provider": "vertex", "slot": 1, "model": "stored-model"}
+
+    def test_model_only_with_no_activate_still_probes_the_new_model(self, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(set_override.store, "init_pool", lambda: None)
+        monkeypatch.setattr(set_override, "_refuse_local_test_db", lambda: False)
+        monkeypatch.setattr(set_override.store, "get_key_index_override", lambda p: 0)
+        monkeypatch.setattr(set_override.store, "get_slot_config", lambda *a: {})
+        monkeypatch.setattr(set_override.store, "set_slot_config", lambda *a, **k: None)
+        monkeypatch.setattr(
+            set_override.model_check,
+            "problems",
+            lambda provider, slot, model, **k: seen.update({"model": model}) or [],
+        )
+
+        assert set_override.main(
+            ["vertex", "--model", "gemini-2.5-flash", "--no-activate"]
+        ) == 0
+        assert seen == {"model": "gemini-2.5-flash"}

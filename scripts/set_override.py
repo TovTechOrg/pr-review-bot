@@ -23,6 +23,9 @@ rate-table entry for this provider -- naming the models that ARE known -- and
 still sets the override: an unpriced model runs fine, it simply produces no
 cost estimate on the review comment (providers/pricing.py::
 estimate_cost_usd returns None; design spec 2026-08-18 section 6b).
+It DOES refuse a model that fails its live entitlement probe, which is a
+different failure: an unpriced model works and reports no cost, an
+unentitled one 404s every review. --skip-probe opts out of that live call.
 
 The model override is per-provider, not global: setting one only changes the
 model used when that specific provider is active, so flipping the active
@@ -66,7 +69,7 @@ from urllib.parse import urlsplit
 
 import render_client as _render
 from config import settings
-from providers import active_model, pricing, registry
+from providers import active_model, model_check, pricing, registry
 from review_queue import store
 from scripts import _override
 from scripts._prereqs import _looks_like_local_test_db
@@ -127,6 +130,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--list",
         action="store_true",
         help="show each provider's slots, active index, and active model (must be used alone)",
+    )
+    parser.add_argument(
+        "--skip-probe",
+        action="store_true",
+        help=(
+            "do not make the live call that proves the model is actually "
+            "callable (offline use, or a break-glass repair while the "
+            "provider is unreachable)"
+        ),
     )
     return parser
 
@@ -342,6 +354,39 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     store.init_pool()
 
+    # Two different rules, deliberately. An UNPRICED model runs fine and
+    # simply produces no cost estimate, so it warns (above). An UNCALLABLE
+    # model 404s every review, so it refuses. --skip-probe is the only way
+    # past this, and it says what it skipped.
+    if args.model is not None and not args.skip_probe:
+        target_index = (
+            args.index
+            if args.index is not None
+            else (0 if args.clear_index else (store.get_key_index_override(args.provider) or 0))
+        )
+        existing = store.get_slot_config(args.provider, target_index) or {}
+        issues = model_check.problems(
+            args.provider,
+            target_index,
+            stripped_model,
+            vertex_gcp_project=existing.get("vertex_gcp_project"),
+            vertex_gcp_location=existing.get("vertex_gcp_location"),
+        )
+        if issues:
+            print(
+                f"refusing to set the model: {args.provider} model "
+                f"{stripped_model!r} failed its entitlement probe ({issues[0]}). "
+                "Use --skip-probe to write it anyway.",
+                file=sys.stderr,
+            )
+            return 2
+    elif args.model is not None and args.skip_probe:
+        print(
+            f"warning: skipped the entitlement probe for {stripped_model!r} "
+            "(--skip-probe) -- it has not been proven callable",
+            file=sys.stderr,
+        )
+
     # A pure "clear the key-index override, leave the active provider
     # alone" never verifies -- same as old set_api_key.py's --clear, which
     # never checked a credential before clearing one either. Clearing is
@@ -373,6 +418,29 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"refusing to set the override: {message}", file=sys.stderr)
             return 2
+
+        # Arming a slot makes ITS model live. The credential, project and
+        # location all belong to that slot, so a model verified elsewhere
+        # says nothing here -- and a row written before this gate existed is
+        # caught right now rather than on the next PR.
+        if not args.skip_probe and args.model is None:
+            armed = store.get_slot_config(args.provider, effective_index) or {}
+            arming_issues = model_check.problems(
+                args.provider,
+                effective_index,
+                armed.get("model") or "",
+                vertex_gcp_project=armed.get("vertex_gcp_project"),
+                vertex_gcp_location=armed.get("vertex_gcp_location"),
+            )
+            if arming_issues:
+                print(
+                    f"refusing to activate {args.provider} slot {effective_index}: "
+                    f"its configured model failed its entitlement probe "
+                    f"({arming_issues[0]}). Set a working model first, or use "
+                    "--skip-probe.",
+                    file=sys.stderr,
+                )
+                return 2
 
     # Index write before provider-activation write (not the reverse): these
     # are two separate statements, not one transaction (see the design doc's
