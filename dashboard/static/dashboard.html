@@ -855,6 +855,9 @@
         env_guided_needs_revalidate: "Project or location changed — validate again before applying.",
         env_config_validate: "Validate",
         env_config_needs_revalidate: "Changed — click Validate before Save.",
+        env_config_model_unverified_hint: "Listed by the provider — verified when you validate or save.",
+        err_model_not_callable: "This model is listed by the provider, but this project isn't entitled to call it. Pick a different model.",
+        err_model_probe_unavailable: "Couldn't verify this model right now (provider unreachable). Try again.",
         env_guided_no_models: "This credential is valid but reports no usable models — nothing to apply.",
         env_guided_missing_input: "Fill in every field before validating.",
         env_guided_api_key_placeholder: "API key",
@@ -1012,6 +1015,9 @@
         env_guided_needs_revalidate: "הפרויקט או המיקום השתנו — יש לאמת מחדש לפני ההחלה.",
         env_config_validate: "אמת",
         env_config_needs_revalidate: "השתנה — יש ללחוץ על אמת לפני שמירה.",
+        env_config_model_unverified_hint: "רשום על ידי הספק — יאומת בעת אימות או שמירה.",
+        err_model_not_callable: "מודל זה רשום על ידי הספק, אך לפרויקט זה אין הרשאה לקרוא לו. בחר מודל אחר.",
+        err_model_probe_unavailable: "לא ניתן היה לאמת מודל זה כעת (הספק אינו זמין). נסה שוב.",
         env_guided_no_models: "האישור תקין אך לא מדווח על מודלים שמישים — אין מה להחיל.",
         env_guided_missing_input: "מלא את כל השדות לפני האימות.",
         env_guided_api_key_placeholder: "מפתח API",
@@ -2200,6 +2206,11 @@
     document.getElementById("saveRenderVarsBtn").addEventListener("click", saveRenderVars);
 
     const LLM_PROVIDERS = ["gemini", "groq", "vertex"];
+    const MODEL_VAR_BY_PROVIDER = {
+      gemini: "GEMINI_MODEL",
+      groq: "GROQ_MODEL",
+      vertex: "VERTEX_MODEL",
+    };
     let currentConfig = { key_index: {} };
     let currentAvailableKeySlots = { gemini: [], groq: [], vertex: [] };
     // Scoped separately so an invalid VERTEX_GCP_PROJECT/VERTEX_GCP_LOCATION field edited
@@ -2431,18 +2442,18 @@
     // modal's own project cache.
     const rowVertexProjectCache = new Map();
     // Which rows have been live-confirmed for their CURRENTLY selected
-    // project+location pair THIS PAGE LOAD -- but a row's stored value is
-    // already known-good (it passed this same check when it was saved), so
-    // Save's disabled state (below) doesn't key off this alone. This only
-    // grows via a live "Validate" success and shrinks via a dropdown change
-    // to something other than the stored baseline (see rowVertexBaseline).
-    const rowVertexValidated = new Set();
-    // Each vertex row's project/location AS LAST SAVED -- lets a dropdown
-    // change re-enable Save without another live call when the operator
-    // picks the pair right back to what's already on file, and disable it
-    // for anything else. Repopulated on every render from the fetched
-    // slot_config, so it always reflects the server's current state.
-    const rowVertexBaseline = new Map();
+    // model (and, for vertex, project+location) THIS PAGE LOAD -- but a
+    // row's stored values are already known-good (they passed this same
+    // check when they were saved), so Save's disabled state doesn't key off
+    // this alone. Grows via a live "Validate" success, shrinks via a change
+    // away from the stored baseline. Provider-agnostic now that gemini is
+    // probed too -- only vertex used to have anything per-row to validate.
+    const rowValidated = new Set();
+    // Each row's values AS LAST SAVED -- lets a change back to what's
+    // already on file re-enable Save without another live call.
+    // Repopulated on every render from the fetched slot_config, so it
+    // always reflects the server's current state.
+    const rowBaseline = new Map();
 
     function renderSlotConfigRows(slotConfigs) {
       const container = document.getElementById("slotConfigRows");
@@ -2453,11 +2464,15 @@
           const rowId = `slotCfg-${provider}-${slot}`;
           const rowKey = `${provider}-${slot}`;
           const modelOptions = `<option value=""></option>${modelOptionsHtml(provider, entry.model || "")}`;
+          rowBaseline.set(rowKey, {
+            model: entry.model || "",
+            project: entry.vertex_gcp_project || "",
+            location: entry.vertex_gcp_location || "",
+          });
           let vertexFields = "";
           if (provider === "vertex") {
             const currentProject = entry.vertex_gcp_project || "";
             const currentLocation = entry.vertex_gcp_location || vertexLocations[0] || "";
-            rowVertexBaseline.set(rowKey, { project: currentProject, location: currentLocation });
             // Never fetched (or a page reload since) -- show only the
             // stored value until the operator clicks Validate to pull the
             // full accessible-projects list.
@@ -2472,9 +2487,19 @@
               <select id="${rowId}-location" data-provider="${esc(provider)}" data-slot="${slot}">
                 ${vertexLocationOptionsHtml(vertexLocations, currentLocation)}
               </select>
-              <button type="button" class="control slot-config-validate" data-provider="${esc(provider)}" data-slot="${slot}">${t("env_config_validate")}</button>
             `;
           }
+          // Every model select is probed except groq's -- registry.
+          // MODEL_PROBE_POLICY returns no problems for groq unconditionally
+          // (no free token-counting endpoint), so there is nothing for a
+          // groq row to validate and it keeps a plain dropdown.
+          const probed = provider === "vertex" || provider === "gemini";
+          const validateButton = probed
+            ? `<button type="button" class="control slot-config-validate" data-provider="${esc(provider)}" data-slot="${slot}">${t("env_config_validate")}</button>`
+            : "";
+          const modelHint = probed
+            ? `<span class="field-hint">${t("env_config_model_unverified_hint")}</span>`
+            : "";
           // A row with a stored location already passed this same check
           // when it was saved -- only a genuinely unconfigured row (no
           // location on file yet) needs a live Validate before its first
@@ -2483,14 +2508,16 @@
           // an already-working row.
           const saveDisabled = provider === "vertex"
             && !entry.vertex_gcp_location
-            && !rowVertexValidated.has(rowKey)
+            && !rowValidated.has(rowKey)
             ? "disabled" : "";
           return `
             <div class="provider-model-row" data-provider="${provider}">
               <span class="provider-name">${esc(provider)} (${t("env_config_key_slot")} ${slot})</span>
               <label>${t("env_config_model")}</label>
-              <select id="${rowId}-model">${modelOptions}</select>
+              <select id="${rowId}-model" data-provider="${esc(provider)}" data-slot="${slot}">${modelOptions}</select>
+              ${modelHint}
               ${vertexFields}
+              ${validateButton}
               <button type="button" class="control slot-config-save" data-provider="${esc(provider)}" data-slot="${slot}" ${saveDisabled}>${t("env_save")}</button>
               <span class="field-hint" data-slot-result="${provider}-${slot}"></span>
             </div>
@@ -2510,31 +2537,34 @@
           btn.getAttribute("data-provider"), parseInt(btn.getAttribute("data-slot"), 10)
         ));
       });
-      // Changing either vertex dropdown re-arms the "needs another
-      // Validate" gate for anything other than the ALREADY-SAVED pair --
-      // picking a genuinely new pair has never been confirmed live, so Save
-      // must not act on it yet. Picking the dropdowns right back to the
-      // stored baseline needs no re-validate: that pair is already known
-      // good on the server.
-      container.querySelectorAll('select[id$="-project"], select[id$="-location"]').forEach((select) => {
+      // Changing the model select (or, for vertex, either GCP dropdown)
+      // re-arms the "needs another Validate" gate for anything other than
+      // the ALREADY-SAVED baseline -- a genuinely new value has never been
+      // confirmed live, so Save must not act on it yet. Changing back to
+      // the stored baseline needs no re-validate: that value is already
+      // known good on the server.
+      container.querySelectorAll('select[id$="-model"], select[id$="-project"], select[id$="-location"]').forEach((select) => {
         select.addEventListener("change", () => {
           const provider = select.getAttribute("data-provider");
           const slot = select.getAttribute("data-slot");
+          if (provider === "groq") return;  // nothing to validate
           const rowKey = `${provider}-${slot}`;
           const rowId = `slotCfg-${provider}-${slot}`;
           const saveBtn = container.querySelector(`.slot-config-save[data-provider="${provider}"][data-slot="${slot}"]`);
           const hint = document.querySelector(`[data-slot-result="${provider}-${slot}"]`);
-          const baseline = rowVertexBaseline.get(rowKey) || {};
-          const currentProject = document.getElementById(`${rowId}-project`).value;
-          const currentLocation = document.getElementById(`${rowId}-location`).value;
-          const matchesBaseline = currentProject === (baseline.project || "")
-            && currentLocation === (baseline.location || "");
+          const baseline = rowBaseline.get(rowKey) || {};
+          const projectEl = document.getElementById(`${rowId}-project`);
+          const locationEl = document.getElementById(`${rowId}-location`);
+          const matchesBaseline =
+            document.getElementById(`${rowId}-model`).value === (baseline.model || "")
+            && (!projectEl || projectEl.value === (baseline.project || ""))
+            && (!locationEl || locationEl.value === (baseline.location || ""));
           if (matchesBaseline) {
             if (saveBtn) saveBtn.disabled = false;
             if (hint) hint.textContent = "";
             return;
           }
-          rowVertexValidated.delete(rowKey);
+          rowValidated.delete(rowKey);
           if (saveBtn) saveBtn.disabled = true;
           if (hint) hint.textContent = t("env_config_needs_revalidate");
         });
@@ -2547,36 +2577,61 @@
       const hint = document.querySelector(`[data-slot-result="${provider}-${slot}"]`);
       const saveBtn = document.querySelector(`.slot-config-save[data-provider="${provider}"][data-slot="${slot}"]`);
       const validateBtn = document.querySelector(`.slot-config-validate[data-provider="${provider}"][data-slot="${slot}"]`);
+      const modelValue = document.getElementById(`${rowId}-model`).value;
       const projectSelect = document.getElementById(`${rowId}-project`);
       const locationSelect = document.getElementById(`${rowId}-location`);
-      const projectOverride = projectSelect.value;
-      const locationOverride = locationSelect.value;
-      // Only ask for the accessible-projects listing once per row -- a
-      // re-validate after a dropdown change re-checks the pair without
-      // repeating that live call.
-      const includeProjects = !rowVertexProjectCache.has(rowKey);
       validateBtn.disabled = true;
       try {
-        const params = new URLSearchParams({
-          slot: String(slot),
-          project_override: projectOverride,
-          location_override: locationOverride,
-          include_projects: String(includeProjects),
-        });
-        const resp = await fetch(`/api/environment/credential/${provider}/models?${params}`);
-        const result = await resp.json();
-        if (result.projects !== null) {
-          rowVertexProjectCache.set(rowKey, result.projects);
-          projectSelect.innerHTML = vertexProjectOptionsHtml(result.projects, projectOverride);
+        let ok = true;
+        let error = null;
+        if (provider === "vertex") {
+          const projectOverride = projectSelect.value;
+          const locationOverride = locationSelect.value;
+          // Only ask for the accessible-projects listing once per row -- a
+          // re-validate after a dropdown change re-checks the pair without
+          // repeating that live call.
+          const includeProjects = !rowVertexProjectCache.has(rowKey);
+          const params = new URLSearchParams({
+            slot: String(slot),
+            project_override: projectOverride,
+            location_override: locationOverride,
+            include_projects: String(includeProjects),
+          });
+          const resp = await fetch(`/api/environment/credential/${provider}/models?${params}`);
+          const result = await resp.json();
+          if (result.projects !== null) {
+            rowVertexProjectCache.set(rowKey, result.projects);
+            projectSelect.innerHTML = vertexProjectOptionsHtml(result.projects, projectOverride);
+          }
+          if (!result.ok) {
+            ok = false;
+            error = result.error;
+          }
         }
-        if (result.ok) {
-          rowVertexValidated.add(rowKey);
+        // The model validate is an additional call, not a replacement: a
+        // vertex row needs both answers, since _validate_model_var reads
+        // the slot's STORED project/location, which may not be saved yet.
+        if (ok) {
+          const modelResp = await fetch(`/api/environment/validate/${MODEL_VAR_BY_PROVIDER[provider]}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ value: modelValue }),
+          });
+          const modelResult = await modelResp.json();
+          if (!modelResult.ok) {
+            ok = false;
+            error = modelResult.error;
+          }
+        }
+        if (ok) {
+          rowValidated.add(rowKey);
           if (saveBtn) saveBtn.disabled = false;
           if (hint) hint.textContent = t("env_valid");
         } else {
-          rowVertexValidated.delete(rowKey);
+          rowValidated.delete(rowKey);
           if (saveBtn) saveBtn.disabled = true;
-          if (hint) hint.textContent = `${t("env_invalid")}: ${result.error}`;
+          const message = t(`err_${error}`) || error;
+          if (hint) hint.textContent = `${t("env_invalid")}: ${message}`;
         }
       } finally {
         validateBtn.disabled = false;
