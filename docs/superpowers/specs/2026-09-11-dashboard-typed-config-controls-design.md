@@ -454,9 +454,12 @@ lambdas (`lambda v: v >= 0`), so no bound *number* can be extracted from
 them mechanically — but any bound can be confirmed by evaluating the
 lambda either side of it.
 
-The test **fails on today's code**: `dispatcher_idle_sleep_seconds`
-carries `min="0"` while its predicate rejects `0`. Fixing that attribute
-is part of this work, and the test is what stops it recurring.
+The test reads the registry, not the markup, so it cannot literally fail
+against today's tree -- there is no registry yet. What it does is make
+§1.2's bug **unwritable**: transcribing the current `min="0"` for
+`dispatcher_idle_sleep_seconds` into the registry fails the probe
+immediately, because the predicate rejects `0`. Correcting that bound is
+part of this work; the test is what stops it recurring.
 
 Registry coverage is asserted too: every key in `store.RUNTIME_CONFIG_COLUMNS` (`store.py:44`)
 that the form edits has exactly one registry entry, and no entry names a
