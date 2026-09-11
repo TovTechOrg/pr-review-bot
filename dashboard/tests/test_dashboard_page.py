@@ -544,3 +544,55 @@ async def test_every_config_string_key_exists_in_both_languages():
         block = body.split(f"      {lang}: {{", 1)[1].split("\n      },", 1)[0]
         missing = sorted(k for k in referenced if f"{k}:" not in block)
         assert not missing, f"{lang} is missing: {missing}"
+
+
+async def test_config_number_inputs_suppress_the_native_spinner():
+    """One stepper idiom in the form, not two.
+
+    `count` fields carry our one-bit - n + stepper. Every other numeric field
+    is a plain box. Left alone, type=number ALSO draws the browser's own
+    spinner -- rounded, system-coloured, unreachable by our CSS -- so 11
+    fields showed a second stepper idiom and 3 showed ours, which reads as
+    arbitrary. DESIGN.md rejects platform chrome, and the design rejected
+    these very spinners for counts (section 2.1); the same reasoning applies
+    form-wide.
+    """
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "::-webkit-inner-spin-button" in body
+    assert "::-webkit-outer-spin-button" in body
+    assert "appearance: textfield" in body
+
+
+async def test_slot_config_save_result_renders_as_html_not_literal_markup():
+    """formatSaveResult builds <div>/<ul>/<li>, so assigning it to textContent
+    prints the markup verbatim in the panel. The three other call sites use
+    innerHTML; saveSlotConfig did not (pre-dates this work -- commit 2e328ef).
+    Safe because formatSaveResult esc()s every interpolated value."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "hint.textContent = formatSaveResult(" not in body
+    assert "hint.innerHTML = formatSaveResult(" in body
+
+
+async def test_no_label_repeats_a_unit_its_control_already_shows():
+    """Duration controls render a "seconds" suffix beside the input, so a
+    label ending in "(s)" / "(שנ')" states the unit twice."""
+    client = await _client()
+    body = (await client.get("/")).text
+    for lang, unit in (("en", "(s)"), ("he", "(שנ')")):
+        block = body.split(f"      {lang}: {{", 1)[1].split("\n      },", 1)[0]
+        offenders = [
+            line.strip()
+            for line in block.splitlines()
+            if line.strip().startswith("env_config_") and unit in line
+        ]
+        assert not offenders, f"{lang} label repeats the unit: {offenders}"
+
+
+async def test_boolean_default_hint_reads_off_not_the_raw_wire_value():
+    """`default false` leaks the JSON wire value into operator-facing copy."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "cfg_bool_off" in body
+    assert "cfg_bool_on" in body
