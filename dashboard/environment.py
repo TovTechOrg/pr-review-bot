@@ -21,7 +21,7 @@ import config_deps
 import github_app
 import render_client
 from config_deps import CREDENTIAL_FAMILIES, MAX_CREDENTIAL_SLOTS, credential_slot_vars
-from providers import catalog, credentials, registry, vertex_credentials
+from providers import catalog, credentials, model_check, registry, vertex_credentials
 from providers.registry import slot_env_name
 from review_queue import cooldown_config, dispatcher_tuning_config, store, usage_cap_config
 
@@ -105,6 +105,7 @@ def _safe_resolve_vertex_info(slot: int) -> tuple[dict | None, str | None]:
 
 
 def _validate_model_var(provider: str, candidate: str) -> dict:
+    row = {}
     if provider == "vertex":
         slot = store.get_all_key_index_overrides().get("vertex", 0)
         info, error = _safe_resolve_vertex_info(slot)
@@ -130,6 +131,19 @@ def _validate_model_var(provider: str, candidate: str) -> dict:
         return {"ok": False, "error": result.error, "models": None}
     if candidate not in (result.models or []):
         return {"ok": False, "error": "not_in_catalog", "models": result.models}
+    # Being in the catalog is necessary and NOT sufficient -- for vertex the
+    # listing is the global Model Garden, so this is where a listed model is
+    # actually proven callable. The listing is returned either way: the
+    # dropdown it populates should survive a rejected candidate.
+    issues = model_check.problems(
+        provider,
+        slot,
+        candidate,
+        vertex_gcp_project=row.get("vertex_gcp_project") if provider == "vertex" else None,
+        vertex_gcp_location=row.get("vertex_gcp_location") if provider == "vertex" else None,
+    )
+    if issues:
+        return {"ok": False, "error": issues[0], "models": result.models}
     return {"ok": True, "error": None, "models": result.models}
 
 
@@ -389,16 +403,47 @@ def _apply_llm_credential(family: str, payload: ApplyLlmCredentialRequest) -> di
             "failed": [{"key": slot_config_key, "error": "vertex_gcp_location_required"}],
         }
 
-    service_id = render_client.find_service_id()
-    if service_id is None:
-        return {"applied": [], "failed": [{"key": "*", "error": "service_not_found"}]}
-
-    credential_var = slot_env_name(family, payload.slot)
     credential_value = (
         payload.credential.get("service_account_b64", "")
         if family == "vertex"
         else payload.credential.get("api_key", "")
     )
+
+    # Probe the credential in THIS request body, not the slot's stored one:
+    # the uploaded credential has not been pushed to Render yet, so the slot
+    # cannot resolve it. Runs before the push for the same reason the
+    # location guard above does -- a refused model must never leave a pushed
+    # credential with no matching slot_config row.
+    probe_credential: str | dict | None = credential_value or None
+    if family == "vertex" and credential_value:
+        try:
+            probe_credential = json.loads(
+                base64.b64decode(credential_value, validate=True).decode()
+            )
+        except (ValueError, UnicodeDecodeError):
+            # ValueError covers binascii.Error and json.JSONDecodeError.
+            return {
+                "applied": [],
+                "failed": [
+                    {"key": slot_config_key, "error": "invalid_service_account_json"}
+                ],
+            }
+    issues = model_check.problems(
+        family,
+        payload.slot,
+        payload.model,
+        vertex_gcp_project=payload.vertex_gcp_project,
+        vertex_gcp_location=payload.vertex_gcp_location,
+        credential=probe_credential,
+    )
+    if issues:
+        return {"applied": [], "failed": [{"key": slot_config_key, "error": issues[0]}]}
+
+    service_id = render_client.find_service_id()
+    if service_id is None:
+        return {"applied": [], "failed": [{"key": "*", "error": "service_not_found"}]}
+
+    credential_var = slot_env_name(family, payload.slot)
     applied: list[str] = []
     failed: list[dict] = []
     try:
@@ -541,7 +586,12 @@ def _apply_render_patch(payload: EnvironmentRenderPatch) -> dict:
                 failed.append({"key": key, "error": "failed_validation"})
                 continue
             if not check["ok"]:
-                failed.append({"key": key, "error": "failed_validation"})
+                # Propagate the real code (model_not_callable /
+                # model_probe_unavailable / not_in_catalog) rather than
+                # flattening it: the dashboard maps each to its own message,
+                # and "failed_validation" tells an operator nothing about
+                # whether to pick a different model or simply retry.
+                failed.append({"key": key, "error": check["error"] or "failed_validation"})
                 continue
         try:
             render_client.push_env_var(service_id, key, value)
@@ -925,6 +975,15 @@ def _apply_slot_config_patch(payload: SlotConfigPatch) -> dict:
         return {"applied": [], "failed": [{"key": key, "error": "model_required"}]}
     if payload.provider == "vertex" and not location:
         return {"applied": [], "failed": [{"key": key, "error": "vertex_gcp_location_required"}]}
+    issues = model_check.problems(
+        payload.provider,
+        payload.slot,
+        model,
+        vertex_gcp_project=project,
+        vertex_gcp_location=location,
+    )
+    if issues:
+        return {"applied": [], "failed": [{"key": key, "error": issues[0]}]}
     try:
         store.set_slot_config(
             payload.provider,

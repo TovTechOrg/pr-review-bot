@@ -4,9 +4,11 @@ AsyncClient pattern dashboard/tests/test_dashboard_page.py already uses."""
 
 from __future__ import annotations
 
+import asyncio
 import io
 
 import jwt
+import pytest
 from httpx import ASGITransport, AsyncClient
 
 import github_app
@@ -14,7 +16,7 @@ import render_client
 from main import app
 from providers import catalog, credentials, vertex_credentials
 from review_queue import store
-from dashboard import auth
+from dashboard import auth, environment
 
 
 async def _client() -> AsyncClient:
@@ -433,7 +435,10 @@ async def test_slot_config_patch_sets_a_model_for_a_spare_slot(db):
     assert store.get_slot_config("groq", 1)["model"] == "llama-3.3-70b-versatile"
 
 
-async def test_slot_config_patch_preserves_project_and_location_when_only_model_is_sent(db):
+async def test_slot_config_patch_preserves_project_and_location_when_only_model_is_sent(
+    monkeypatch, db
+):
+    monkeypatch.setattr(environment.model_check, "problems", lambda *a, **k: [])
     store.set_slot_config(
         "vertex", 0, model="old-model", vertex_gcp_project="proj-a",
         vertex_gcp_location="us-east1", now="2026-01-01T00:00:00+00:00",
@@ -707,6 +712,7 @@ async def test_guided_github_app_validate_no_installation_is_structural_error(mo
 async def test_guided_gemini_apply_writes_credential_only_to_render(monkeypatch, db):
     """Model lives in slot_config only now -- Render never sees it."""
     applied = {}
+    monkeypatch.setattr(environment.model_check, "problems", lambda *a, **k: [])
     monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
 
     def _push(service_id, key, value):
@@ -751,6 +757,7 @@ async def test_apply_writes_model_to_slot_config(monkeypatch, db):
 
 
 async def test_apply_writes_vertex_project_and_location_to_slot_config(monkeypatch, db):
+    monkeypatch.setattr(environment.model_check, "problems", lambda *a, **k: [])
     monkeypatch.setattr(render_client, "push_env_var", lambda *a: None)
     monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
     monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
@@ -759,7 +766,7 @@ async def test_apply_writes_vertex_project_and_location_to_slot_config(monkeypat
         "/api/environment/credential/vertex/apply",
         json={
             "slot": 0,
-            "credential": {"service_account_b64": "..."},
+            "credential": {"service_account_b64": "eyJwcm9qZWN0X2lkIjogInByb2otYSJ9"},
             "model": "gemini-2.5-flash",
             "vertex_gcp_project": "proj-a",
             "vertex_gcp_location": "us-east1",
@@ -852,6 +859,7 @@ async def test_apply_writes_an_explicit_null_project_as_use_the_keys_own(monkeyp
         model="old-model", vertex_gcp_project="proj-a", vertex_gcp_location="us-east1",
         now="2026-09-08T00:00:00+00:00",
     )
+    monkeypatch.setattr(environment.model_check, "problems", lambda *a, **k: [])
     monkeypatch.setattr(render_client, "push_env_var", lambda *a: None)
     monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
     monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
@@ -860,7 +868,7 @@ async def test_apply_writes_an_explicit_null_project_as_use_the_keys_own(monkeyp
         "/api/environment/credential/vertex/apply",
         json={
             "slot": 0,
-            "credential": {"service_account_b64": "..."},
+            "credential": {"service_account_b64": "eyJwcm9qZWN0X2lkIjogInByb2otYSJ9"},
             "model": "gemini-2.5-flash",
             "vertex_gcp_project": None,
             "vertex_gcp_location": "us-east1",
@@ -1171,6 +1179,7 @@ async def test_validate_model_var_ok_when_in_catalog(monkeypatch):
         "list_gemini_models",
         lambda api_key: catalog.CatalogResult(ok=True, models=["gemini-flash-latest"], error=None),
     )
+    monkeypatch.setattr(environment.model_check, "problems", lambda *a, **k: [])
     client = await _client()
     resp = await client.post(
         "/api/environment/validate/GEMINI_MODEL", json={"value": "gemini-flash-latest"}
@@ -1271,7 +1280,7 @@ async def test_patch_render_rejects_model_not_in_catalog_but_applies_other_keys(
         json={"sets": {"GEMINI_MODEL": "bogus-model", "OTHER_KEY": "fine"}, "deletes": []},
     )
     result = resp.json()
-    assert {"key": "GEMINI_MODEL", "error": "failed_validation"} in result["failed"]
+    assert {"key": "GEMINI_MODEL", "error": "not_in_catalog"} in result["failed"]
     assert "OTHER_KEY" in result["applied"]
 
 
@@ -1502,6 +1511,7 @@ async def test_guided_github_app_validate_transport_failure_is_github_unreachabl
 
 
 async def test_guided_gemini_apply_also_sets_slot_config_model(monkeypatch, db):
+    monkeypatch.setattr(environment.model_check, "problems", lambda *a, **k: [])
     monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
     monkeypatch.setattr(render_client, "push_env_var", lambda *a, **k: None)
     monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
@@ -1658,3 +1668,146 @@ async def test_patch_render_bulk_delete_of_non_dependent_slot_still_works(monkey
     body = resp.json()
     assert body["applied"] == ["GEMINI_API_KEY_2"]
     assert deleted == ["GEMINI_API_KEY_2"]
+
+
+class TestModelProbeGatesEveryWritePath:
+    @pytest.mark.asyncio
+    async def test_validate_model_var_rejects_a_listed_but_uncallable_model(
+        self, monkeypatch
+    ):
+        """The exact production shape: the model IS in the catalog and still
+        404s. The listing must still come back so the dropdown survives."""
+        monkeypatch.setattr(
+            catalog,
+            "list_vertex_models",
+            lambda *a, **k: catalog.CatalogResult(
+                ok=True, models=["gemini-2.5-flash", "gemini-3.1-flash-lite"], error=None
+            ),
+        )
+        monkeypatch.setattr(
+            environment.model_check, "problems", lambda *a, **k: ["model_not_callable"]
+        )
+        monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"vertex": 0})
+        monkeypatch.setattr(store, "get_slot_config", lambda *a: {"model": "x"})
+        monkeypatch.setattr(
+            environment, "_safe_resolve_vertex_info", lambda slot: ({"project_id": "p"}, None)
+        )
+
+        result = await asyncio.to_thread(
+            environment._validate_model_var, "vertex", "gemini-3.1-flash-lite"
+        )
+
+        assert result["ok"] is False
+        assert result["error"] == "model_not_callable"
+        assert result["models"] == ["gemini-2.5-flash", "gemini-3.1-flash-lite"]
+
+    @pytest.mark.asyncio
+    async def test_apply_llm_credential_refuses_before_pushing_the_credential(
+        self, monkeypatch
+    ):
+        """Ordering matters: a refused model must never leave a pushed
+        credential with no matching slot_config row."""
+        pushed = []
+        monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+        monkeypatch.setattr(
+            render_client, "push_env_var", lambda *a: pushed.append(a)
+        )
+
+        def _never(*a, **k):
+            raise AssertionError("slot_config must not be written")
+
+        monkeypatch.setattr(store, "set_slot_config", _never)
+        monkeypatch.setattr(
+            environment.model_check, "problems", lambda *a, **k: ["model_not_callable"]
+        )
+
+        payload = environment.ApplyLlmCredentialRequest(
+            slot=0,
+            credential={"api_key": "k"},
+            model="no-such-model",
+            vertex_gcp_project=None,
+            vertex_gcp_location=None,
+        )
+        result = await asyncio.to_thread(
+            environment._apply_llm_credential, "gemini", payload
+        )
+
+        assert pushed == []
+        assert result["failed"] == [
+            {"key": "slot_config.gemini.0", "error": "model_not_callable"}
+        ]
+
+    @pytest.mark.asyncio
+    async def test_apply_llm_credential_probes_the_request_body_credential(
+        self, monkeypatch
+    ):
+        seen = {}
+
+        def _problems(provider, slot, model, **kwargs):
+            seen.update(kwargs)
+            return []
+
+        monkeypatch.setattr(environment.model_check, "problems", _problems)
+        monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+        monkeypatch.setattr(render_client, "push_env_var", lambda *a: None)
+        monkeypatch.setattr(store, "set_slot_config", lambda *a, **k: None)
+
+        payload = environment.ApplyLlmCredentialRequest(
+            slot=0,
+            credential={"api_key": "fresh-key"},
+            model="gemini-flash-latest",
+            vertex_gcp_project=None,
+            vertex_gcp_location=None,
+        )
+        await asyncio.to_thread(environment._apply_llm_credential, "gemini", payload)
+
+        assert seen["credential"] == "fresh-key"
+
+    @pytest.mark.asyncio
+    async def test_apply_slot_config_patch_refuses_an_uncallable_model(
+        self, monkeypatch
+    ):
+        def _never(*a, **k):
+            raise AssertionError("slot_config must not be written")
+
+        monkeypatch.setattr(store, "set_slot_config", _never)
+        monkeypatch.setattr(store, "get_slot_config", lambda *a: {
+            "model": "old", "vertex_gcp_project": "p", "vertex_gcp_location": "us-central1"
+        })
+        monkeypatch.setattr(
+            environment.model_check, "problems", lambda *a, **k: ["model_probe_unavailable"]
+        )
+
+        patch_payload = environment.SlotConfigPatch(
+            provider="vertex", slot=0, model="gemini-3.1-flash-lite"
+        )
+        result = await asyncio.to_thread(
+            environment._apply_slot_config_patch, patch_payload
+        )
+
+        assert result["applied"] == []
+        assert result["failed"] == [
+            {"key": "slot_config.vertex.0", "error": "model_probe_unavailable"}
+        ]
+
+    @pytest.mark.asyncio
+    async def test_render_patch_propagates_the_probe_code_not_failed_validation(
+        self, monkeypatch
+    ):
+        """Flattening every verdict to failed_validation would make the two
+        new UI strings dead code on this path."""
+        monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+        monkeypatch.setattr(
+            environment,
+            "_validate_var",
+            lambda var, value: {"ok": False, "error": "model_not_callable", "models": None},
+        )
+
+        result = await asyncio.to_thread(
+            environment._apply_render_patch,
+            environment.EnvironmentRenderPatch(sets={"VERTEX_MODEL": "gemini-3.1-flash-lite"}),
+        )
+
+        assert result["failed"] == [
+            {"key": "VERTEX_MODEL", "error": "model_not_callable"}
+        ]
