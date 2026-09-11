@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from google.auth import exceptions as google_auth_exceptions
+
 from providers import catalog
 
 
@@ -285,6 +287,152 @@ class TestListAccessibleProjects:
         mock_session_cls.return_value = session
 
         result = catalog.list_accessible_projects({"project_id": "proj-a"})
+
+        assert result.ok is False
+        assert result.error == "unauthorized"
+
+
+class TestProbeVertexModel:
+    @patch("providers.catalog.service_account.Credentials.from_service_account_info")
+    @patch("providers.catalog.genai.Client")
+    def test_callable_model_returns_ok(self, mock_client_cls, mock_creds):
+        client = MagicMock()
+        client.models.count_tokens.return_value = MagicMock(total_tokens=1)
+        mock_client_cls.return_value = client
+
+        result = catalog.probe_vertex_model(
+            {"project_id": "proj-a", "token_uri": "x"}, "gemini-2.5-flash"
+        )
+
+        assert result.ok is True
+        assert result.error is None
+        assert result.models is None
+        assert client.models.count_tokens.call_args.kwargs["model"] == "gemini-2.5-flash"
+
+    @patch("providers.catalog.service_account.Credentials.from_service_account_info")
+    @patch("providers.catalog.genai.Client")
+    def test_404_is_model_not_callable(self, mock_client_cls, mock_creds):
+        client = MagicMock()
+        client.models.count_tokens.side_effect = _FakeApiError(404)
+        mock_client_cls.return_value = client
+
+        result = catalog.probe_vertex_model(
+            {"project_id": "proj-a"}, "gemini-3.1-flash-lite"
+        )
+
+        assert result.ok is False
+        assert result.error == "model_not_callable"
+
+    @patch("providers.catalog.service_account.Credentials.from_service_account_info")
+    @patch("providers.catalog.genai.Client")
+    def test_rate_limited_is_probe_unavailable_not_model_not_callable(
+        self, mock_client_cls, mock_creds
+    ):
+        """A provider hiccup must never be reported as an unusable model --
+        that would send an operator hunting for a replacement model that was
+        never the problem."""
+        client = MagicMock()
+        client.models.count_tokens.side_effect = _FakeApiError(429)
+        mock_client_cls.return_value = client
+
+        result = catalog.probe_vertex_model({"project_id": "proj-a"}, "gemini-2.5-flash")
+
+        assert result.ok is False
+        assert result.error == "model_probe_unavailable"
+
+    @patch("providers.catalog.service_account.Credentials.from_service_account_info")
+    @patch("providers.catalog.genai.Client")
+    def test_server_error_is_probe_unavailable(self, mock_client_cls, mock_creds):
+        client = MagicMock()
+        client.models.count_tokens.side_effect = _FakeApiError(503)
+        mock_client_cls.return_value = client
+
+        result = catalog.probe_vertex_model({"project_id": "proj-a"}, "gemini-2.5-flash")
+
+        assert result.ok is False
+        assert result.error == "model_probe_unavailable"
+
+    @patch("providers.catalog.service_account.Credentials.from_service_account_info")
+    @patch("providers.catalog.genai.Client")
+    def test_credential_refresh_failure_is_unauthorized(self, mock_client_cls, mock_creds):
+        """A dead credential is a credential problem, not a model problem."""
+        client = MagicMock()
+        client.models.count_tokens.side_effect = google_auth_exceptions.RefreshError("nope")
+        mock_client_cls.return_value = client
+
+        result = catalog.probe_vertex_model({"project_id": "proj-a"}, "gemini-2.5-flash")
+
+        assert result.ok is False
+        assert result.error == "unauthorized"
+
+    def test_no_project_anywhere_is_invalid_json(self):
+        result = catalog.probe_vertex_model({}, "gemini-2.5-flash")
+
+        assert result.ok is False
+        assert result.error == "invalid_service_account_json"
+
+    @patch("providers.catalog.service_account.Credentials.from_service_account_info")
+    @patch("providers.catalog.genai.Client")
+    def test_project_and_location_overrides_reach_the_client(
+        self, mock_client_cls, mock_creds
+    ):
+        client = MagicMock()
+        client.models.count_tokens.return_value = MagicMock(total_tokens=1)
+        mock_client_cls.return_value = client
+
+        catalog.probe_vertex_model(
+            {"project_id": "key-project"},
+            "gemini-2.5-flash",
+            project_override="other-project",
+            location_override="europe-west4",
+        )
+
+        kwargs = mock_client_cls.call_args.kwargs
+        assert kwargs["project"] == "other-project"
+        assert kwargs["location"] == "europe-west4"
+
+    @patch("providers.catalog.service_account.Credentials.from_service_account_info")
+    @patch("providers.catalog.genai.Client")
+    def test_location_defaults_to_the_module_literal(self, mock_client_cls, mock_creds):
+        client = MagicMock()
+        client.models.count_tokens.return_value = MagicMock(total_tokens=1)
+        mock_client_cls.return_value = client
+
+        catalog.probe_vertex_model({"project_id": "proj-a"}, "gemini-2.5-flash")
+
+        assert mock_client_cls.call_args.kwargs["location"] == catalog.DEFAULT_VERTEX_LOCATION
+
+
+class TestProbeGeminiModel:
+    @patch("providers.catalog.genai.Client")
+    def test_callable_model_returns_ok(self, mock_client_cls):
+        client = MagicMock()
+        client.models.count_tokens.return_value = MagicMock(total_tokens=1)
+        mock_client_cls.return_value = client
+
+        result = catalog.probe_gemini_model("fake-key", "gemini-flash-latest")
+
+        assert result.ok is True
+        assert result.error is None
+
+    @patch("providers.catalog.genai.Client")
+    def test_404_is_model_not_callable(self, mock_client_cls):
+        client = MagicMock()
+        client.models.count_tokens.side_effect = _FakeApiError(404)
+        mock_client_cls.return_value = client
+
+        result = catalog.probe_gemini_model("fake-key", "no-such-model")
+
+        assert result.ok is False
+        assert result.error == "model_not_callable"
+
+    @patch("providers.catalog.genai.Client")
+    def test_unauthorized_key_is_not_a_model_verdict(self, mock_client_cls):
+        client = MagicMock()
+        client.models.count_tokens.side_effect = _FakeApiError(401)
+        mock_client_cls.return_value = client
+
+        result = catalog.probe_gemini_model("bad-key", "gemini-flash-latest")
 
         assert result.ok is False
         assert result.error == "unauthorized"

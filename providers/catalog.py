@@ -41,7 +41,7 @@ def _classify_status(status: int | None) -> str:
     return "provider_unreachable"
 
 
-def _classify_exception(exc: Exception) -> str:
+def _status_of(exc: Exception) -> int | None:
     # Duck-typed on purpose: rather than depend on each SDK's own exception
     # class hierarchy (google-genai's and groq's differ, and either could
     # change shape across versions), read whichever HTTP-status-shaped
@@ -59,9 +59,11 @@ def _classify_exception(exc: Exception) -> str:
     if not isinstance(status, int):
         response = getattr(exc, "response", None)
         status = getattr(response, "status_code", None) if response is not None else None
-    if not isinstance(status, int):
-        status = None
-    return _classify_status(status)
+    return status if isinstance(status, int) else None
+
+
+def _classify_exception(exc: Exception) -> str:
+    return _classify_status(_status_of(exc))
 
 
 def _classify_vertex_auth_exception(exc: Exception) -> str | None:
@@ -82,6 +84,23 @@ def _classify_vertex_auth_exception(exc: Exception) -> str | None:
 
 
 def _list_generative_models(client: genai.Client) -> list[str]:
+    """Every model the client lists, filtered to generateContent-capable ones
+    where that capability is known.
+
+    Vertex responses never populate Model.supported_actions
+    (_Model_from_vertex has no mapping for it), so a Vertex model is always
+    let through rather than dropped -- dropping it would silently empty the
+    entire Vertex catalog regardless of credential.
+
+    WHAT THIS LIST IS NOT: for Vertex it is essentially the global Model
+    Garden, not a per-project entitlement list -- a live listing returned
+    veo-*, lyria-* and medgemma entries this project plainly cannot call.
+    Membership here means the credential authenticates. Whether this project
+    may actually generate with a given model is probe_vertex_model's
+    question, and only a real call can answer it. Treating the two as the
+    same fact put a 404-ing model into production -- see the design spec's
+    section 1.
+    """
     names: list[str] = []
     for model in client.models.list():
         name = model.name or ""
@@ -117,23 +136,30 @@ def list_groq_models(api_key: str) -> CatalogResult:
 DEFAULT_VERTEX_LOCATION = "us-central1"
 
 
-def list_vertex_models(
+def _vertex_client(
     service_account_info: dict | None,
-    project_override: str | None = None,
-    location_override: str | None = None,
-) -> CatalogResult:
-    """`location_override` unset falls back to DEFAULT_VERTEX_LOCATION -- a
+    project_override: str | None,
+    location_override: str | None,
+) -> tuple[genai.Client | None, str | None]:
+    """The Vertex client for this (credential, project, location), or a
+    structural error code. Shared by list_vertex_models and
+    probe_vertex_model so the two can never disagree about which project,
+    location or credential a verdict was obtained against -- the listing
+    saying one thing and the probe another would be worse than either alone.
+
+    `location_override` unset falls back to DEFAULT_VERTEX_LOCATION -- a
     LITERAL, not a Settings read. settings.vertex_gcp_location is no longer
     authoritative (it's only a seed value for slot_config -- see
     docs/superpowers/specs/2026-09-08-slotted-config-and-db-delegation-
     design.md section 10.4) and doesn't exist as an env var on the deployed
-    service at all, so reading it here silently listed every slot's catalog
-    from whatever the operator's local .env.config happened to say. This
-    fallback exists only for this read-only catalog listing; the review path
-    (providers/factory.py) has no location fallback at all, by design."""
+    service at all, so reading it here silently used whatever the operator's
+    local .env.config happened to say. This fallback exists only for these
+    read-only catalog/probe calls; the review path (providers/factory.py)
+    has no location fallback at all, by design.
+    """
     project = project_override or (service_account_info or {}).get("project_id", "")
     if not project:
-        return CatalogResult(ok=False, models=None, error="invalid_service_account_json")
+        return None, "invalid_service_account_json"
     location = location_override or DEFAULT_VERTEX_LOCATION
 
     creds = None
@@ -143,21 +169,114 @@ def list_vertex_models(
                 service_account_info, scopes=_VERTEX_SCOPES
             )
         except Exception:  # noqa: BLE001 -- malformed key content, not an HTTP failure
-            return CatalogResult(ok=False, models=None, error="invalid_service_account_json")
+            return None, "invalid_service_account_json"
 
-    try:
-        client = genai.Client(
+    return (
+        genai.Client(
             vertexai=True,
             project=project,
             location=location,
             credentials=creds,
             http_options=types.HttpOptions(timeout=_LIST_TIMEOUT_MS),
+        ),
+        None,
+    )
+
+
+def list_vertex_models(
+    service_account_info: dict | None,
+    project_override: str | None = None,
+    location_override: str | None = None,
+) -> CatalogResult:
+    """Every model Vertex lists for this credential -- which is NOT the same
+    as every model this project may call: see _list_generative_models.
+    Client construction, including the location fallback, is _vertex_client's."""
+    try:
+        client, error = _vertex_client(
+            service_account_info, project_override, location_override
         )
+        if error:
+            return CatalogResult(ok=False, models=None, error=error)
         models = _list_generative_models(client)
     except Exception as exc:  # noqa: BLE001
         error = _classify_vertex_auth_exception(exc) or _classify_exception(exc)
         return CatalogResult(ok=False, models=None, error=error)
     return CatalogResult(ok=True, models=models, error=None)
+
+
+# What a probe sends. One token of throwaway text: countTokens neither
+# generates nor bills, so the content is irrelevant -- only whether the
+# publisher model resolves for this project.
+_PROBE_CONTENTS = "ping"
+
+
+def _classify_probe_exception(exc: Exception) -> str:
+    """A probe failure's structural code.
+
+    The 404 branch is the whole point: Vertex answers a model this project
+    may not call with 404 NOT_FOUND, byte-for-byte the error a real
+    generateContent gets (verified live -- see the design spec's section
+    1a). Every other failure means no verdict was reached, which is NOT the
+    same answer and must never be reported as one. 401/403 keep their
+    credential-shaped classification so an operator is not told to change
+    the model when the key is the problem.
+    """
+    auth = _classify_vertex_auth_exception(exc)
+    if auth is not None:
+        return auth
+    status = _status_of(exc)
+    if status == 404:
+        return "model_not_callable"
+    if status in (401, 403):
+        return _classify_status(status)
+    return "model_probe_unavailable"
+
+
+def probe_vertex_model(
+    service_account_info: dict | None,
+    model: str,
+    project_override: str | None = None,
+    location_override: str | None = None,
+) -> CatalogResult:
+    """Whether `model` is actually callable for this project/location.
+
+    THE question list_vertex_models cannot answer. Vertex's own listing is
+    the global Model Garden -- entitlement is enforced only when a request
+    names the publisher model -- so membership in it proves the credential
+    authenticates and nothing more. countTokens resolves the publisher model
+    exactly as generateContent does, for free and without generating
+    anything, which makes it the cheapest honest answer available.
+
+    `models` is always None: this reports a verdict, not a catalog.
+    """
+    try:
+        client, error = _vertex_client(
+            service_account_info, project_override, location_override
+        )
+        if error:
+            return CatalogResult(ok=False, models=None, error=error)
+        client.models.count_tokens(model=model, contents=_PROBE_CONTENTS)
+    except Exception as exc:  # noqa: BLE001 -- classified structurally above
+        return CatalogResult(ok=False, models=None, error=_classify_probe_exception(exc))
+    return CatalogResult(ok=True, models=None, error=None)
+
+
+def probe_gemini_model(api_key: str, model: str) -> CatalogResult:
+    """Whether `model` is callable with this AI-Studio key.
+
+    Gemini's listing IS key-scoped, unlike Vertex's, so this is a narrower
+    guarantee than probe_vertex_model's -- but countTokens is free here too,
+    and a verdict obtained the same way the review path obtains its own beats
+    one inferred from a listing.
+    """
+    try:
+        client = genai.Client(
+            api_key=api_key, http_options=types.HttpOptions(timeout=_LIST_TIMEOUT_MS)
+        )
+        client.models.count_tokens(model=model, contents=_PROBE_CONTENTS)
+    except Exception as exc:  # noqa: BLE001
+        return CatalogResult(ok=False, models=None, error=_classify_probe_exception(exc))
+    return CatalogResult(ok=True, models=None, error=None)
 
 
 # Vertex AI's generative-model regions -- unlike the project dropdown, this
