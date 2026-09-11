@@ -1,6 +1,8 @@
 """Tests for GET / — the static HTML dashboard page shell."""
 from __future__ import annotations
 
+import re
+
 from httpx import ASGITransport, AsyncClient
 
 from main import app
@@ -524,3 +526,21 @@ async def test_cross_field_validation_is_keyed_by_group_not_by_field():
     client = await _client()
     body = (await client.get("/")).text
     assert "invalidConfigFields.add(\"group:\"" in body
+
+
+async def test_every_config_string_key_exists_in_both_languages():
+    """Every t("cfg_...") / data-i18n="cfg_..." the config form references must
+    resolve in en AND he -- a missing Hebrew key renders as the raw key."""
+    client = await _client()
+    body = (await client.get("/")).text
+    referenced = set(re.findall(r'(?:data-i18n="|t\(")(cfg_[a-z0-9_]+)', body))
+    # A dynamic key like data-i18n="cfg_group_${group}" matches only up to
+    # the "$", leaving a truncated "cfg_group_" that is never a real static
+    # key (the runtime concatenation always adds a suffix) -- drop these
+    # rather than require a nonsensical literal "cfg_group_" entry.
+    referenced = {k for k in referenced if not k.endswith("_")}
+    assert referenced, "no cfg_ keys found -- the regex or the markup changed"
+    for lang in ("en", "he"):
+        block = body.split(f"      {lang}: {{", 1)[1].split("\n      },", 1)[0]
+        missing = sorted(k for k in referenced if f"{k}:" not in block)
+        assert not missing, f"{lang} is missing: {missing}"
