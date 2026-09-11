@@ -810,7 +810,7 @@
               <span class="info-tooltip" role="tooltip" data-i18n="cfg_desc_dispatcher_idle_sleep_seconds"></span>
             </span>
           </label>
-          <input id="cfgDispatcherIdleSleepSeconds" type="number" step="any" min="0">
+          <input id="cfgDispatcherIdleSleepSeconds" type="number" step="any" min="0.001">
           <label>
             <span data-i18n="env_config_dispatcher_max_failure_attempts"></span>
             <span class="info-wrap">
@@ -2562,28 +2562,56 @@
       await fetchEnvironmentConfig();
     }
 
-    const TUNING_KNOB_FIELDS = [
-      "llm_request_timeout_seconds",
-      "dispatcher_default_retry_after_seconds",
-      "dispatcher_failure_base_backoff_seconds",
-      "dispatcher_failure_max_backoff_seconds",
-      "dispatcher_max_failure_attempts",
-      "dispatcher_max_notice_post_attempts",
-      "dispatcher_min_retry_after_seconds",
-      "dispatcher_backoff_jitter_seconds",
-      "dispatcher_notice_sweep_batch_size",
-      "dispatcher_idle_sleep_seconds",
-    ];
+    // CONFIG_FIELDS_BEGIN -- machine-read by tests/test_config_field_registry.py,
+    // which probes each `min`/`exclusive` pair against the real Python
+    // predicate. Keep this array JSON-parseable: double-quoted keys and string
+    // values, no comments inside it, no trailing commas, no JS expressions.
+    //
+    // `key`    is the /api/environment/config payload and PATCH body name.
+    // `column` is the runtime_config column. They differ for the usage-cap
+    //          pair only; the test resolves predicates and defaults by column.
+    const CONFIG_FIELDS = [
+      {"key": "provider", "column": "provider", "kind": "enum", "group": "pinned", "default": null},
 
-    // parseFloat on these sends e.g. 5.0, which pydantic's int coercion
-    // accepts but a stray "5.5" makes the whole PATCH 422 -- parse them as
-    // ints so a fractional entry is truncated client-side instead of failing
-    // the entire save.
-    const INTEGER_KNOB_FIELDS = new Set([
-      "dispatcher_max_failure_attempts",
-      "dispatcher_max_notice_post_attempts",
-      "dispatcher_notice_sweep_batch_size",
-    ]);
+      {"key": "cooldown_base_seconds", "column": "cooldown_base_seconds", "kind": "duration", "group": "cooldown", "min": 0, "exclusive": false, "step": "any", "unit": "seconds", "default": 300.0},
+      {"key": "cooldown_factor", "column": "cooldown_factor", "kind": "duration", "group": "cooldown", "min": 1, "exclusive": false, "step": 0.5, "unit": "each_escalation", "humanize": false, "default": 2.0},
+      {"key": "cooldown_max_seconds", "column": "cooldown_max_seconds", "kind": "duration", "group": "cooldown", "min": 0, "exclusive": true, "step": "any", "unit": "seconds", "default": 3600.0},
+
+      {"key": "dispatcher_failure_base_backoff_seconds", "column": "dispatcher_failure_base_backoff_seconds", "kind": "duration", "group": "backoff", "min": 0, "exclusive": false, "step": "any", "unit": "seconds", "default": 2.0},
+      {"key": "dispatcher_failure_max_backoff_seconds", "column": "dispatcher_failure_max_backoff_seconds", "kind": "duration", "group": "backoff", "min": 0, "exclusive": true, "step": "any", "unit": "seconds", "default": 300.0},
+      {"key": "dispatcher_backoff_jitter_seconds", "column": "dispatcher_backoff_jitter_seconds", "kind": "duration", "group": "backoff", "min": 0, "exclusive": false, "step": "any", "unit": "seconds", "default": 0.0},
+      {"key": "dispatcher_max_failure_attempts", "column": "dispatcher_max_failure_attempts", "kind": "count", "group": "backoff", "min": 1, "exclusive": false, "integer": true, "unit": "attempts", "default": 5},
+
+      {"key": "usage_cap_tokens", "column": "key_usage_token_cap", "kind": "magnitude", "group": "usage_cap", "min": 0, "exclusive": true, "integer": true, "nullable": "cap_off", "presets": [10000, 100000, 500000, 1000000, 5000000], "default": null},
+      {"key": "usage_cap_reset", "column": "key_usage_reset_time_utc", "kind": "wallclock", "group": "usage_cap", "default": "04:00:00"},
+
+      {"key": "llm_request_timeout_seconds", "column": "llm_request_timeout_seconds", "kind": "duration", "group": "limits", "min": 0, "exclusive": true, "step": "any", "unit": "seconds", "default": 45.0},
+      {"key": "dispatcher_default_retry_after_seconds", "column": "dispatcher_default_retry_after_seconds", "kind": "duration", "group": "limits", "min": 0, "exclusive": false, "step": "any", "unit": "seconds", "default": 60.0},
+      {"key": "dispatcher_min_retry_after_seconds", "column": "dispatcher_min_retry_after_seconds", "kind": "duration", "group": "limits", "min": 0, "exclusive": false, "step": "any", "unit": "seconds", "default": 1.0},
+      {"key": "dispatcher_idle_sleep_seconds", "column": "dispatcher_idle_sleep_seconds", "kind": "duration", "group": "limits", "min": 0, "exclusive": true, "step": "any", "unit": "seconds", "default": 1.0},
+      {"key": "dispatcher_notice_sweep_batch_size", "column": "dispatcher_notice_sweep_batch_size", "kind": "count", "group": "limits", "min": 1, "exclusive": false, "integer": true, "unit": "per_batch", "default": 20},
+      {"key": "dispatcher_max_notice_post_attempts", "column": "dispatcher_max_notice_post_attempts", "kind": "count", "group": "limits", "min": 1, "exclusive": false, "integer": true, "unit": "attempts", "default": 3},
+
+      {"key": "review_draft_prs", "column": "review_draft_prs", "kind": "bool", "group": "standalone", "default": false}
+    ];
+    // CONFIG_FIELDS_END
+
+    // The 9 knobs whose PATCH keys must be OMITTED when blank rather than
+    // sent as null (see saveConfig). Derived from the registry rather than
+    // re-listed: everything in the two dispatcher-tuning groups plus the LLM
+    // timeout, i.e. every field that has no fallback and whose NULL column
+    // stops the dispatcher dead.
+    const TUNING_KNOB_FIELDS = CONFIG_FIELDS
+      .filter((f) => f.group === "backoff" || f.group === "limits")
+      .map((f) => f.key);
+
+    const INTEGER_KNOB_FIELDS = new Set(
+      CONFIG_FIELDS.filter((f) => f.integer && f.kind === "count").map((f) => f.key)
+    );
+
+    function fieldByKey(key) {
+      return CONFIG_FIELDS.find((f) => f.key === key);
+    }
 
     function tuningKnobFieldId(field) {
       return "cfg" + field.replace(/(^|_)([a-z])/g, (_m, _sep, c) => c.toUpperCase());
