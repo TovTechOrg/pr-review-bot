@@ -800,6 +800,76 @@ class EnvironmentConfigPatch(BaseModel):
     dispatcher_idle_sleep_seconds: float | None = None
 
 
+def _arming_probe_targets(fields: dict) -> dict[tuple[str, int], list[str]]:
+    """The (provider, slot) pairs this PATCH would newly arm, mapped to the
+    response field keys that asked for them.
+
+    Neither `provider` nor `key_index` carries a model value, so neither
+    looks like a model write -- but both change WHICH slot_config row is
+    live, and slot N's credential, project and location all differ from slot
+    0's. A model that probed clean in slot 0 is an open question in slot 1.
+    Flipping either is therefore a third route to "the UI reported applied,
+    every subsequent review 404s".
+
+    Scoped to what actually CHANGED. The config form re-sends every
+    provider's key_index on every save, unconditionally and by design
+    (dashboard.html's saveConfig), so an unscoped rule would fire a live call
+    per provider every time someone edits a cooldown value. A clear
+    (index None) has no target slot and is never probed -- refusing one
+    would block a key rotation, which is exactly when an operator needs it.
+    """
+    submitted_indexes = fields.get("key_index", {}) or {}
+    relevant_indexes = {
+        provider: index
+        for provider, index in submitted_indexes.items()
+        if provider in registry.PROVIDERS and index is not None
+    }
+    provider_field = fields.get("provider")
+    provider_changing = "provider" in fields and provider_field in registry.PROVIDERS
+
+    if not relevant_indexes and not provider_changing:
+        # Nothing here names a real provider/slot -- an unknown-provider
+        # request is rejected elsewhere in _apply_config_patch without ever
+        # needing a DB connection, and this must not force one just to
+        # discover there is nothing to probe.
+        return {}
+
+    stored_indexes = store.get_all_key_index_overrides()
+    targets: dict[tuple[str, int], list[str]] = {}
+
+    for provider, index in relevant_indexes.items():
+        if index == stored_indexes.get(provider):
+            continue
+        targets.setdefault((provider, index), []).append(f"key_index.{provider}")
+
+    if provider_changing and provider_field != store.get_provider_override():
+        # The slot this provider will actually run against: a key_index
+        # for it in this same PATCH wins over the stored one.
+        submitted = relevant_indexes.get(provider_field)
+        slot = submitted if submitted is not None else (stored_indexes.get(provider_field) or 0)
+        targets.setdefault((provider_field, slot), []).append("provider")
+
+    return targets
+
+
+def _arming_problems(fields: dict) -> dict[str, str]:
+    """Field key -> error code, for every arming this PATCH cannot honour."""
+    failures: dict[str, str] = {}
+    for (provider, slot), field_keys in _arming_probe_targets(fields).items():
+        row = store.get_slot_config(provider, slot) or {}
+        issues = model_check.problems(
+            provider,
+            slot,
+            row.get("model") or "",
+            vertex_gcp_project=row.get("vertex_gcp_project"),
+            vertex_gcp_location=row.get("vertex_gcp_location"),
+        )
+        if issues:
+            for field_key in field_keys:
+                failures[field_key] = issues[0]
+    return failures
+
+
 def _apply_config_patch(payload: EnvironmentConfigPatch) -> dict:
     # exclude_unset: a field the caller never sent must not be read as
     # "clear this override" -- only a field explicitly present in the
@@ -809,10 +879,16 @@ def _apply_config_patch(payload: EnvironmentConfigPatch) -> dict:
     applied: list[str] = []
     failed: list[dict] = []
 
+    # One probe pass up front, so a provider change and a key_index change
+    # naming the same slot cost one live call, not two.
+    arming_failures = _arming_problems(fields)
+
     if "provider" in fields:
         provider = fields["provider"]
         if provider is not None and provider not in registry.PROVIDERS:
             failed.append({"key": "provider", "error": "unknown_provider"})
+        elif "provider" in arming_failures:
+            failed.append({"key": "provider", "error": arming_failures["provider"]})
         else:
             try:
                 store.set_provider_override(provider, now)
@@ -892,6 +968,10 @@ def _apply_config_patch(payload: EnvironmentConfigPatch) -> dict:
             continue
         if index is not None and not (0 <= index < MAX_CREDENTIAL_SLOTS):
             failed.append({"key": f"key_index.{provider}", "error": "invalid_slot"})
+            continue
+        field_key = f"key_index.{provider}"
+        if field_key in arming_failures:
+            failed.append({"key": field_key, "error": arming_failures[field_key]})
             continue
         try:
             store.set_key_index_override(provider, index, now)

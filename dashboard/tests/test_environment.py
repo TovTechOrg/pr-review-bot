@@ -158,6 +158,12 @@ async def test_get_environment_config_reflects_current_overrides(db):
 
 
 async def test_patch_environment_config_sets_provider_override(db):
+    # groq is never probed (registry.MODEL_PROBE_POLICY), but arming still
+    # requires a model to be configured for the target slot at all.
+    store.set_slot_config(
+        "groq", 0, model="llama-3.3-70b-versatile", vertex_gcp_project=None,
+        vertex_gcp_location=None, now="2026-01-01T00:00:00+00:00",
+    )
     client = await _client()
     resp = await client.patch("/api/environment/config", json={"provider": "groq"})
     assert resp.status_code == 200
@@ -1811,3 +1817,151 @@ class TestModelProbeGatesEveryWritePath:
         assert result["failed"] == [
             {"key": "VERTEX_MODEL", "error": "model_not_callable"}
         ]
+
+
+class TestArmingIsGatedToo:
+    @pytest.mark.asyncio
+    async def test_unchanged_key_index_triggers_no_probe(self, monkeypatch):
+        """saveConfig() re-sends every provider's key_index on every save, so
+        an unscoped rule would fire three live calls when someone edits a
+        cooldown value."""
+        monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"vertex": 1})
+        monkeypatch.setattr(store, "get_provider_override", lambda: "vertex")
+        monkeypatch.setattr(store, "set_key_index_override", lambda *a: None)
+
+        def _never(*a, **k):
+            raise AssertionError("an unchanged arming must not be probed")
+
+        monkeypatch.setattr(environment.model_check, "problems", _never)
+
+        result = await asyncio.to_thread(
+            environment._apply_config_patch,
+            environment.EnvironmentConfigPatch(key_index={"vertex": 1}),
+        )
+
+        assert result["failed"] == []
+
+    @pytest.mark.asyncio
+    async def test_changed_key_index_probes_the_target_slots_stored_model(
+        self, monkeypatch
+    ):
+        seen = {}
+
+        def _problems(provider, slot, model, **kwargs):
+            seen.update({"provider": provider, "slot": slot, "model": model, **kwargs})
+            return []
+
+        monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"vertex": 0})
+        monkeypatch.setattr(store, "get_provider_override", lambda: "vertex")
+        monkeypatch.setattr(store, "set_key_index_override", lambda *a: None)
+        monkeypatch.setattr(store, "get_slot_config", lambda *a: {
+            "model": "gemini-2.5-flash",
+            "vertex_gcp_project": "proj-b",
+            "vertex_gcp_location": "europe-west4",
+        })
+        monkeypatch.setattr(environment.model_check, "problems", _problems)
+
+        await asyncio.to_thread(
+            environment._apply_config_patch,
+            environment.EnvironmentConfigPatch(key_index={"vertex": 1}),
+        )
+
+        assert seen["slot"] == 1
+        assert seen["model"] == "gemini-2.5-flash"
+        assert seen["vertex_gcp_project"] == "proj-b"
+        assert seen["vertex_gcp_location"] == "europe-west4"
+
+    @pytest.mark.asyncio
+    async def test_failed_arming_probe_fails_only_that_field(self, monkeypatch):
+        """The cooldown values riding in the same PATCH must still apply --
+        _apply_config_patch has always applied each group independently."""
+        monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"vertex": 0})
+        monkeypatch.setattr(store, "get_provider_override", lambda: "vertex")
+        monkeypatch.setattr(store, "get_slot_config", lambda *a: {"model": "bad-model"})
+        monkeypatch.setattr(store, "get_cooldown_overrides", lambda: (300.0, 3600.0, 2.0))
+        applied_cooldown = []
+        monkeypatch.setattr(
+            store, "set_cooldown_override", lambda *a: applied_cooldown.append(a)
+        )
+
+        def _never_set(*a):
+            raise AssertionError("a refused arming must not be written")
+
+        monkeypatch.setattr(store, "set_key_index_override", _never_set)
+        monkeypatch.setattr(
+            environment.model_check, "problems", lambda *a, **k: ["model_not_callable"]
+        )
+
+        result = await asyncio.to_thread(
+            environment._apply_config_patch,
+            environment.EnvironmentConfigPatch(
+                key_index={"vertex": 1}, cooldown_base_seconds=120.0
+            ),
+        )
+
+        assert {"key": "key_index.vertex", "error": "model_not_callable"} in result["failed"]
+        assert "cooldown_base_seconds" in result["applied"]
+        assert applied_cooldown
+
+    @pytest.mark.asyncio
+    async def test_changed_provider_probes_its_effective_slot(self, monkeypatch):
+        seen = {}
+
+        def _problems(provider, slot, model, **kwargs):
+            seen.update({"provider": provider, "slot": slot})
+            return []
+
+        monkeypatch.setattr(store, "get_provider_override", lambda: "gemini")
+        monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"vertex": 2})
+        monkeypatch.setattr(store, "get_slot_config", lambda *a: {"model": "gemini-2.5-flash"})
+        monkeypatch.setattr(store, "set_provider_override", lambda *a: None)
+        monkeypatch.setattr(environment.model_check, "problems", _problems)
+
+        await asyncio.to_thread(
+            environment._apply_config_patch,
+            environment.EnvironmentConfigPatch(provider="vertex"),
+        )
+
+        assert seen == {"provider": "vertex", "slot": 2}
+
+    @pytest.mark.asyncio
+    async def test_provider_and_key_index_for_one_provider_probe_once(self, monkeypatch):
+        calls = []
+
+        monkeypatch.setattr(store, "get_provider_override", lambda: "gemini")
+        monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"vertex": 0})
+        monkeypatch.setattr(store, "get_slot_config", lambda *a: {"model": "m"})
+        monkeypatch.setattr(store, "set_provider_override", lambda *a: None)
+        monkeypatch.setattr(store, "set_key_index_override", lambda *a: None)
+        monkeypatch.setattr(
+            environment.model_check,
+            "problems",
+            lambda provider, slot, model, **k: calls.append((provider, slot)) or [],
+        )
+
+        await asyncio.to_thread(
+            environment._apply_config_patch,
+            environment.EnvironmentConfigPatch(provider="vertex", key_index={"vertex": 1}),
+        )
+
+        assert calls == [("vertex", 1)]
+
+    @pytest.mark.asyncio
+    async def test_clearing_an_override_to_none_is_not_an_arming(self, monkeypatch):
+        """key_index=None clears the override; there is no target slot to
+        probe, and refusing a clear would block a key rotation."""
+        monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"vertex": 1})
+        monkeypatch.setattr(store, "get_provider_override", lambda: "vertex")
+        monkeypatch.setattr(store, "set_key_index_override", lambda *a: None)
+
+        def _never(*a, **k):
+            raise AssertionError("clearing must not be probed")
+
+        monkeypatch.setattr(environment.model_check, "problems", _never)
+
+        result = await asyncio.to_thread(
+            environment._apply_config_patch,
+            environment.EnvironmentConfigPatch(key_index={"vertex": None}),
+        )
+
+        assert result["failed"] == []
