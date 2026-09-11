@@ -58,7 +58,7 @@ CONTRACT_PATH = "contracts/provisioning.json"
 # any ordinary schema or env-var edit and is what the byte-compare already
 # catches. The consumer reads this to know whether it understands the file
 # at all.
-CONTRACT_VERSION = 1
+CONTRACT_VERSION = 2
 
 GENERATED_BY = "scripts.gen_contract -- do not edit by hand"
 
@@ -235,6 +235,34 @@ def slot_config() -> dict[str, list[str]]:
     }
 
 
+def model_validation() -> dict[str, object]:
+    """What makes a `model` value valid, not just present.
+
+    slot_config's shape says a provisioner must write `model`; it has never
+    said what a writable model IS. For Vertex that gap was load-bearing:
+    client.models.list() returns the global Model Garden rather than a
+    per-project entitlement list, so a provisioner filling a dropdown from it
+    can write a model that 404s every review while reporting the choice as
+    validated. That is not hypothetical -- it reached production, and it
+    reached it through two independent implementations that had each inferred
+    the same wrong thing from the same listing call.
+
+    Published here rather than described in each repository's own docstrings
+    because docstrings are exactly what was in place while that happened. The
+    consumer vendors this file and asserts its own conformance against it.
+
+    Read from registry.MODEL_PROBE_POLICY -- a module constant, like every
+    other derivation in this file (see the module docstring's one rule).
+    """
+    return {
+        "error_codes": list(registry.MODEL_PROBE_ERROR_CODES),
+        "providers": {
+            provider: dict(registry.MODEL_PROBE_POLICY[provider])
+            for provider in sorted(registry.PROVIDERS)
+        },
+    }
+
+
 def build_contract() -> dict[str, object]:
     """The whole contract, in the key order it is serialized in."""
     return {
@@ -242,6 +270,7 @@ def build_contract() -> dict[str, object]:
         "contract_version": CONTRACT_VERSION,
         "env_vars": env_vars(),
         "providers": providers(),
+        "model_validation": model_validation(),
         "runtime_config": runtime_config(),
         "slot_config": slot_config(),
     }

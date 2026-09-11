@@ -149,7 +149,7 @@ def test_model_is_provisioner_required_even_though_the_column_is_nullable():
     assert "model" in gen_contract.slot_config()["provisioner_required"]
 
 
-def test_build_contract_carries_the_marker_version_and_all_four_blocks():
+def test_build_contract_carries_the_marker_version_and_all_five_blocks():
     contract = gen_contract.build_contract()
     assert contract["generated_by"] == gen_contract.GENERATED_BY
     assert "do not edit" in contract["generated_by"].lower()
@@ -157,7 +157,7 @@ def test_build_contract_carries_the_marker_version_and_all_four_blocks():
     assert contract["contract_version"] == gen_contract.CONTRACT_VERSION
     assert set(contract) == {
         "generated_by", "contract_version",
-        "env_vars", "providers", "runtime_config", "slot_config",
+        "env_vars", "providers", "model_validation", "runtime_config", "slot_config",
     }
 
 
@@ -374,3 +374,43 @@ def test_the_always_synced_placement_matches_deploys_own_tuple():
         if entry["placement"] == "always_synced"
     }
     assert always == set(deploy._ALWAYS_SYNCED)
+
+
+class TestModelValidationBlock:
+    def test_contract_version_is_two(self):
+        assert gen_contract.CONTRACT_VERSION == 2
+
+    def test_block_declares_every_provider(self):
+        block = gen_contract.model_validation()
+
+        assert set(block["providers"]) == set(registry.PROVIDERS)
+
+    def test_vertex_and_gemini_require_a_probe_and_groq_explains_why_it_does_not(self):
+        providers = gen_contract.model_validation()["providers"]
+
+        assert providers["vertex"]["required_before_write"] is True
+        assert providers["vertex"]["mechanism"] == "count_tokens"
+        assert providers["gemini"]["required_before_write"] is True
+        assert providers["groq"]["required_before_write"] is False
+        assert providers["groq"]["reason"]
+
+    def test_error_codes_are_published(self):
+        assert gen_contract.model_validation()["error_codes"] == [
+            "model_not_callable",
+            "model_probe_unavailable",
+        ]
+
+    def test_block_carries_no_values_from_the_settings_instance(self):
+        """Same constraint as every other block: names and non-secret policy
+        only. A probe policy has no shape a credential could occupy, and this
+        pins that it stays that way."""
+        rendered = json.dumps(gen_contract.model_validation())
+
+        assert "API_KEY" not in rendered
+        assert "DATABASE_URL" not in rendered
+
+    def test_committed_contract_is_in_sync(self):
+        """The docs CI job byte-compares this; failing here first is friendlier."""
+        committed = Path(gen_contract.CONTRACT_PATH).read_text()
+
+        assert committed == gen_contract.render()

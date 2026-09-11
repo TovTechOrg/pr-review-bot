@@ -1,6 +1,6 @@
 {
   "generated_by": "scripts.gen_contract -- do not edit by hand",
-  "contract_version": 1,
+  "contract_version": 2,
   "env_vars": {
     "DASHBOARD_PASSWORD": {
       "placement": "always_synced"
@@ -117,6 +117,29 @@
       "credential_var": "VERTEX_GCP_SERVICE_ACCOUNT_KEY",
       "model_var": "VERTEX_MODEL",
       "key_index_column": "vertex_key_index"
+    }
+  },
+  "model_validation": {
+    "error_codes": [
+      "model_not_callable",
+      "model_probe_unavailable"
+    ],
+    "providers": {
+      "gemini": {
+        "required_before_write": true,
+        "mechanism": "count_tokens",
+        "reason": null
+      },
+      "groq": {
+        "required_before_write": false,
+        "mechanism": null,
+        "reason": "no free token-counting endpoint -- probing would mean a paid chat completion on every model save, and groq's own model listing is key-scoped, unlike Vertex's"
+      },
+      "vertex": {
+        "required_before_write": true,
+        "mechanism": "count_tokens",
+        "reason": null
+      }
     }
   },
   "runtime_config": {
