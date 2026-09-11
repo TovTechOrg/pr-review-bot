@@ -186,6 +186,13 @@ Recorded here so they aren't silently lost. Format:
 - **Why parked:** Cosmetic and narrow (only reachable by typing a value that's already both invalid and blocked from saving). The fix is straightforward (gate on `CONFIG_FIELDS.filter(f => f.group === group).some(f => invalidConfigFields.has(f.key))` too) but wasn't judged worth a fix-wave slot for a state that's already blocked from being saved.
 - **Follow-up:** Add that per-field-in-group check to `refreshGroupPreview`'s hide condition alongside the existing `validateGroup(group).length` check, if this proves confusing in practice.
 
+### CI run for the dashboard-typed-config-controls merge logged several warnings, all pre-existing infrastructure noise unrelated to the change
+
+- **Found during:** Polling GitHub Actions run `34607749968` (`main CI`, triggered by the merge push `7ee59e8..11bf049`) after merging and pushing dashboard-typed-config-controls, per explicit request to check the run for errors/warnings.
+- **What:** All three jobs (`lint-and-test`, `docs`, `pages`) completed successfully; no job or step failed. Scanning the full job logs for "warning"/"deprecat" turned up: a git `safe.directory`-config hint on `actions/checkout`; a `tar --warning=no-unknown-keyword` flag notice from the `uv` install step (that's the flag being passed, not a warning being raised); two Postgres test-container init lines (`no usable system locales were found`, `enabling "trust" authentication for local connections`) from the `lint-and-test` job's service container teardown; a routine "MkDocs 2.0 upcoming backward-incompatible changes" notice from Material for MkDocs in the `pages` job's guide build; and a Node `(node:2360) [DEP0040] DeprecationWarning: punycode module is deprecated` line from `actions/deploy-pages@v5`'s own internals. No `PytestWarning`/`DeprecationWarning`/`UserWarning` appeared in the `pytest` step's own output.
+- **Why parked:** None of these originate from this branch's code or are new to this run -- they're standard, recurring noise from the pinned third-party actions/tooling versions (`actions/checkout`, `uv`'s tar extraction, the ephemeral Postgres service container, Material for MkDocs' own release-notice banner, `actions/deploy-pages`'s bundled Node runtime) that would appear identically on any push to this pipeline. No action needed.
+- **Follow-up:** None expected from this branch. If `actions/deploy-pages` or Material for MkDocs are ever upgraded, re-check whether these specific lines are still present or have changed shape.
+
 _Everything closed as of 2026-09-05 or earlier (Stage 3b's five items,
 2026-08-21's four items, and "Repo-wide `ruff check .` is already red on
 main" — confirmed clean again as of 2026-09-05) has been pruned from this
