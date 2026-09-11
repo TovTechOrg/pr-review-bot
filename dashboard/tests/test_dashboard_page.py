@@ -503,3 +503,24 @@ async def test_every_programmatic_value_write_goes_through_sync_field():
     assert ".value = " not in config_js.split("function syncField(")[0], (
         "a value is assigned outside syncField"
     )
+
+
+async def test_config_form_groups_fields_and_validates_across_them():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "GROUP_ORDER" in body
+    assert "function validateGroup(" in body
+    # both cross-field rules the server enforces are expressed client-side
+    assert "cfg_err_base_exceeds_max" in body
+    assert "cfg_err_backoff_base_exceeds_max" in body
+    # the dead guard is finally fed
+    assert "invalidConfigFields.add(" in body
+    assert "invalidConfigFields.delete(" in body
+
+
+async def test_cross_field_validation_is_keyed_by_group_not_by_field():
+    """A rule must not report as passing because the field that would have
+    failed it was not the one touched."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "invalidConfigFields.add(\"group:\"" in body

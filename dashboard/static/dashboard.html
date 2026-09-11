@@ -329,6 +329,15 @@
     .cfg-stepper button { width: 2.6rem; height: 2.4rem; font-size: 1rem; }
     .cfg-stepper-value { width: 3.5rem; height: 2.4rem; }
   }
+  .cfg-group { grid-column: 1 / -1; border: 1px solid var(--border);
+    padding: 0.75rem 0.85rem; margin: 0.3rem 0; }
+  .cfg-group-cap { font-family: var(--pixel-font); font-size: 0.6rem;
+    letter-spacing: 0.03em; text-transform: uppercase;
+    color: var(--text-muted); margin-bottom: 0.7rem; }
+  .cfg-group-rows { display: grid; grid-template-columns: max-content 1fr;
+    gap: 0.6rem 0.75rem; align-items: start; }
+  @media (max-width: 640px) { .cfg-group-rows { grid-template-columns: 1fr; } }
+  input.cfg-bad { outline: 2px solid var(--fail); outline-offset: 1px; }
   /* A ruled group, like the config form's own rows above it -- not a boxed,
      dithered panel. Plain dashed hairlines between provider rows, matching
      .kv-row's separator idiom, instead of a nested "hollowed out" fill. */
@@ -2206,20 +2215,31 @@
         </span>`;
     }
 
+    function groupHtml(group) {
+      const rows = CONFIG_FIELDS.filter((f) => f.group === group).map(configRowHtml).join("");
+      return `
+        <div class="cfg-group" data-group="${group}">
+          <div class="cfg-group-cap" data-i18n="cfg_group_${group}"></div>
+          <div class="cfg-group-rows">${rows}</div>
+          <div class="field-error" data-group-error="${group}" hidden></div>
+          <div class="cfg-preview" data-preview-for="${group}" hidden></div>
+        </div>`;
+    }
+
     function renderConfigForm() {
       const form = document.getElementById("configForm");
       const providerRows = document.getElementById("providerModelRows");
       const slotRows = document.getElementById("slotConfigRows");
-      const html = CONFIG_FIELDS.filter((f) => f.kind !== "enum")
-        .map(configRowHtml)
-        .join("");
-      // provider is pinned above the generated rows because it drives
-      // #providerModelRows directly beneath it.
+      // provider is pinned above the groups because it drives
+      // #providerModelRows directly beneath it; review_draft_prs sits below
+      // them, per the design's grouping (docs/superpowers/specs/
+      // 2026-09-11-dashboard-typed-config-controls-design.md section 5).
       form.innerHTML =
         configRowHtml(fieldByKey("provider")) +
         '<div id="providerModelRows" class="provider-model-grid"></div>' +
         '<div id="slotConfigRows" class="provider-model-grid"></div>' +
-        html;
+        GROUP_ORDER.map(groupHtml).join("") +
+        configRowHtml(fieldByKey("review_draft_prs"));
       // Re-attach the two containers' previously rendered content, if any.
       if (providerRows) document.getElementById("providerModelRows").innerHTML = providerRows.innerHTML;
       if (slotRows) document.getElementById("slotConfigRows").innerHTML = slotRows.innerHTML;
@@ -2247,6 +2267,10 @@
         el.addEventListener("input", () => {
           refreshFieldDisplay(field);
           refreshGroupPreview(field.group);
+        });
+        el.addEventListener("blur", () => {
+          validateField(field);
+          validateGroup(field.group);
         });
       });
       applyLanguage(currentLang);
@@ -2547,8 +2571,78 @@
         : parseFloat(raw);
     }
 
-    // Stub -- implemented in the grouping/validation task.
-    function validateField() {}
+    const GROUP_ORDER = ["cooldown", "backoff", "usage_cap", "limits"];
+
+    function validateField(field) {
+      if (field.min === undefined && field.kind !== "wallclock") return;
+      const el = document.getElementById(tuningKnobFieldId(field.key));
+      const raw = el.value;
+      let problem = "";
+      if (raw === "") {
+        // Blank is legitimate for the magnitude field (cap off) and for the
+        // no-fallback knobs (omitted from the PATCH, see readConfigValue).
+        problem = "";
+      } else if (field.kind === "wallclock") {
+        if (!el.checkValidity()) problem = t("cfg_err_wallclock");
+      } else {
+        const value = parseFloat(raw);
+        if (!isFinite(value)) problem = t("cfg_err_not_a_number");
+        else if (field.exclusive ? value <= field.min : value < field.min) {
+          problem = t("cfg_err_min").replace("{min}", field.min)
+            .replace("{rel}", t(field.exclusive ? "cfg_rel_gt" : "cfg_rel_gte"));
+        }
+      }
+      const errorEl = document.querySelector(`[data-error-for="${field.key}"]`);
+      if (problem) {
+        invalidConfigFields.add(field.key);
+        errorEl.hidden = false;
+        errorEl.textContent = "* " + problem;
+        el.classList.add("cfg-bad");
+      } else {
+        invalidConfigFields.delete(field.key);
+        errorEl.hidden = true;
+        el.classList.remove("cfg-bad");
+      }
+      updateSaveGuards();
+    }
+
+    function numberIn(key) {
+      const raw = document.getElementById(tuningKnobFieldId(key)).value;
+      return raw === "" ? NaN : parseFloat(raw);
+    }
+
+    // Cross-field rules. No per-field min/step attribute can express either;
+    // the server rejects each group WHOLE, so the client reports it the same
+    // way -- one line at the group's foot, keyed by group rather than by
+    // field so a rule cannot pass merely because the offending field was not
+    // the one blurred.
+    function validateGroup(group) {
+      const problems = [];
+      if (group === "cooldown") {
+        const base = numberIn("cooldown_base_seconds");
+        const cap = numberIn("cooldown_max_seconds");
+        if (isFinite(base) && isFinite(cap) && base > cap) {
+          problems.push(t("cfg_err_base_exceeds_max").replace("{base}", base).replace("{max}", cap));
+        }
+      }
+      if (group === "backoff") {
+        const base = numberIn("dispatcher_failure_base_backoff_seconds");
+        const cap = numberIn("dispatcher_failure_max_backoff_seconds");
+        if (isFinite(base) && isFinite(cap) && base > cap) {
+          problems.push(t("cfg_err_backoff_base_exceeds_max").replace("{base}", base).replace("{max}", cap));
+        }
+      }
+      const errorEl = document.querySelector(`[data-group-error="${group}"]`);
+      if (errorEl) {
+        errorEl.hidden = problems.length === 0;
+        errorEl.textContent = problems.length ? "* " + problems.join("; ") : "";
+      }
+      if (problems.length) invalidConfigFields.add("group:" + group);
+      else invalidConfigFields.delete("group:" + group);
+      updateSaveGuards();
+      return problems;
+    }
+
     // Stub -- implemented in the previews task.
     function refreshGroupPreview() {}
 
