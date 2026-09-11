@@ -357,14 +357,22 @@ min(base * 2 ** (attempts - 1), cap) + jitter
 
 ```
 Retry schedule after a hard failure:
-[2s][4s][8s][16s][32s] then gives up — 1m 2s total
+[2s][4s][8s][16s] then gives up — 30s total
 ```
 
 Note the factor here is **hardcoded `2`**, not the configurable cooldown
 factor — the two sequences are not the same shape and the preview must
-not imply they are. Its term count is `dispatcher_max_failure_attempts`,
-a field in the same group, so changing the stepper visibly lengthens the
-schedule. Non-zero jitter is annotated ("plus 0–Ns jitter each") rather
+not imply they are.
+
+**Its term count is `dispatcher_max_failure_attempts` MINUS ONE.**
+`dispatcher.py:524` goes terminal at `next_attempt >= max_failure_attempts`,
+so `compute_backoff` is only ever reached for `next_attempt` in
+`1..attempts-1` — at `attempts = 1` the first failure is terminal and there
+is no wait at all, which `tests/test_dispatcher.py:400` pins explicitly.
+An earlier draft of this section said the count equals `attempts`; that was
+wrong, and the implementation's `Math.max(attempts - 1, 0)` is correct.
+`dispatcher_max_failure_attempts` is a field in the same group either way,
+so changing the stepper still visibly lengthens the schedule. Non-zero jitter is annotated ("plus 0–Ns jitter each") rather
 than folded into the chips, since it is random per retry.
 
 The total is rendered at full precision: 62 seconds reads "1m 2s", never
@@ -373,8 +381,9 @@ The total is rendered at full precision: 62 seconds reads "1m 2s", never
 The backoff preview earned its place during design by exposing a real
 fact about the shipped defaults: at base 2, ×2, 5 attempts the schedule
 tops out at 32s, so `dispatcher_failure_max_backoff_seconds = 300` is
-**inert** — it does not bind until attempts reach 9. Four independent
-number boxes hide that; the ladder states it.
+**inert** — with only `attempts - 1` waits it does not bind until
+`dispatcher_max_failure_attempts` reaches 10. Four independent number boxes
+hide that; the ladder states it.
 
 Both previews hide **entirely** when their group is invalid — caption
 included. Clearing the chips while leaving the caption pointing at
