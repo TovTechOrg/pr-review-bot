@@ -158,6 +158,13 @@ Recorded here so they aren't silently lost. Format:
 - **Follow-up:** what closing it would take
 ```
 
+### `readConfigValue`'s blank/zero handling briefly makes `usage_cap_tokens=0` a hard 422 instead of the old silent "cap off"
+
+- **Found during:** dashboard-typed-config-controls Task 2, by the opus reviewer subagent spawned to draft fixes for two test/plan discrepancies (its "Additional flags" item 3), while examining `readConfigValue`'s exact semantics against the pre-refactor `saveConfig`.
+- **What:** The pre-registry `saveConfig` built non-tuning fields with `parseFloat(...) || null` / `parseInt(...) || null`, so a literal `0` in `usage_cap_tokens` (min 0, exclusive) silently became `null` ("cap off"). The new `readConfigValue` only nulls on `raw === ""`, so `0` now round-trips as `0` and the server 422s instead. (The same change also *fixes* `cooldown_base_seconds`, whose min is 0 inclusive: `0` previously coerced to `null` incorrectly and now correctly sends `0`.) Between this commit and Task 4 (which adds client-side cross-field/bound validation), typing `0` into the token-cap field produces a new hard PATCH error where it used to silently no-op.
+- **Why parked:** Not a regression in final behavior -- Task 4's validation closes the gap within the same branch, before the branch is considered done. Fixing it earlier would mean duplicating bound-checking logic in `readConfigValue` that Task 4 already owns, only to delete it again one task later.
+- **Follow-up:** None needed if Task 4 lands as planned (verify its validation does cover `usage_cap_tokens=0` specifically when that task completes). If Task 4 is ever dropped from the branch, this becomes a real gap to close first.
+
 _Everything closed as of 2026-09-05 or earlier (Stage 3b's five items,
 2026-08-21's four items, and "Repo-wide `ruff check .` is already red on
 main" — confirmed clean again as of 2026-09-05) has been pruned from this
