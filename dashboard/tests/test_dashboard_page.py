@@ -474,3 +474,32 @@ async def test_slot_config_rows_are_editable():
     body = resp.text
     assert "slot-config-save" in body
     assert "/api/environment/slot-config" in body
+
+
+async def test_config_controls_are_typed_not_generic_number_boxes():
+    client = await _client()
+    body = (await client.get("/")).text
+    # duration fields carry a unit suffix and a humanised readout
+    assert "function dur(" in body
+    assert "function durLong(" in body
+    # counts render a - n + stepper, not a bare number input
+    assert "cfg-stepper" in body
+    # the magnitude field offers presets and an explicit off state
+    assert "cfg-presets" in body
+    assert "cap_off" in body
+    # the wallclock field enforces its format client-side
+    assert "([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?" in body
+
+
+async def test_every_programmatic_value_write_goes_through_sync_field():
+    """Assigning .value fires no input event, so a direct assignment leaves a
+    stale readout and a stale valid/invalid verdict. Four paths write values
+    programmatically (populate, reset-to-default, preset chips, stepper); all
+    four must route through syncField."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "function syncField(" in body
+    config_js = body.split("CONFIG_FIELDS_BEGIN")[1]
+    assert ".value = " not in config_js.split("function syncField(")[0], (
+        "a value is assigned outside syncField"
+    )

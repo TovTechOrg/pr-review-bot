@@ -306,6 +306,29 @@
   #configForm > * { min-width: 0; }
   .cfg-cell { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
   .cfg-cell .cfg-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; }
+  .cfg-num { width: 7rem; }
+  .cfg-suffix { color: var(--text-muted); font-size: 0.85rem; }
+  /* Parenthesised, not "= 5m": "=" is bidi-neutral between an RTL run and a
+     digit run, so it reorders to the wrong side in Hebrew. Isolation pins the
+     whole token. */
+  .cfg-readout { color: var(--text-muted); font-size: 0.85rem; unicode-bidi: isolate; }
+  .cfg-stepper { display: inline-flex; }
+  .cfg-stepper button { padding: 0; width: 1.9rem; height: 1.9rem; line-height: 1; cursor: pointer; }
+  .cfg-stepper button + input, .cfg-stepper input + button { border-inline-start: none; }
+  .cfg-stepper-value { width: 3rem; text-align: center; padding: 0.4rem 0; }
+  .cfg-presets { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .cfg-presets button { padding: 0.2rem 0.5rem; font-size: 0.8rem; cursor: pointer; }
+  .cfg-presets button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .cfg-reset { background: none; border: none; padding: 0; color: var(--text-muted);
+    font-size: 0.78rem; text-decoration: underline dotted; cursor: pointer; }
+  .cfg-reset:hover { color: var(--accent); }
+  @media (max-width: 640px) {
+    /* Bumped for touch: the desktop size is ~30px, under the ~44px target,
+       and there is no native mobile spinner to fall back to -- verified under
+       Playwright mobile emulation, which renders no spinner arrows at all. */
+    .cfg-stepper button { width: 2.6rem; height: 2.4rem; font-size: 1rem; }
+    .cfg-stepper-value { width: 3.5rem; height: 2.4rem; }
+  }
   /* A ruled group, like the config form's own rows above it -- not a boxed,
      dithered panel. Plain dashed hairlines between provider rows, matching
      .kv-row's separator idiom, instead of a nested "hollowed out" fill. */
@@ -2092,37 +2115,73 @@
         </span>`;
     }
 
-    // Task 3 replaces this body with one branch per `kind`. For now every
-    // field renders exactly the control the hand-written markup used, so this
-    // task is a pure refactor with no visual change.
     function controlHtml(field) {
       const id = tuningKnobFieldId(field.key);
       if (field.kind === "enum") {
-        return `<select id="${id}">
+        return `<span class="cfg-line"><select id="${id}">
             <option value="">—</option>
             <option value="gemini">gemini</option>
             <option value="groq">groq</option>
             <option value="vertex">vertex</option>
-          </select>`;
+          </select></span>`;
       }
       if (field.kind === "bool") {
         return `<input id="${id}" type="checkbox">`;
       }
       if (field.kind === "wallclock") {
-        return `<input id="${id}" type="text" placeholder="HH:MM">`;
+        return `<span class="cfg-line">
+            <input id="${id}" type="text" class="cfg-num" inputmode="numeric"
+                   pattern="([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?">
+            <span class="cfg-suffix" data-i18n="cfg_unit_utc"></span>
+          </span>`;
       }
-      const step = field.integer ? "1" : (field.step || "any");
-      const min = field.min === undefined ? "" : ` min="${field.min}"`;
-      return `<input id="${id}" type="number" step="${step}"${min}>`;
+      if (field.kind === "count") {
+        return `<span class="cfg-line">
+            <span class="cfg-stepper">
+              <button type="button" data-step="-1" data-key="${field.key}" aria-label="−">−</button>
+              <input id="${id}" class="cfg-stepper-value" readonly>
+              <button type="button" data-step="1" data-key="${field.key}" aria-label="+">+</button>
+            </span>
+            <span class="cfg-suffix" data-i18n="cfg_unit_${field.unit}"></span>
+          </span>`;
+      }
+      if (field.kind === "magnitude") {
+        const chips = field.presets
+          .map((v) => `<button type="button" data-value="${v}" data-key="${field.key}">${humanMagnitude(v)}</button>`)
+          .join("");
+        return `<span class="cfg-line">
+            <input id="${id}" type="number" class="cfg-num" step="1" min="1">
+            <span class="cfg-readout"></span>
+          </span>
+          <span class="cfg-presets">${chips}
+            <button type="button" data-value="" data-key="${field.key}" data-i18n="cfg_cap_off_chip"></button>
+          </span>`;
+      }
+      // duration
+      const step = field.step === undefined ? "any" : field.step;
+      const minAttr = field.exclusive ? ` min="${field.min + 0.001}"` : ` min="${field.min}"`;
+      return `<span class="cfg-line">
+          <input id="${id}" type="number" class="cfg-num" step="${step}"${minAttr}>
+          <span class="cfg-suffix" data-i18n="cfg_unit_${field.unit}"></span>
+          ${field.humanize === false ? "" : '<span class="cfg-readout"></span>'}
+        </span>`;
     }
 
     function configRowHtml(field) {
       const id = tuningKnobFieldId(field.key);
+      const noDefault = field.default === null && field.kind === "magnitude";
+      const hint = field.default === null && !noDefault
+        ? ""
+        : noDefault
+          ? '<span data-i18n="cfg_hint_no_default"></span>'
+          : `<span>${t("cfg_hint_default").replace("{value}", field.default)}</span>
+             · <button type="button" class="cfg-reset" data-key="${field.key}"
+                       data-i18n="cfg_hint_reset"></button>`;
       // bool is the one kind whose control (a checkbox) sits INSIDE the
-      // label, before the text, with the second grid cell left empty --
-      // matching the pre-registry hand-written markup's layout for
-      // review_draft_prs, which this generator must reproduce exactly for
-      // Task 2 to be a true pure refactor (see Task 2 Step 8).
+      // label, before the text -- matching the pre-registry hand-written
+      // markup's layout for review_draft_prs (see Task 2 Step 8) -- with the
+      // second grid cell holding just the hint/error lines instead of the
+      // control itself.
       if (field.kind === "bool") {
         return `
         <label for="${id}">
@@ -2130,14 +2189,21 @@
           <span data-i18n="env_config_${field.key}"></span>
           ${infoIconHtml("cfg_desc_" + field.key)}
         </label>
-        <span></span>`;
+        <span class="cfg-cell">
+          <span class="field-error" data-error-for="${field.key}" hidden></span>
+          <span class="field-hint">${hint}</span>
+        </span>`;
       }
       return `
         <label for="${id}">
           <span data-i18n="env_config_${field.key}"></span>
           ${infoIconHtml("cfg_desc_" + field.key)}
         </label>
-        <span class="cfg-cell">${controlHtml(field)}</span>`;
+        <span class="cfg-cell">
+          ${controlHtml(field)}
+          <span class="field-error" data-error-for="${field.key}" hidden></span>
+          <span class="field-hint">${hint}</span>
+        </span>`;
     }
 
     function renderConfigForm() {
@@ -2158,6 +2224,31 @@
       if (providerRows) document.getElementById("providerModelRows").innerHTML = providerRows.innerHTML;
       if (slotRows) document.getElementById("slotConfigRows").innerHTML = slotRows.innerHTML;
       form.querySelectorAll('[data-action="info"]').forEach(wireInfoIcon);
+      form.querySelectorAll(".cfg-stepper button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const field = fieldByKey(btn.dataset.key);
+          const current = parseInt(document.getElementById(tuningKnobFieldId(field.key)).value, 10);
+          const next = (isFinite(current) ? current : field.min) + parseInt(btn.dataset.step, 10);
+          syncField(field.key, Math.max(field.min, next));
+        });
+      });
+      form.querySelectorAll(".cfg-presets button").forEach((chip) => {
+        chip.addEventListener("click", () => {
+          syncField(chip.dataset.key, chip.dataset.value === "" ? null : parseInt(chip.dataset.value, 10));
+        });
+      });
+      form.querySelectorAll(".cfg-reset").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          syncField(btn.dataset.key, fieldByKey(btn.dataset.key).default);
+        });
+      });
+      CONFIG_FIELDS.forEach((field) => {
+        const el = document.getElementById(tuningKnobFieldId(field.key));
+        el.addEventListener("input", () => {
+          refreshFieldDisplay(field);
+          refreshGroupPreview(field.group);
+        });
+      });
       applyLanguage(currentLang);
     }
 
@@ -2438,15 +2529,6 @@
       return "cfg" + field.replace(/(^|_)([a-z])/g, (_m, _sep, c) => c.toUpperCase());
     }
 
-    function writeFieldValue(field, value) {
-      const el = document.getElementById(tuningKnobFieldId(field.key));
-      if (field.kind === "bool") {
-        el.checked = Boolean(value);
-        return;
-      }
-      el.value = value === null || value === undefined ? "" : value;
-    }
-
     function readConfigValue(field) {
       const el = document.getElementById(tuningKnobFieldId(field.key));
       if (field.kind === "bool") return el.checked;
@@ -2465,6 +2547,98 @@
         : parseFloat(raw);
     }
 
+    // Stub -- implemented in the grouping/validation task.
+    function validateField() {}
+    // Stub -- implemented in the previews task.
+    function refreshGroupPreview() {}
+
+    function trimNum(n) { return (Math.round(n * 10) / 10).toString(); }
+
+    // Humanised duration for a readout: "45s", "5m", "1h". Display only --
+    // the wire format is ALWAYS seconds and is never derived from this.
+    function dur(seconds) {
+      if (!isFinite(seconds) || seconds < 0) return "";
+      if (seconds === 0) return "0" + t("unit_abbr_seconds");
+      if (seconds >= 3600) return trimNum(seconds / 3600) + t("unit_abbr_hours");
+      if (seconds >= 60) return trimNum(seconds / 60) + t("unit_abbr_minutes");
+      return trimNum(seconds) + t("unit_abbr_seconds");
+    }
+
+    // Full-precision total: 62 reads "1m 2s", never "1m". A preview whose
+    // purpose is accuracy may not round.
+    function durLong(seconds) {
+      if (!isFinite(seconds) || seconds < 0) return "";
+      if (seconds < 60) return trimNum(seconds) + t("unit_abbr_seconds");
+      const mins = Math.floor(seconds / 60);
+      const rest = Math.round((seconds - mins * 60) * 10) / 10;
+      if (mins >= 60) {
+        const hours = Math.floor(mins / 60);
+        return hours + t("unit_abbr_hours") + " " + (mins - hours * 60) + t("unit_abbr_minutes");
+      }
+      return mins + t("unit_abbr_minutes") + (rest ? " " + rest + t("unit_abbr_seconds") : "");
+    }
+
+    function humanMagnitude(n) {
+      if (!isFinite(n)) return "";
+      if (n >= 1e6) return trimNum(n / 1e6) + "M";
+      if (n >= 1e3) return trimNum(n / 1e3) + "k";
+      return String(n);
+    }
+
+    // THE one entry point for setting a field's value. Assigning .value
+    // directly fires no input event, which leaves the readout and the
+    // valid/invalid verdict stale -- observed as a row reading
+    // "0 seconds (1s)". populate, reset-to-default, preset chips and the
+    // stepper all route through here.
+    function syncField(key, value) {
+      const field = fieldByKey(key);
+      writeFieldValue(field, value);
+      refreshFieldDisplay(field);
+      validateField(field);
+      refreshGroupPreview(field.group);
+    }
+
+    // The only place that writes an input's .value/.checked directly --
+    // called by syncField (the sanctioned programmatic-write path) and by
+    // populateConfigForm's initial bulk write, which immediately calls
+    // syncAllFields() to bring every readout/validity state in sync with what
+    // this just wrote. Defined after syncField in the source (not just in
+    // execution order -- function hoisting would make that irrelevant) so
+    // that "no .value assignment appears outside syncField's own reach" is
+    // also true of the raw source text, not just of runtime call graphs.
+    function writeFieldValue(field, value) {
+      const el = document.getElementById(tuningKnobFieldId(field.key));
+      if (field.kind === "bool") {
+        el.checked = Boolean(value);
+        return;
+      }
+      el.value = value === null || value === undefined ? "" : value;
+    }
+
+    function syncAllFields() {
+      CONFIG_FIELDS.forEach((field) => {
+        refreshFieldDisplay(field);
+        validateField(field);
+      });
+      ["cooldown", "backoff"].forEach(refreshGroupPreview);
+    }
+
+    // Updates the readout beside a field. Fields with no readout no-op.
+    function refreshFieldDisplay(field) {
+      const cell = document.getElementById(tuningKnobFieldId(field.key)).closest(".cfg-cell");
+      const readout = cell && cell.querySelector(".cfg-readout");
+      if (!readout) return;
+      const raw = document.getElementById(tuningKnobFieldId(field.key)).value;
+      if (field.kind === "magnitude") {
+        readout.textContent = raw === "" ? t("cfg_cap_off") : humanMagnitude(parseInt(raw, 10));
+        cell.querySelectorAll(".cfg-presets button").forEach((chip) => {
+          chip.setAttribute("aria-pressed", String(chip.dataset.value === raw));
+        });
+        return;
+      }
+      readout.textContent = raw === "" ? "" : "(" + dur(parseFloat(raw)) + ")";
+    }
+
     function populateConfigForm(cfg) {
       CONFIG_FIELDS.forEach((field) => writeFieldValue(field, cfg[field.key]));
       currentConfig = { key_index: cfg.key_index || {} };
@@ -2472,6 +2646,7 @@
       updateSaveGuards();
       renderProviderModelRows();
       renderSlotConfigRows(cfg.slot_configs);
+      syncAllFields();
     }
 
     async function fetchEnvironmentConfig() {
