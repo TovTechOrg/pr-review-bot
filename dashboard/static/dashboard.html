@@ -1213,6 +1213,13 @@
       // (safe pre-first-fetch: renderVars/currentConfig default to empty).
       renderRenderVarsTable();
       renderProviderModelRows();
+      // The config form's hint line bakes "default {value}" via t() at
+      // render time (the {value} interpolation can't be expressed as a
+      // plain data-i18n attribute), so it stays in whatever language was
+      // active when the row was first rendered -- refresh it explicitly
+      // rather than rebuild the whole form (which would discard any
+      // unsaved input value).
+      refreshConfigHints();
     }
 
     const POLL_INTERVAL_MS = 4000;
@@ -2254,7 +2261,7 @@
         ? ""
         : noDefault
           ? '<span data-i18n="cfg_hint_no_default"></span>'
-          : `<span>${t("cfg_hint_default").replace("{value}", field.default)}</span>
+          : `<span data-hint-for="${field.key}">${t("cfg_hint_default").replace("{value}", field.default)}</span>
              · <button type="button" class="cfg-reset" data-key="${field.key}"
                        data-i18n="cfg_hint_reset"></button>`;
       // bool is the one kind whose control (a checkbox) sits INSIDE the
@@ -2765,15 +2772,21 @@
       const jitter = numberIn("dispatcher_backoff_jitter_seconds");
       const attempts = parseInt(document.getElementById(tuningKnobFieldId("dispatcher_max_failure_attempts")).value, 10);
       if (![base, cap].every(isFinite) || !isFinite(attempts)) return "";
-      const shown = Math.min(attempts, 8);
+      // dispatcher.py's hard-failure handler goes terminal (no backoff) the
+      // moment next_attempt >= dispatcher_max_failure_attempts -- compute_backoff
+      // is only ever reached for next_attempt in 1..attempts-1. So the real
+      // schedule is attempts-1 waits, not attempts (at attempts=1, zero waits:
+      // the first failure is terminal, per test_dispatcher.py's own comment).
+      const realWaits = Math.max(attempts - 1, 0);
+      const shown = Math.min(realWaits, 8);
       let out = "", total = 0;
-      for (let n = 1; n <= attempts; n++) {
+      for (let n = 1; n <= realWaits; n++) {
         const wait = Math.min(base * Math.pow(BACKOFF_DOUBLING, n - 1), cap);
         total += wait;
         if (n <= shown) out += chip(dur(wait), wait >= cap);
       }
-      if (attempts > shown) {
-        out += `<span class="cfg-chip-tail">${t("cfg_preview_more").replace("{n}", attempts - shown)}</span>`;
+      if (realWaits > shown) {
+        out += `<span class="cfg-chip-tail">${t("cfg_preview_more").replace("{n}", realWaits - shown)}</span>`;
       }
       let tail = t("cfg_preview_gives_up").replace("{total}", durLong(total));
       if (isFinite(jitter) && jitter > 0) {
@@ -2796,7 +2809,16 @@
       host.innerHTML =
         `<div class="cfg-preview-cap" data-i18n="cfg_preview_cap_${group}"></div>
          <div class="cfg-chips">${chips}</div>`;
-      applyLanguage(currentLang);
+      // Translate only this preview's own subtree -- NOT the global
+      // applyLanguage(), which also re-renders #providerModelRows from
+      // currentConfig.key_index, discarding any key-slot dropdown selection
+      // not yet saved. refreshGroupPreview runs on every keystroke in the
+      // cooldown/backoff groups, which made that silent data-loss path
+      // near-guaranteed rather than the rare "language toggle mid-edit" case
+      // it originally was.
+      host.querySelectorAll("[data-i18n]").forEach((el) => {
+        el.textContent = t(el.getAttribute("data-i18n"));
+      });
     }
 
     function trimNum(n) { return (Math.round(n * 10) / 10).toString(); }
@@ -2884,6 +2906,17 @@
         return;
       }
       readout.textContent = raw === "" ? "" : "(" + dur(parseFloat(raw)) + ")";
+    }
+
+    // Re-sets every "default {value}" hint's text to the current language.
+    // Safe to call before the form has ever been populated with real data --
+    // it only touches [data-hint-for] spans configRowHtml already rendered,
+    // never a field's own input value.
+    function refreshConfigHints() {
+      document.querySelectorAll("[data-hint-for]").forEach((el) => {
+        const field = fieldByKey(el.getAttribute("data-hint-for"));
+        if (field) el.textContent = t("cfg_hint_default").replace("{value}", field.default);
+      });
     }
 
     function populateConfigForm(cfg) {

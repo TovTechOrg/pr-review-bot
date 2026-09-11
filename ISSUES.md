@@ -172,6 +172,20 @@ Recorded here so they aren't silently lost. Format:
 - **Why parked:** The plan's own literal CSS was followed exactly; deviating from it to hit the stated target would be a unilateral design change outside what any task's steps asked for, and the gap (38.4px vs ~44px) is real but small -- not a broken control, just short of the stated ideal.
 - **Follow-up:** If touch ergonomics on the count fields are ever revisited, bump `.cfg-stepper button`'s `height` (and consider `width`) enough to clear 44px under the same `max-width: 640px` media query.
 
+### Cooldown preview's "reaching {value} at the 31st re-review" tail names the wrong re-review number when the cap is hit between levels 6 and 30
+
+- **Found during:** dashboard-typed-config-controls final whole-branch review (opus, no subagents), verified directly against `cooldownPreviewHtml()`.
+- **What:** The preview loop returns its "ceiling" tail unconditionally at `level === 5` once it establishes the cap wasn't reached in levels 0-5, using `cooldownAt(30, ...)` (already cap-clamped) as `{value}`. If the true cap is reached later than level 5 but before level 30 (e.g. level 17 with a gentler factor), the displayed *value* is still correct (it's the cap), but the claim "at the 31st re-review" is wrong -- the cap was actually reached earlier. The shipped defaults (300/2/3600) never hit this branch (they hit the cap at level 4, taking the "held at" branch instead), so it's latent, not visible with default config.
+- **Why parked:** Low severity -- the number shown is never wrong, only the "when" framing is imprecise, and only for cooldown factors gentler than the shipped default. Fixing it means walking the loop further (or a closed-form check) to find the actual cap-crossing level before deciding which tail to show, which is more than a one-line change for a display-only imprecision.
+- **Follow-up:** If ever revisited, extend the loop to continue past level 5 (still rendering only the first 6 chips) until either the cap is hit (report the real crossing level) or level 30 is reached (keep the current "ceiling" wording, which is only actually correct in that case).
+
+### Live cooldown preview keeps rendering chips for an individually-invalid field value (e.g. a negative base) when no cross-field rule catches it
+
+- **Found during:** Same final review as above.
+- **What:** `refreshGroupPreview` only hides the preview block when `validateGroup(group)` reports a cross-field problem (base > max); it never checks whether an individual member field is in `invalidConfigFields` (e.g. a negative `cooldown_base_seconds`, which `validateField` flags but which triggers no cross-field rule). Result: typing `-5` into Base renders a row of empty chips (`dur()` returns `""` for negative durations) instead of hiding the preview the way an out-of-range cross-field combination does. Save is still correctly blocked either way -- this is a display-only inconsistency.
+- **Why parked:** Cosmetic and narrow (only reachable by typing a value that's already both invalid and blocked from saving). The fix is straightforward (gate on `CONFIG_FIELDS.filter(f => f.group === group).some(f => invalidConfigFields.has(f.key))` too) but wasn't judged worth a fix-wave slot for a state that's already blocked from being saved.
+- **Follow-up:** Add that per-field-in-group check to `refreshGroupPreview`'s hide condition alongside the existing `validateGroup(group).length` check, if this proves confusing in practice.
+
 _Everything closed as of 2026-09-05 or earlier (Stage 3b's five items,
 2026-08-21's four items, and "Repo-wide `ruff check .` is already red on
 main" — confirmed clean again as of 2026-09-05) has been pruned from this
