@@ -165,6 +165,13 @@ Recorded here so they aren't silently lost. Format:
 - **Why parked:** Not a regression in final behavior -- Task 4's validation closes the gap within the same branch, before the branch is considered done. Fixing it earlier would mean duplicating bound-checking logic in `readConfigValue` that Task 4 already owns, only to delete it again one task later.
 - **Follow-up:** None needed if Task 4 lands as planned (verify its validation does cover `usage_cap_tokens=0` specifically when that task completes). If Task 4 is ever dropped from the branch, this becomes a real gap to close first.
 
+### The `count`-kind stepper's mobile touch target is ~38px tall, short of the plan's own stated ~44px goal
+
+- **Found during:** dashboard-typed-config-controls Task 7's `ui-visual-review` pass, measuring the stepper's actual rendered bounding box under the 390px mobile viewport via Playwright (`button.bounding_box()`).
+- **What:** Measured 41.6×38.4 CSS px (`width: 2.6rem; height: 2.4rem;`) — exactly what the plan's own Task 3 Step 6 CSS snippet specifies, copied verbatim. The plan's design spec (§4.2) and that same CSS block's own comment both state the goal as "≈44 px" / "the ~44 px target," but `2.4rem` (38.4px at the default 16px root) doesn't reach it — `2.75rem` would.
+- **Why parked:** The plan's own literal CSS was followed exactly; deviating from it to hit the stated target would be a unilateral design change outside what any task's steps asked for, and the gap (38.4px vs ~44px) is real but small -- not a broken control, just short of the stated ideal.
+- **Follow-up:** If touch ergonomics on the count fields are ever revisited, bump `.cfg-stepper button`'s `height` (and consider `width`) enough to clear 44px under the same `max-width: 640px` media query.
+
 _Everything closed as of 2026-09-05 or earlier (Stage 3b's five items,
 2026-08-21's four items, and "Repo-wide `ruff check .` is already red on
 main" — confirmed clean again as of 2026-09-05) has been pruned from this
