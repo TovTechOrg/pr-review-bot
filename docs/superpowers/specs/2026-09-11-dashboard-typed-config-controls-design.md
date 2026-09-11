@@ -493,8 +493,11 @@ the registry, those ids no longer appear as literals. The test is
 rewritten to assert the **registry** declares all 17 keys, which is the
 same guarantee against the new structure.
 `test_config_form_omits_blank_tuning_knob_fields_from_the_patch_body`
-(`:452`) must keep passing unchanged — the omit-don't-null rule survives
-the refactor intact.
+(`:452`) pins the omit-don't-null rule, which survives the refactor intact
+— but not unchanged: the rule moves from one loop's `if (raw !== "")` guard
+into two collaborating places (`readConfigValue` returning `undefined`,
+`saveConfig` filtering it out), so the test is retargeted at both of those
+literal strings rather than the now-nonexistent original phrasing.
 
 ### 7.5 Not covered by tests
 

@@ -1381,9 +1381,9 @@ these existing `env_config_*` values in `STRINGS.en`** (the keys stay):
 
 | Key | Was | Becomes |
 |---|---|---|
-| `env_config_cooldown_base` → `env_config_cooldown_base_seconds` | "Cooldown base (seconds)" | "Base" |
+| `env_config_cooldown_base_seconds` (already renamed in Task 2 — see below) | "Cooldown base (seconds)" | "Base" |
 | `env_config_cooldown_factor` | "Cooldown factor" | "Multiply by" |
-| `env_config_cooldown_max` → `env_config_cooldown_max_seconds` | "Cooldown max (seconds)" | "Up to" |
+| `env_config_cooldown_max_seconds` (already renamed in Task 2 — see below) | "Cooldown max (seconds)" | "Up to" |
 | `env_config_dispatcher_failure_base_backoff_seconds` | (long) | "First retry after" |
 | `env_config_dispatcher_failure_max_backoff_seconds` | (long) | "Up to" |
 | `env_config_dispatcher_backoff_jitter_seconds` | (long) | "Random jitter" |
@@ -1391,11 +1391,16 @@ these existing `env_config_*` values in `STRINGS.en`** (the keys stay):
 | `env_config_usage_cap_tokens` | "Usage cap (tokens)" | "Token cap" |
 | `env_config_usage_cap_reset` | "Usage cap reset (UTC)" | "Resets at" |
 
-The registry keys the label as `env_config_<field.key>`, so the three
-cooldown keys are **renamed** from `env_config_cooldown_base`/`_factor`/`_max`
-to `env_config_cooldown_base_seconds`/`_factor`/`_max_seconds`. Rename them
-in both language blocks. Leave the `limits` group's labels as they are —
-they already read well standalone.
+The registry keys the label as `env_config_<field.key>`, so
+`env_config_cooldown_base`/`_max` and their `cfg_desc_cooldown_base`/`_max`
+tooltip counterparts had to be renamed to `_base_seconds`/`_max_seconds` as
+soon as Task 2's registry-driven markup went live (otherwise those two rows
+render their raw i18n key as literal text, in both languages, from the
+moment `renderConfigForm()` first runs) — that rename was pulled forward
+into Task 2 rather than left for this step; see that task's commit.
+`cooldown_factor` needed no rename. This step only changes the *values* of
+the (already-renamed) keys below. Leave the `limits` group's labels as they
+are — they already read well standalone.
 
 Mirror every new and changed string into `STRINGS.he`. Hebrew for the new
 keys:
