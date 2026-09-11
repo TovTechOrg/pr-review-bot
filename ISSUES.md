@@ -282,6 +282,41 @@ beyond what the code/tests/design docs it references already provide._
 - **Why parked:** Genuinely independent of the entitlement work it was found next to -- it would exist unchanged if the Vertex catalog had always been entitlement-scoped, and closing it means per-row dirty-state tracking (or a confirm-before-discard) in the frontend, which is a different change than adding a validation predicate to the write paths. Folding it in would widen that spec past its subject.
 - **Follow-up:** Either preserve pending per-row edits across the post-save rerender (re-apply dirty fields after `renderSlotConfigRows`, keyed by the `provider-slot` row key the row state maps already use), or warn before discarding them. Worth doing together with any other rerender-driven state loss in the same panel, since the :2846 fix suggests this class recurs here.
 
+### `set_override.py --clear-model` (with activation) probes the model it's about to delete, then arms a slot with no model at all
+
+- **Found during:** 2026-09-12 vertex-model-entitlement-validation implementation, final whole-branch review (Opus, no subagents), verified live by execution.
+- **What:** `--clear-model --index N` (without `--no-activate`) runs the activation-probe block, which reads the slot's CURRENT (pre-clear) model and probes it -- then the model write nulls it, and the provider is activated anyway. The probe answers a question about a value that is about to stop existing; the row that actually gets armed has no model at all. This fails loudly at review time (`providers/active_model.py` has no env fallback for a missing model), so it's a wasted live call and a confusing "why did it probe a model I just deleted" moment rather than a silent gap.
+- **Why parked:** Low severity and narrow (`--clear-model` plus activation in the same invocation, a combination the plan's own test suite never exercised). Fixing it means either skipping the activation probe when `--clear-model` is also given (nothing to usefully probe), or refusing to activate a slot with no model at all -- either is a small CLI-semantics decision outside the reviewed diff's scope.
+- **Follow-up:** Skip the arming probe when `args.clear_model` is set (there is no model to verify), and consider whether activating a slot with no configured model should be refused outright rather than deferred to the next review's failure.
+
+### A 404 from the vertex entitlement probe is always attributed to the model, even when a wrong project or location caused it
+
+- **Found during:** Same review as above.
+- **What:** `catalog._classify_probe_exception` maps every 404 to `model_not_callable` unconditionally. Vertex's `countTokens` 404s the same way for "this model doesn't exist for this project" and "this project/location pair is wrong" -- the probe can't distinguish them structurally. `_apply_slot_config_patch` and the dashboard's error strings both tell the operator "pick a different model" even when the actual fix is correcting `vertex_gcp_project`/`vertex_gcp_location`.
+- **Why parked:** The verdict is still safely fail-closed (a broken row is refused either way), and disambiguating the two cases would require an additional live call (e.g. probing a known-good reference model against the same project/location to isolate which field is wrong) -- real added complexity and live-call budget for a message-wording improvement, not a correctness gap.
+- **Follow-up:** If this proves confusing in practice, consider a secondary probe against a known-callable model when the primary probe 404s, to distinguish "bad model" from "bad project/location" before choosing the error string.
+
+### `google.auth.exceptions.TransportError` during a probe maps to `provider_unreachable`, not `model_probe_unavailable`
+
+- **Found during:** Same review as above.
+- **What:** `catalog._classify_probe_exception` defers to `_classify_vertex_auth_exception` first, which maps any `GoogleAuthError` subclass (including `TransportError`, a genuine network failure) to `provider_unreachable` -- one of the pre-existing listing-call codes, not one of this design's two new probe-specific codes. The design spec (section 9) lists "timeout" under `model_probe_unavailable`; a `TransportError` is the same class of failure but keeps the older code. The failure direction is safe (still refuses the write), but the dashboard has no `err_provider_unreachable` string (added only for the two new codes), so it falls back to the raw code via `tError()` instead of the "couldn't verify, try again" message `model_probe_unavailable` would show.
+- **Why parked:** No incorrect verdict results -- both codes fail closed identically in `model_check.problems`. Purely a message-wording/consistency question about which of two "the provider didn't answer" codes a transport-layer failure should carry, not a behavior bug.
+- **Follow-up:** Decide whether probe-specific transport failures should be reclassified from `provider_unreachable` to `model_probe_unavailable` for a consistent message, or whether `err_provider_unreachable` should simply be added to both i18n dictionaries.
+
+### The per-row vertex baseline's location fallback changed from `vertexLocations[0]` to `""` when Task 7 made the baseline map provider-agnostic
+
+- **Found during:** Same review as above.
+- **What:** Before Task 7, `rowVertexBaseline.set(rowKey, { project, location })` used `entry.vertex_gcp_location || vertexLocations[0]` as the baseline location for a row with no stored location. The provider-agnostic rewrite (`rowBaseline.set(...)`, hoisted above the vertex-only branch so every provider gets a baseline) uses `entry.vertex_gcp_location || ""` instead, so a genuinely unconfigured vertex row's baseline no longer matches whatever the location `<select>` actually renders as selected (`vertexLocations[0]` there too).
+- **Why parked:** No user-visible effect found: such a row already has Save disabled by the pre-existing `!entry.vertex_gcp_location && !rowValidated.has(rowKey)` guard, so the mismatched baseline can't currently cause a wrongly-enabled or wrongly-disabled Save button in practice.
+- **Follow-up:** If the Save-disabled guard for an unconfigured row is ever relaxed or restructured, revisit whether the baseline should track `vertexLocations[0]` (matching the rendered default) instead of `""`.
+
+### New probe/model_check test coverage has a few pinning gaps
+
+- **Found during:** Same review as above.
+- **What:** (1) `test_validate_model_var_rejects_a_listed_but_uncallable_model` stubs `model_check.problems` with `lambda *a, **k: [...]`, so it wouldn't fail if `_validate_model_var` stopped passing the row's `vertex_gcp_project`/`vertex_gcp_location` through. (2) No test exercises a genuine timeout/no-status-attribute exception through `_classify_probe_exception` (the design spec's section 9 explicitly calls for one alongside 429/500). (3) No test covers `_apply_llm_credential`'s vertex base64-decode-failure branch specifically (only the generic "credential decode fails" shape is implied, not asserted end-to-end for that function). (4) `tests/test_set_override_script.py`'s `_temp_db` autouse fixture now stubs `model_check.problems` to `[]` for the whole file, so only `TestModelProbe` actually exercises the real gate -- correct for isolating those tests from live calls, but it means a regression in the CLI's own probe wiring (as opposed to `model_check.problems` itself) would only be caught by that one test class.
+- **Why parked:** None of these are known-wrong behavior -- the code paths are believed correct (verified by reading and, in two cases, live execution during review) -- these are coverage gaps that would let a *future* regression in these specific spots slip through unpinned, not currently-wrong behavior.
+- **Follow-up:** Add a test asserting `_validate_model_var`'s project/location pass-through with a signature-checking stub (`def _problems(provider, slot, model, **kwargs)`); add a `_FakeApiError`-free / bare-`Exception` case to `TestProbeVertexModel` for the no-status-attribute path; add a decode-failure test for `_apply_llm_credential`'s vertex branch; consider a narrow non-autouse test in `test_set_override_script.py` that exercises the CLI's probe call sites without the blanket stub.
+
 ---
 
 ## Design Gaps

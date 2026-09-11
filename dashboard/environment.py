@@ -414,8 +414,21 @@ def _apply_llm_credential(family: str, payload: ApplyLlmCredentialRequest) -> di
     # cannot resolve it. Runs before the push for the same reason the
     # location guard above does -- a refused model must never leave a pushed
     # credential with no matching slot_config row.
-    probe_credential: str | dict | None = credential_value or None
-    if family == "vertex" and credential_value:
+    #
+    # An empty credential_value is refused HERE, directly, rather than
+    # passed through as `credential=None` -- model_check.problems treats
+    # `None` as "no credential was given, resolve the slot's own", which for
+    # this caller would silently probe (and validate against) a DIFFERENT,
+    # already-stored credential than the one actually being applied. A
+    # request shaped `{"credential": {}}` is exactly this case: an empty
+    # api_key/service_account_b64 that must never fall back to the slot.
+    if not credential_value:
+        return {
+            "applied": [],
+            "failed": [{"key": slot_config_key, "error": "no_credential_configured"}],
+        }
+    probe_credential: str | dict = credential_value
+    if family == "vertex":
         try:
             probe_credential = json.loads(
                 base64.b64decode(credential_value, validate=True).decode()
@@ -811,23 +824,33 @@ def _arming_probe_targets(fields: dict) -> dict[tuple[str, int], list[str]]:
     Flipping either is therefore a third route to "the UI reported applied,
     every subsequent review 404s".
 
-    Scoped to what actually CHANGED. The config form re-sends every
-    provider's key_index on every save, unconditionally and by design
-    (dashboard.html's saveConfig), so an unscoped rule would fire a live call
-    per provider every time someone edits a cooldown value. A clear
-    (index None) has no target slot and is never probed -- refusing one
-    would block a key rotation, which is exactly when an operator needs it.
+    Scoped to what actually CHANGED, and to a provider that is (or is
+    becoming, via `provider` in this same PATCH) the ACTIVE one -- a
+    key_index change for a provider that isn't active arms nothing yet; the
+    separate check here for `provider` itself is what catches the moment it
+    does. The config form re-sends every provider's key_index on every save,
+    unconditionally and by design (dashboard.html's saveConfig), so an
+    unscoped rule would fire a live call per provider every time someone
+    edits a cooldown value.
+
+    A `key_index` clear (submitted as None) resolves to slot 0 -- exactly
+    what store.get_key_index_override's own fallback does -- not "no target
+    slot". For the currently-active provider that is a real arming change
+    and must be probed like any other; for an inactive one it is inert until
+    that provider is switched to. This also fixes the case where `provider`
+    and `key_index[provider]: None` arrive in the SAME patch: naively
+    falling back to the pre-clear STORED index there would probe a slot
+    other than the one the clear actually arms.
     """
     submitted_indexes = fields.get("key_index", {}) or {}
-    relevant_indexes = {
-        provider: index
-        for provider, index in submitted_indexes.items()
-        if provider in registry.PROVIDERS and index is not None
-    }
     provider_field = fields.get("provider")
     provider_changing = "provider" in fields and provider_field in registry.PROVIDERS
 
-    if not relevant_indexes and not provider_changing:
+    relevant_providers = {p for p in submitted_indexes if p in registry.PROVIDERS}
+    if provider_changing:
+        relevant_providers.add(provider_field)
+
+    if not relevant_providers:
         # Nothing here names a real provider/slot -- an unknown-provider
         # request is rejected elsewhere in _apply_config_patch without ever
         # needing a DB connection, and this must not force one just to
@@ -835,18 +858,36 @@ def _arming_probe_targets(fields: dict) -> dict[tuple[str, int], list[str]]:
         return {}
 
     stored_indexes = store.get_all_key_index_overrides()
+    current_provider = store.get_provider_override()
+
+    def _effective_index(provider: str) -> int:
+        # An explicit submission -- clear (None) included -- wins over
+        # whatever is currently stored, and a clear resolves to slot 0.
+        if provider in submitted_indexes:
+            index = submitted_indexes[provider]
+            return index if index is not None else 0
+        return stored_indexes.get(provider) or 0
+
     targets: dict[tuple[str, int], list[str]] = {}
 
-    for provider, index in relevant_indexes.items():
-        if index == stored_indexes.get(provider):
+    for provider in submitted_indexes:
+        if provider not in registry.PROVIDERS:
             continue
-        targets.setdefault((provider, index), []).append(f"key_index.{provider}")
+        new_index = _effective_index(provider)
+        if new_index == (stored_indexes.get(provider) or 0):
+            continue
+        becomes_active = provider == current_provider or (
+            provider_changing and provider_field == provider
+        )
+        if not becomes_active:
+            continue
+        targets.setdefault((provider, new_index), []).append(f"key_index.{provider}")
 
-    if provider_changing and provider_field != store.get_provider_override():
+    if provider_changing and provider_field != current_provider:
         # The slot this provider will actually run against: a key_index
-        # for it in this same PATCH wins over the stored one.
-        submitted = relevant_indexes.get(provider_field)
-        slot = submitted if submitted is not None else (stored_indexes.get(provider_field) or 0)
+        # for it in this same PATCH (clear included) wins over the stored
+        # one.
+        slot = _effective_index(provider_field)
         targets.setdefault((provider_field, slot), []).append("provider")
 
     return targets

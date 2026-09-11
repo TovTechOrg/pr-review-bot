@@ -1770,6 +1770,43 @@ class TestModelProbeGatesEveryWritePath:
         assert seen["credential"] == "fresh-key"
 
     @pytest.mark.asyncio
+    async def test_apply_llm_credential_refuses_an_empty_credential_without_probing_the_slot(
+        self, monkeypatch
+    ):
+        """M3 regression: {"credential": {}} is a valid request shape (an
+        empty api_key/service_account_b64). Passing that through as
+        credential=None would tell model_check.problems "none was given,
+        resolve the slot's own" -- silently validating (and potentially
+        passing) against a DIFFERENT, already-stored credential than the
+        one actually being applied, then overwriting Render with the empty
+        value anyway. It must be refused here, before any resolution."""
+        monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+
+        def _never_push(*a):
+            raise AssertionError("must not push an empty credential")
+
+        monkeypatch.setattr(render_client, "push_env_var", _never_push)
+
+        def _never_probe(*a, **k):
+            raise AssertionError("must not resolve/probe the slot's stored credential")
+
+        monkeypatch.setattr(environment.model_check, "problems", _never_probe)
+
+        payload = environment.ApplyLlmCredentialRequest(
+            slot=0,
+            credential={},
+            model="gemini-flash-latest",
+            vertex_gcp_project=None,
+            vertex_gcp_location=None,
+        )
+        result = await asyncio.to_thread(environment._apply_llm_credential, "gemini", payload)
+
+        assert result == {
+            "applied": [],
+            "failed": [{"key": "slot_config.gemini.0", "error": "no_credential_configured"}],
+        }
+
+    @pytest.mark.asyncio
     async def test_apply_slot_config_patch_refuses_an_uncallable_model(
         self, monkeypatch
     ):
@@ -1947,15 +1984,45 @@ class TestArmingIsGatedToo:
         assert calls == [("vertex", 1)]
 
     @pytest.mark.asyncio
-    async def test_clearing_an_override_to_none_is_not_an_arming(self, monkeypatch):
-        """key_index=None clears the override; there is no target slot to
-        probe, and refusing a clear would block a key rotation."""
+    async def test_clearing_the_active_providers_index_probes_slot_zero(self, monkeypatch):
+        """key_index=None clears the override, which resolves to slot 0 --
+        exactly what store.get_key_index_override's own fallback does -- not
+        "no target slot". For the provider that's currently ACTIVE, that is
+        a real arming change (slot 0 becomes live immediately) and must be
+        probed like any other."""
+        seen = {}
         monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"vertex": 1})
         monkeypatch.setattr(store, "get_provider_override", lambda: "vertex")
         monkeypatch.setattr(store, "set_key_index_override", lambda *a: None)
+        monkeypatch.setattr(store, "get_slot_config", lambda *a: {"model": "m"})
+        monkeypatch.setattr(
+            environment.model_check,
+            "problems",
+            lambda provider, slot, model, **k: seen.update(
+                {"provider": provider, "slot": slot}
+            ) or [],
+        )
+
+        result = await asyncio.to_thread(
+            environment._apply_config_patch,
+            environment.EnvironmentConfigPatch(key_index={"vertex": None}),
+        )
+
+        assert seen == {"provider": "vertex", "slot": 0}
+        assert result["failed"] == []
+
+    @pytest.mark.asyncio
+    async def test_clearing_an_inactive_providers_index_is_not_an_arming(self, monkeypatch):
+        """Clearing a key-index override for a provider that ISN'T currently
+        active (and isn't becoming active in this same PATCH) arms nothing
+        yet -- nothing is live against it. The separate arming check fires
+        later, if and when that provider is switched to."""
+        monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"vertex": 1})
+        monkeypatch.setattr(store, "get_provider_override", lambda: "gemini")
+        monkeypatch.setattr(store, "set_key_index_override", lambda *a: None)
 
         def _never(*a, **k):
-            raise AssertionError("clearing must not be probed")
+            raise AssertionError("clearing an inactive provider's index must not be probed")
 
         monkeypatch.setattr(environment.model_check, "problems", _never)
 
@@ -1965,3 +2032,34 @@ class TestArmingIsGatedToo:
         )
 
         assert result["failed"] == []
+
+    @pytest.mark.asyncio
+    async def test_provider_change_with_explicit_index_clear_probes_slot_zero(
+        self, monkeypatch
+    ):
+        """H1 regression: a PATCH that both switches the active provider AND
+        clears that provider's key-index override in the same request must
+        probe the slot the clear actually resolves to (0), not whatever was
+        stored before the clear. Falling back to the stale stored slot here
+        would probe a genuinely different, unprobed row than the one that
+        ends up live -- exactly the incident this design exists to prevent."""
+        seen = {}
+        monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"vertex": 2})
+        monkeypatch.setattr(store, "get_provider_override", lambda: "gemini")
+        monkeypatch.setattr(store, "set_provider_override", lambda *a: None)
+        monkeypatch.setattr(store, "set_key_index_override", lambda *a: None)
+        monkeypatch.setattr(store, "get_slot_config", lambda *a: {"model": "m"})
+        monkeypatch.setattr(
+            environment.model_check,
+            "problems",
+            lambda provider, slot, model, **k: seen.update(
+                {"provider": provider, "slot": slot}
+            ) or [],
+        )
+
+        await asyncio.to_thread(
+            environment._apply_config_patch,
+            environment.EnvironmentConfigPatch(provider="vertex", key_index={"vertex": None}),
+        )
+
+        assert seen == {"provider": "vertex", "slot": 0}

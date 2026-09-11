@@ -1202,6 +1202,18 @@
       return STRINGS[currentLang][key] || STRINGS.en[key] || key;
     }
 
+    // Unlike t(), which falls back to the KEY ITSELF when nothing is
+    // mapped (by design, for a UI label that should never render blank),
+    // this is for mapping a server-supplied error CODE to a friendly
+    // string when one exists, and to the raw code otherwise -- e.g.
+    // "not_in_catalog" is more useful to an operator than the literal text
+    // "err_not_in_catalog", which is what `t(`err_${code}`) || code` would
+    // always produce (t() never returns a falsy value for `|| code` to fall
+    // through to).
+    function tError(code) {
+      return STRINGS[currentLang][`err_${code}`] || STRINGS.en[`err_${code}`] || code;
+    }
+
     function esc(value) {
       return String(value).replace(/[&<>"']/g, (c) => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -2630,7 +2642,7 @@
         } else {
           rowValidated.delete(rowKey);
           if (saveBtn) saveBtn.disabled = true;
-          const message = t(`err_${error}`) || error;
+          const message = tError(error);
           if (hint) hint.textContent = `${t("env_invalid")}: ${message}`;
         }
       } finally {
