@@ -338,6 +338,13 @@
     gap: 0.6rem 0.75rem; align-items: start; }
   @media (max-width: 640px) { .cfg-group-rows { grid-template-columns: 1fr; } }
   input.cfg-bad { outline: 2px solid var(--fail); outline-offset: 1px; }
+  .cfg-preview { margin-top: 0.6rem; padding-top: 0.55rem;
+    border-top: 1px dashed var(--border); font-size: 0.82rem; color: var(--text-muted); }
+  .cfg-chips { display: flex; flex-wrap: wrap; gap: 0.28rem; align-items: center; margin-top: 0.3rem; }
+  .cfg-chip { border: 1px solid var(--border); padding: 0.12rem 0.38rem;
+    font-size: 0.8rem; color: var(--text); font-variant-numeric: tabular-nums; }
+  .cfg-chip.is-cap { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .cfg-chip-tail { color: var(--text-muted); font-size: 0.8rem; }
   /* A ruled group, like the config form's own rows above it -- not a boxed,
      dithered panel. Plain dashed hairlines between provider rows, matching
      .kv-row's separator idiom, instead of a nested "hollowed out" fill. */
@@ -2643,8 +2650,90 @@
       return problems;
     }
 
-    // Stub -- implemented in the previews task.
-    function refreshGroupPreview() {}
+    // Mirrors review_queue/store.py::effective_cooldown --
+    //   max(base, min(base * factor ** min(level, 30), cap))
+    // The level clamp is what makes the sequence finite: if the cap is never
+    // reached, the real ceiling is base * factor**30, not cap.
+    const MAX_COOLDOWN_LEVEL = 30;
+    // Mirrors review_queue/dispatcher.py::compute_backoff, whose factor is
+    // HARDCODED 2 -- not the configurable cooldown factor. Different sequence.
+    const BACKOFF_DOUBLING = 2;
+
+    function cooldownAt(level, base, factor, cap) {
+      return Math.max(base, Math.min(base * Math.pow(factor, Math.min(level, MAX_COOLDOWN_LEVEL)), cap));
+    }
+
+    function chip(text, capped) {
+      return `<span class="cfg-chip${capped ? " is-cap" : ""}">${text}</span>`;
+    }
+
+    function cooldownPreviewHtml() {
+      const base = numberIn("cooldown_base_seconds");
+      const factor = numberIn("cooldown_factor");
+      const cap = numberIn("cooldown_max_seconds");
+      if (![base, factor, cap].every(isFinite)) return "";
+      // A constant sequence: factor 1 never escalates, and a base of 0 is
+      // equally constant (0 * f**n is 0 at every level) -- and a 0 base is
+      // VALID, only a negative one is rejected.
+      if (factor === 1 || base === 0) {
+        return chip(dur(cooldownAt(0, base, factor, cap)), true) +
+          `<span class="cfg-chip-tail" data-i18n="cfg_preview_never_escalates"></span>`;
+      }
+      let out = "";
+      for (let level = 0; level <= MAX_COOLDOWN_LEVEL; level++) {
+        const wait = cooldownAt(level, base, factor, cap);
+        const atCap = wait >= cap;
+        out += chip(dur(wait), atCap);
+        if (atCap) {
+          return out + `<span class="cfg-chip-tail">${t("cfg_preview_held_at").replace("{value}", dur(cap))}</span>`;
+        }
+        if (level === 5) {
+          const ceiling = dur(cooldownAt(MAX_COOLDOWN_LEVEL, base, factor, cap));
+          return out + `<span class="cfg-chip-tail">${t("cfg_preview_ceiling").replace("{value}", ceiling)}</span>`;
+        }
+      }
+      return out;
+    }
+
+    function backoffPreviewHtml() {
+      const base = numberIn("dispatcher_failure_base_backoff_seconds");
+      const cap = numberIn("dispatcher_failure_max_backoff_seconds");
+      const jitter = numberIn("dispatcher_backoff_jitter_seconds");
+      const attempts = parseInt(document.getElementById(tuningKnobFieldId("dispatcher_max_failure_attempts")).value, 10);
+      if (![base, cap].every(isFinite) || !isFinite(attempts)) return "";
+      const shown = Math.min(attempts, 8);
+      let out = "", total = 0;
+      for (let n = 1; n <= attempts; n++) {
+        const wait = Math.min(base * Math.pow(BACKOFF_DOUBLING, n - 1), cap);
+        total += wait;
+        if (n <= shown) out += chip(dur(wait), wait >= cap);
+      }
+      if (attempts > shown) {
+        out += `<span class="cfg-chip-tail">${t("cfg_preview_more").replace("{n}", attempts - shown)}</span>`;
+      }
+      let tail = t("cfg_preview_gives_up").replace("{total}", durLong(total));
+      if (isFinite(jitter) && jitter > 0) {
+        tail += t("cfg_preview_jitter").replace("{value}", dur(jitter));
+      }
+      return out + `<span class="cfg-chip-tail">${tail}</span>`;
+    }
+
+    function refreshGroupPreview(group) {
+      const host = document.querySelector(`[data-preview-for="${group}"]`);
+      if (!host) return;
+      // Hide the block ENTIRELY when the group is invalid -- caption
+      // included. Clearing the chips but leaving the caption pointing at
+      // nothing reads as a rendering fault.
+      if (validateGroup(group).length) { host.hidden = true; return; }
+      const chips = group === "cooldown" ? cooldownPreviewHtml()
+        : group === "backoff" ? backoffPreviewHtml() : "";
+      if (!chips) { host.hidden = true; return; }
+      host.hidden = false;
+      host.innerHTML =
+        `<div class="cfg-preview-cap" data-i18n="cfg_preview_cap_${group}"></div>
+         <div class="cfg-chips">${chips}</div>`;
+      applyLanguage(currentLang);
+    }
 
     function trimNum(n) { return (Math.round(n * 10) / 10).toString(); }
 

@@ -142,3 +142,24 @@ def test_registry_defaults_match_the_declared_column_defaults():
             f"{field['key']}: registry default {field['default']!r} != "
             f"declared default {declared[column]!r}"
         )
+
+
+def test_cooldown_preview_pins_the_real_level_ceiling():
+    """The preview mirrors store.effective_cooldown, whose exponent is clamped
+    at _MAX_COOLDOWN_LEVEL. If that constant moves, the preview silently lies
+    about where the sequence ends -- so pin it."""
+    assert store._MAX_COOLDOWN_LEVEL == 30
+    assert "MAX_COOLDOWN_LEVEL = 30" in DASHBOARD_HTML.read_text(encoding="utf-8")
+
+
+def test_backoff_preview_pins_the_hardcoded_doubling():
+    """dispatcher.compute_backoff doubles -- its factor is NOT the configurable
+    cooldown factor. If it ever becomes configurable the preview must gain a
+    field, and this assertion is what forces that conversation."""
+    import inspect
+
+    from review_queue import dispatcher
+
+    source = inspect.getsource(dispatcher.compute_backoff)
+    assert "2 ** (attempts - 1)" in source
+    assert "BACKOFF_DOUBLING = 2" in DASHBOARD_HTML.read_text(encoding="utf-8")
