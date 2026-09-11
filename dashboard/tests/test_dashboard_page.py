@@ -416,29 +416,29 @@ async def test_guided_setup_strings_exist_in_both_languages():
         assert body.count(f"{key}:") == 2, key
 
 
-async def test_dashboard_page_declares_all_17_config_panel_field_ids():
-    """The config panel's 17 fields (provider + 16 flat tunables) must all
-    be present in the served page, or a field silently drops out of the
-    dashboard entirely."""
+async def test_config_panel_fields_are_declared_by_the_registry_not_by_markup():
+    """The 17 config fields are generated from CONFIG_FIELDS at runtime.
+
+    Replaces the old assertion that 17 literal id="cfg..." strings appear in
+    the served HTML. Those ids are now produced by renderConfigForm() in the
+    browser, so the served document no longer contains them -- the guarantee
+    moves to the registry, which tests/test_config_field_registry.py checks
+    for completeness against the runtime_config columns.
+    """
     client = await _client()
-    resp = await client.get("/")
-    body = resp.text
-    for field_id in (
-        "cfgProvider",
-        "cfgCooldownBase", "cfgCooldownFactor", "cfgCooldownMax",
-        "cfgDispatcherBackoffJitterSeconds",
-        "cfgDispatcherDefaultRetryAfterSeconds",
-        "cfgDispatcherFailureBaseBackoffSeconds",
-        "cfgDispatcherFailureMaxBackoffSeconds",
-        "cfgDispatcherIdleSleepSeconds",
-        "cfgDispatcherMaxFailureAttempts",
-        "cfgDispatcherMaxNoticePostAttempts",
-        "cfgDispatcherMinRetryAfterSeconds",
-        "cfgDispatcherNoticeSweepBatchSize",
-        "cfgLlmRequestTimeoutSeconds",
-        "cfgReviewDraftPrs", "cfgUsageCapReset", "cfgUsageCapTokens",
-    ):
-        assert f'id="{field_id}"' in body, f"{field_id} missing from the served page"
+    body = (await client.get("/")).text
+    assert "CONFIG_FIELDS_BEGIN" in body
+    assert "renderConfigForm" in body
+    # The generic per-field markup is gone -- one shared info icon builder
+    # replaces the 17 verbatim copies. Count the button template itself, not
+    # the bare `data-action="info"` substring: that also appears inside the
+    # two querySelectorAll selectors that wire the icons up.
+    assert "infoIconHtml" in body
+    assert body.count('class="info-icon" data-action="info"') == 2, (
+        "exactly two info-icon button templates should exist -- keyCellHtml()'s "
+        "render-vars one and infoIconHtml() -- config rows must build theirs "
+        "from infoIconHtml(), not repeat the block per field"
+    )
 
 
 async def test_dashboard_page_declares_slot_config_rows_container():
@@ -451,12 +451,20 @@ async def test_dashboard_page_declares_slot_config_rows_container():
 
 async def test_config_form_omits_blank_tuning_knob_fields_from_the_patch_body():
     """A blank tuning-knob input must be OMITTED from the PATCH body, not
-    sent as null: these 9 have no fallback, and a NULL column stops the
-    dispatcher dead (review_queue/dispatcher_tuning_config.py)."""
+    sent as null: these have no fallback, and a NULL column stops the
+    dispatcher dead (review_queue/dispatcher_tuning_config.py).
+
+    Since the registry refactor the rule lives in two collaborating places --
+    readConfigValue() returns `undefined` for a blank tuning knob, and
+    saveConfig() drops any key whose value is `undefined`. Both halves are
+    pinned here; the pre-refactor `if (raw !== "")` phrasing pinned only the
+    first, in a loop that no longer exists.
+    """
     client = await _client()
     resp = await client.get("/")
     body = resp.text
-    assert 'if (raw !== "")' in body
+    assert "return TUNING_KNOB_FIELDS.includes(field.key) ? undefined : null;" in body
+    assert "if (value !== undefined) body[field.key] = value;" in body
     assert 'raw === "" ? null' not in body
 
 
