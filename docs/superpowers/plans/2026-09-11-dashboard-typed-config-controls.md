@@ -366,7 +366,34 @@ that changes appearance separate from the diff that changes structure.
   - `controlHtml(field)` → `string` — the inner control only; Task 3 replaces its body per `kind`.
   - `readConfigValue(field)` → the field's current value in PATCH form, or `undefined` meaning "omit this key".
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Capture the before-baseline**
+
+This task's entire claim is "same controls, same behaviour" — so capture
+what the form looks like **now**, before deleting anything. Without a
+baseline the claim is unfalsifiable, and pytest cannot check it: the tests
+below can only assert that strings appear in the served HTML, never that
+the page renders the same.
+
+Start the dev server (README:117):
+
+```bash
+uv run uvicorn main:app --host 127.0.0.1 --port 8000
+```
+
+Mint a throwaway session cookie (never a real credential) and capture:
+
+```bash
+COOKIE="$(uv run python -c 'from dashboard import auth; print(auth.create_session_token(remember=False))')"
+uv run --no-project python .claude/skills/ui-visual-review/screenshot_ui.py \
+  http://127.0.0.1:8000/ /tmp/cfgform-before \
+  --cookie "dashboard_session=$COOKIE"
+```
+
+Open the Environment tab before capturing — `#configForm` lives there, and
+the default landing panel is Status. Keep `/tmp/cfgform-before` until
+Step 8.
+
+- [ ] **Step 2: Write the failing test**
 
 Replace `test_dashboard_page_declares_all_17_config_panel_field_ids`
 (`dashboard/tests/test_dashboard_page.py:419`) with:
@@ -394,12 +421,12 @@ async def test_config_panel_fields_are_declared_by_the_registry_not_by_markup():
     )
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [ ] **Step 3: Run it to verify it fails**
 
 Run: `uv run pytest dashboard/tests/test_dashboard_page.py -k config_panel_fields -v`
 Expected: FAIL — `assert "renderConfigForm" in body`.
 
-- [ ] **Step 3: Delete the hand-written rows**
+- [ ] **Step 4: Delete the hand-written rows**
 
 In `dashboard/static/dashboard.html`, delete everything inside `<form
 id="configForm">` from the first `<label>` after `<div id="slotConfigRows"
@@ -425,7 +452,7 @@ Keep `#providerModelRows` and `#slotConfigRows` exactly as they are — they
 are populated by `renderProviderModelRows`/`renderSlotConfigRows` and are
 out of this design's scope.
 
-- [ ] **Step 4: Add the generators**
+- [ ] **Step 5: Add the generators**
 
 Add near `renderProviderModelRows`:
 
@@ -510,7 +537,7 @@ Add the cell style beside the `#configForm` rules (`:299-306`):
   .cfg-cell .cfg-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; }
 ```
 
-- [ ] **Step 5: Drive populate and save from the registry**
+- [ ] **Step 6: Drive populate and save from the registry**
 
 Replace `populateConfigForm` (`:2592-2608`) and the body-building half of
 `saveConfig` (`:2621-2641`):
@@ -573,13 +600,35 @@ Finally, call the renderer once at load, immediately before
     renderConfigForm();
 ```
 
-- [ ] **Step 6: Run the tests**
+- [ ] **Step 7: Run the tests**
 
 Run: `uv run pytest dashboard/tests/ tests/test_config_field_registry.py -v`
 Expected: PASS, including
 `test_config_form_omits_blank_tuning_knob_fields_from_the_patch_body`.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Prove the refactor changed nothing visually**
+
+Re-capture into a second directory and compare against the baseline:
+
+```bash
+uv run --no-project python .claude/skills/ui-visual-review/screenshot_ui.py \\
+  http://127.0.0.1:8000/ /tmp/cfgform-after \\
+  --cookie "dashboard_session=$COOKIE"
+```
+
+Read each pair (`light-desktop`, `dark-desktop`, `mobile`) from both
+directories and confirm the config form is **visually identical**. Row
+order, label text, control widths and the two-column grid must all match.
+
+Any difference here is a bug in this task, not a preview of Task 3 — the
+typed controls arrive in the next task, deliberately in a separate diff.
+The one expected difference is that `#providerModelRows` and
+`#slotConfigRows` are re-rendered rather than server-emitted; confirm they
+still show their key-slot and per-slot model rows and are not empty.
+
+If they differ, fix and re-capture before committing.
+
+- [ ] **Step 9: Commit**
 
 ```bash
 git add dashboard/static/dashboard.html dashboard/tests/test_dashboard_page.py
@@ -1430,6 +1479,11 @@ push with a red suite.
 **REQUIRED by the root `CLAUDE.md` before any `dashboard/static/` change is
 called done.** Capture light-desktop, dark-desktop and mobile.
 
+Task 2 already ran a render check, but a narrow one: it proved the
+*refactor* changed nothing. Everything that changes appearance — typed
+controls, groups, previews, shortened labels, Hebrew — landed in Tasks 3–6
+and is unrendered until now. This is the first look at the actual design.
+
 **Additionally capture RTL**, which the skill's default set does not cover:
 this design introduces the first bidi-sensitive content in the config form,
 and an `= 5m` readout was verified broken in RTL during design (`=` is
@@ -1473,6 +1527,12 @@ Naming consistency verified across tasks: `syncField`, `validateField`,
 `readConfigValue`, `writeFieldValue`, `fieldByKey`, `numberIn`, `dur`,
 `durLong`, `humanMagnitude`, `tuningKnobFieldId` are each defined once and
 referenced with the same signature everywhere.
+
+Render checkpoints: Task 2 (before/after comparison, proving the pure
+refactor is pure) and Task 7 (full review of the design). The gap this
+closes is that Task 2 deletes ~300 lines of markup and rebuilds the form in
+JS, while pytest can only assert strings appear in the served HTML — it
+cannot execute the JS or see the result.
 
 Known ordering constraint: `refreshGroupPreview` is called by `syncField`
 in Task 3 but only implemented in Task 5. Task 3 must therefore define it
