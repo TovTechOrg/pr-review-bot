@@ -275,6 +275,13 @@ pruned from this section; `git log -p -- ISSUES.md` has the original
 write-ups if useful again. Nothing from this batch needed a durable home
 beyond what the code/tests/design docs it references already provide._
 
+### The Environment tab's per-slot config editor silently discards unsaved edits in every other row on any row's Save
+
+- **Found during:** the 2026-09-11 Vertex model entitlement-validation design session, while establishing what state the config panel actually carries across slots (a question raised about whether multi-slot editing batches or tracks changes).
+- **What:** `#slotConfigRows` renders one independently-saved row per credential-bearing slot, and `saveSlotConfig` (`dashboard/static/dashboard.html:2585`) ends with `await fetchEnvironmentConfig()`, which re-runs `renderSlotConfigRows` and rebuilds the container with `innerHTML = rows.join("")`. Every *other* row's pending, unsaved edits are destroyed with no warning and no indication anything was lost: edit slot 0's model, then save slot 1, and slot 0's edit is simply gone. This is the same shape as the data-loss path already fixed in the neighbouring widget at :2846 (the `applyLanguage` / `#providerModelRows` comment documents that one), so the repo has paid for this bug once already in a different control.
+- **Why parked:** Genuinely independent of the entitlement work it was found next to -- it would exist unchanged if the Vertex catalog had always been entitlement-scoped, and closing it means per-row dirty-state tracking (or a confirm-before-discard) in the frontend, which is a different change than adding a validation predicate to the write paths. Folding it in would widen that spec past its subject.
+- **Follow-up:** Either preserve pending per-row edits across the post-save rerender (re-apply dirty fields after `renderSlotConfigRows`, keyed by the `provider-slot` row key the row state maps already use), or warn before discarding them. Worth doing together with any other rerender-driven state loss in the same panel, since the :2846 fix suggests this class recurs here.
+
 ---
 
 ## Design Gaps
