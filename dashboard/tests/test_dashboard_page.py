@@ -596,3 +596,56 @@ async def test_boolean_default_hint_reads_off_not_the_raw_wire_value():
     body = (await client.get("/")).text
     assert "cfg_bool_off" in body
     assert "cfg_bool_on" in body
+
+
+async def test_stepper_buttons_stretch_instead_of_hardcoding_a_height():
+    """The - n + buttons must take their height from the flex row.
+
+    The value input's height is content-driven (font x line-height + padding +
+    border = 32.8px at desktop defaults). Giving the buttons their own literal
+    height sized them independently, leaving them 2.4px short of the input and
+    visibly misaligned. Stretching makes them equal by construction and keeps
+    them equal if the font or padding ever changes.
+    """
+    import re
+
+    client = await _client()
+    body = (await client.get("/")).text
+    rules = re.findall(r"\.cfg-stepper button \{([^}]*)\}", body)
+    assert rules, "no .cfg-stepper button rule found"
+    for rule in rules:
+        assert not re.search(r"(?<!-)\bheight\s*:", rule), (
+            f"stepper button hardcodes a height, so it can drift from the "
+            f"input beside it: {rule.strip()}"
+        )
+    assert re.search(r"\.cfg-stepper \{[^}]*align-items:\s*stretch", body), (
+        "the stepper row must declare align-items: stretch explicitly -- it is "
+        "the flex default, but this control depends on it, so state it"
+    )
+
+
+async def test_stepper_touch_target_clears_44px_on_mobile():
+    """Closes the parked finding from Task 7's visual review: the stepper
+    measured 41.6x38.4 CSS px against a stated ~44px goal. With the buttons
+    stretching, the row's height is set by .cfg-stepper-value."""
+    import re
+
+    client = await _client()
+    body = (await client.get("/")).text
+    heights = [
+        float(m)
+        for m in re.findall(r"\.cfg-stepper-value \{[^}]*height:\s*([\d.]+)rem", body)
+    ]
+    assert heights, ".cfg-stepper-value declares no height in the mobile block"
+    assert max(heights) >= 2.75, (
+        f"tallest .cfg-stepper-value height is {max(heights)}rem "
+        f"({max(heights) * 16}px), short of the 44px touch target"
+    )
+    widths = [
+        float(m)
+        for m in re.findall(r"\.cfg-stepper button \{[^}]*width:\s*([\d.]+)rem", body)
+    ]
+    assert max(widths) >= 2.75, (
+        f"widest stepper button is {max(widths)}rem ({max(widths) * 16}px), "
+        "short of the 44px touch target"
+    )

@@ -329,8 +329,13 @@
     margin: 0;
   }
   #configForm input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
-  .cfg-stepper { display: inline-flex; }
-  .cfg-stepper button { padding: 0; width: 1.9rem; height: 1.9rem; line-height: 1; cursor: pointer; }
+  /* align-items: stretch is the flex default, but state it: this control
+     depends on it. The buttons deliberately declare NO height, so the row
+     sizes them to the value input, whose own height is content-driven (font
+     x line-height + padding + border). Giving each a literal height sized
+     them independently and left the buttons 2.4px short of the input. */
+  .cfg-stepper { display: inline-flex; align-items: stretch; }
+  .cfg-stepper button { padding: 0; width: 1.9rem; line-height: 1; cursor: pointer; }
   .cfg-stepper button + input, .cfg-stepper input + button { border-inline-start: none; }
   .cfg-stepper-value { width: 3rem; text-align: center; padding: 0.4rem 0; }
   .cfg-presets { display: flex; flex-wrap: wrap; gap: 0.3rem; }
@@ -343,8 +348,11 @@
     /* Bumped for touch: the desktop size is ~30px, under the ~44px target,
        and there is no native mobile spinner to fall back to -- verified under
        Playwright mobile emulation, which renders no spinner arrows at all. */
-    .cfg-stepper button { width: 2.6rem; height: 2.4rem; font-size: 1rem; }
-    .cfg-stepper-value { width: 3.5rem; height: 2.4rem; }
+    /* 2.75rem = 44px at the default root size, the touch-target floor.
+       Only the value input carries the height; the buttons stretch to it.
+       Closes ISSUES.md's parked finding that this measured 41.6x38.4px. */
+    .cfg-stepper button { width: 2.75rem; font-size: 1rem; }
+    .cfg-stepper-value { width: 3.5rem; height: 2.75rem; }
   }
   .cfg-group { grid-column: 1 / -1; border: 1px solid var(--border);
     padding: 0.75rem 0.85rem; margin: 0.3rem 0; }
