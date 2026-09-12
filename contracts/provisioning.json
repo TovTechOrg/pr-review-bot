@@ -1,6 +1,6 @@
 {
   "generated_by": "scripts.gen_contract -- do not edit by hand",
-  "contract_version": 2,
+  "contract_version": 3,
   "env_vars": {
     "DASHBOARD_PASSWORD": {
       "placement": "always_synced"
@@ -244,6 +244,36 @@
     "optional": [
       "vertex_gcp_project",
       "vertex_gcp_location"
+    ]
+  },
+  "vertex_locations": {
+    "default": "us-central1",
+    "options": [
+      "us-central1",
+      "us-east1",
+      "us-east4",
+      "us-east5",
+      "us-south1",
+      "us-west1",
+      "us-west4",
+      "northamerica-northeast1",
+      "southamerica-east1",
+      "europe-west1",
+      "europe-west2",
+      "europe-west3",
+      "europe-west4",
+      "europe-west8",
+      "europe-west9",
+      "europe-southwest1",
+      "europe-central2",
+      "europe-north1",
+      "asia-east1",
+      "asia-northeast1",
+      "asia-northeast3",
+      "asia-south1",
+      "asia-southeast1",
+      "australia-southeast1",
+      "global"
     ]
   }
 }
