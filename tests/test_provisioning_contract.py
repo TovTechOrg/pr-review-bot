@@ -20,7 +20,7 @@ import pytest
 import yaml
 
 from config import OPERATIONAL_KEYS, settings
-from providers import registry
+from providers import catalog, registry
 from review_queue import runtime_config_defaults, store
 from scripts import deploy, gen_contract
 
@@ -149,7 +149,7 @@ def test_model_is_provisioner_required_even_though_the_column_is_nullable():
     assert "model" in gen_contract.slot_config()["provisioner_required"]
 
 
-def test_build_contract_carries_the_marker_version_and_all_five_blocks():
+def test_build_contract_carries_the_marker_version_and_all_six_blocks():
     contract = gen_contract.build_contract()
     assert contract["generated_by"] == gen_contract.GENERATED_BY
     assert "do not edit" in contract["generated_by"].lower()
@@ -158,6 +158,7 @@ def test_build_contract_carries_the_marker_version_and_all_five_blocks():
     assert set(contract) == {
         "generated_by", "contract_version",
         "env_vars", "providers", "model_validation", "runtime_config", "slot_config",
+        "vertex_locations",
     }
 
 
@@ -377,8 +378,8 @@ def test_the_always_synced_placement_matches_deploys_own_tuple():
 
 
 class TestModelValidationBlock:
-    def test_contract_version_is_two(self):
-        assert gen_contract.CONTRACT_VERSION == 2
+    def test_contract_version_is_three(self):
+        assert gen_contract.CONTRACT_VERSION == 3
 
     def test_block_declares_every_provider(self):
         block = gen_contract.model_validation()
@@ -414,3 +415,15 @@ class TestModelValidationBlock:
         committed = Path(gen_contract.CONTRACT_PATH).read_text()
 
         assert committed == gen_contract.render()
+
+
+def test_contract_publishes_the_vertex_location_reference_list():
+    """The onboarding wizard renders a region dropdown from this. It must
+    come from the contract, not a hand-copied list over there -- a
+    duplicate with no parity assertion is the 2026-09-09 shape again."""
+    contract = gen_contract.build_contract()
+    block = contract["vertex_locations"]
+    assert block["options"] == catalog.VERTEX_CATALOG_LOCATIONS
+    assert block["default"] == catalog.DEFAULT_VERTEX_LOCATION
+    assert block["default"] in block["options"]
+    assert contract["contract_version"] == 3

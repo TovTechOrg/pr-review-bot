@@ -43,7 +43,7 @@ import json
 from pathlib import Path
 
 from config import OPERATIONAL_KEYS
-from providers import registry
+from providers import catalog, registry
 from review_queue import runtime_config_defaults, store
 from scripts import deploy
 
@@ -58,7 +58,7 @@ CONTRACT_PATH = "contracts/provisioning.json"
 # any ordinary schema or env-var edit and is what the byte-compare already
 # catches. The consumer reads this to know whether it understands the file
 # at all.
-CONTRACT_VERSION = 2
+CONTRACT_VERSION = 3
 
 GENERATED_BY = "scripts.gen_contract -- do not edit by hand"
 
@@ -263,6 +263,18 @@ def model_validation() -> dict[str, object]:
     }
 
 
+def vertex_locations() -> dict[str, object]:
+    """Vertex's generative-model regions, published for the onboarding
+    wizard's region dropdown. Emitted from catalog.py's own constants so
+    the wizard consumes a generated fact rather than maintaining a second
+    copy of this list. Order is the curated geographic grouping catalog.py
+    authors, NOT alphabetical -- consumers render it as received."""
+    return {
+        "default": catalog.DEFAULT_VERTEX_LOCATION,
+        "options": list(catalog.VERTEX_CATALOG_LOCATIONS),
+    }
+
+
 def build_contract() -> dict[str, object]:
     """The whole contract, in the key order it is serialized in."""
     return {
@@ -273,6 +285,7 @@ def build_contract() -> dict[str, object]:
         "model_validation": model_validation(),
         "runtime_config": runtime_config(),
         "slot_config": slot_config(),
+        "vertex_locations": vertex_locations(),
     }
 
 
