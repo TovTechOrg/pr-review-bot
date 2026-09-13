@@ -91,14 +91,21 @@ def _candidate_paths(token: str) -> list[str]:
     """Every path-ish string a single shell token might be carrying.
 
     One token can hide a path behind a payload sigil (`@.env`), a joined flag
-    (`--body-file=.env`), or an unspaced redirect (`<.env`). Each is unwrapped
-    here so the caller only ever reasons about plain paths.
+    (`--body-file=.env`), an unspaced redirect (`<.env`), or a payload flag
+    glued directly to its value with no separator at all -- real curl parsing
+    behavior for short options (`-d@.env`, `-T.env`, `-Fname=@.env`) that a
+    space- or `=`-only check misses entirely, plus the same shape defensively
+    for long options (`--data@.env`). Each is unwrapped here so the caller
+    only ever reasons about plain paths.
     """
     stripped = token.lstrip("<")
     stripped = stripped[1:] if stripped.startswith("@") else stripped
     out = [stripped]
     if "=" in stripped:
         out.append(stripped.split("=", 1)[1].lstrip("@"))
+    glued = _glued_payload_value(token)
+    if glued:
+        out.append(glued)
     return [value for value in out if value]
 
 
@@ -136,6 +143,28 @@ _PAYLOAD_FLAGS = frozenset({
     "-F", "--form", "-T", "--upload-file",
     "--body-file", "--post-file", "--file",
 })
+
+
+def _glued_payload_value(token: str) -> str | None:
+    """If `token` is a payload flag glued directly to its value with no
+    space and no `=`, return that value; otherwise None.
+
+    curl's short options (`-d`, `-F`, `-T`) attach their value directly with
+    no separator at all (`-d@.env`, `-T.env`, `-Fname=@.env`) -- this is
+    ordinary getopt-style short-option parsing, not an edge case, so any
+    remainder after a short flag is a candidate. Long options only glue this
+    way defensively here (`--data@.env`): real curl requires `=` for those,
+    but catching the `@`-prefixed shape costs nothing since it can't fire on
+    an ordinary long flag's unrelated argument.
+    """
+    for flag in _PAYLOAD_FLAGS:
+        if not token.startswith(flag) or token == flag:
+            continue
+        remainder = token[len(flag):]
+        is_short = len(flag) == 2
+        if is_short or remainder.startswith("@"):
+            return remainder.split("=", 1)[-1].lstrip("@")
+    return None
 
 _NETWORK_VERBS = frozenset({
     "curl", "wget", "nc", "netcat", "ncat", "scp", "rsync", "ssh", "sftp",
@@ -196,7 +225,7 @@ def _deny_reason(tokens: list[str], cwd: Path) -> str | None:
         previous = tokens[index - 1] if index else ""
         flag = token.split("=", 1)[0] if token.startswith("-") and "=" in token else ""
 
-        if previous in _PAYLOAD_FLAGS or flag in _PAYLOAD_FLAGS:
+        if previous in _PAYLOAD_FLAGS or flag in _PAYLOAD_FLAGS or _glued_payload_value(token):
             return f"{token} is a protected path passed as a request payload"
         if token.startswith("@"):
             return f"{token} sends a protected file's contents as a payload"
@@ -217,18 +246,43 @@ def _deny_reason(tokens: list[str], cwd: Path) -> str | None:
     return None
 
 
+def _docker_context_reason(tokens: list[str], heads: list[str], cwd: Path) -> str | None:
+    """`docker build`'s context directory can hold a protected repo-relative
+    path even when the command line never names one directly -- the
+    `.dockerignore` lines are a second net, not the first (design doc, Open
+    risk 3). Checks the context directory's own contents (an existence
+    check, never a read) rather than the command-line tokens."""
+    if "docker" not in heads or "build" not in tokens:
+        return None
+    positional = [t for t in tokens[1:] if not t.startswith("-")]
+    context = positional[-1] if positional else "."
+    try:
+        context_dir = Path(context)
+        context_dir = context_dir if context_dir.is_absolute() else cwd / context_dir
+        context_dir = Path(os.path.normpath(str(context_dir)))
+    except (OSError, ValueError, RuntimeError):
+        return None
+    if not context_dir.is_dir():
+        return None
+    for kind, raw in _PROTECTED:
+        if kind == "REPO" and (context_dir / raw.rstrip("/")).exists():
+            return f"the docker build context ({context_dir}) contains {raw}"
+    return None
+
+
 def _ask_reason(tokens: list[str], cwd: Path) -> str | None:
     """A protected path plus an outward-facing verb, in a shape that does not
     prove intent. Ask rather than deny: this project runs gh/curl/docker
     constantly for legitimate reasons."""
-    if not _protected_hits(tokens, cwd):
-        return None
     heads = _command_heads(tokens)
-    if any(head in _NETWORK_VERBS for head in heads):
-        return "this command names a protected path and can reach the network"
-    if any(head in _ARCHIVE_VERBS for head in heads):
-        return "this command packs a protected path into an archive"
-    return None
+    if _protected_hits(tokens, cwd):
+        if any(head in _NETWORK_VERBS for head in heads):
+            return "this command names a protected path and can reach the network"
+        if any(head in _ARCHIVE_VERBS for head in heads):
+            return "this command packs a protected path into an archive"
+        if "|" in tokens and any(head in _READER_VERBS for head in heads):
+            return "a protected path is piped into a program this guard does not recognize"
+    return _docker_context_reason(tokens, heads, cwd)
 
 
 def _ask(reason: str) -> str:
