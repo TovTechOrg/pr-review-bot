@@ -9,6 +9,15 @@
             "args": ["run", "--no-project", "python", "${CLAUDE_PROJECT_DIR}/.claude/hooks/check_env_access.py"]
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv",
+            "args": ["run", "--no-project", "python", "${CLAUDE_PROJECT_DIR}/.claude/hooks/check_exfiltration.py"]
+          }
+        ]
       }
     ]
   }
