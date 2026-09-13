@@ -64,6 +64,53 @@ def test_grep_recursive_walk_into_env_comes_back_redacted(tmp_path):
     assert "widgets" in result.stdout
 
 
+def _sink_path(command: str) -> Path:
+    """The sink is named literally in the wrapped command (it has to be --
+    the isolation guard refuses a redirect target computed at runtime), so
+    it can be read straight back out of the command text."""
+    marker = "\n) > "
+    start = command.index(marker) + len(marker)
+    return Path(command[start:command.index(" 2>&1\n", start)])
+
+
+def test_a_bare_exit_in_the_original_command_still_reaches_the_filter(tmp_path):
+    """The original runs in a subshell, so `exit` ends only the original.
+    Under a brace group it would exit the wrapper itself, skipping the
+    filter and silently dropping the output -- output loss that would look
+    exactly like a command that legitimately printed nothing."""
+    env_path = tmp_path / ".env"
+    env_path.write_text("SOME_KEY=abcdefgh12345678\n")
+    command = _wrapped_bash_command("echo before-exit; exit 7", env_path)
+    result = subprocess.run(["bash", "-c", command], capture_output=True, text=True)
+    assert result.returncode == 7
+    assert "before-exit" in result.stdout
+
+
+def test_a_filter_failure_suppresses_output_and_overrides_a_successful_command(tmp_path):
+    """Fail-closed, end to end: when redaction cannot run, the original
+    command's output must not appear at all and the wrapper must not report
+    success -- otherwise an unfiltered result would be indistinguishable
+    from a filtered one."""
+    command = _wrapped_bash_command("echo LEAK-CANARY; exit 0", tmp_path / "does-not-exist.env")
+    result = subprocess.run(["bash", "-c", command], capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "LEAK-CANARY" not in result.stdout
+    assert "LEAK-CANARY" not in result.stderr
+
+
+def test_the_sink_holding_unredacted_output_is_removed_afterwards(tmp_path):
+    """The sink briefly holds the command's output before redaction, so it
+    must not survive the command that created it."""
+    env_path = tmp_path / ".env"
+    env_path.write_text("SOME_KEY=abcdefgh12345678\n")
+    command = _wrapped_bash_command("echo abcdefgh12345678", env_path)
+    sink = _sink_path(command)
+    assert sink.exists(), "hook should create the sink up front, at 0600"
+    assert sink.stat().st_mode & 0o777 == 0o600
+    subprocess.run(["bash", "-c", command], capture_output=True, text=True, check=True)
+    assert not sink.exists()
+
+
 def test_a_command_that_never_mentions_env_at_all_still_gets_redacted(tmp_path):
     """The core false-negative fix: nothing about this command's text
     involves .env in any way, yet it still leaks the secret into its

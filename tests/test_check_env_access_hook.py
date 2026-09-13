@@ -95,11 +95,27 @@ def test_allows_grep_pattern_searching_for_the_literal_string():
 
 # --- Shell tools: every command is wrapped, none are denied ---
 
+def _discard_sink(command: str) -> None:
+    """Removes the output sink named in a wrapped Bash command."""
+    marker = "\n) > "
+    start = command.index(marker) + len(marker)
+    Path(command[start:command.index(" 2>&1\n", start)]).unlink(missing_ok=True)
+
+
 def _wrapped_command(tool_name: str, original: str) -> str:
+    """Returns the rewritten command WITHOUT running it. For Bash that means
+    cleaning up after ourselves: the hook creates the output sink up front
+    (it has to -- the path must be a literal, and it must exist at 0600
+    before anything writes to it), and the `rm` that would remove it lives
+    in the command text these tests never execute. Without this, a full test
+    run leaves one stray file per case behind until the hourly sweep."""
     _, out = _run(tool_name, {"command": original})
     decision = _decision(out)
     assert decision["permissionDecision"] == "allow"
-    return decision["updatedInput"]["command"]
+    command = decision["updatedInput"]["command"]
+    if tool_name == "Bash":
+        _discard_sink(command)
+    return command
 
 
 def test_bash_command_is_rewritten_not_denied():
@@ -115,10 +131,53 @@ def test_bash_wrap_preserves_original_command_verbatim():
     assert original in command
 
 
-def test_bash_wrap_uses_pipefail_and_brace_group():
+def test_bash_wrap_runs_the_original_in_a_subshell():
+    """A subshell, not a brace group: a bare `exit` in the original command
+    must end only that command, leaving the filter still to run. With a
+    brace group it would exit the wrapper itself and silently drop the
+    output -- and a subshell also matches the superseded pipeline's
+    semantics, since bash already ran the left side of a pipe in one."""
     command = _wrapped_command("Bash", "echo hi")
-    assert command.startswith("set -o pipefail; { echo hi")
-    assert "} 2>&1 |" in command
+    assert command.startswith("( echo hi\n)")
+
+
+def test_bash_wrap_feeds_the_filter_from_a_file_never_a_pipe():
+    """The property that keeps this wrapper runnable inside a
+    worktree-isolated session: the harness's isolation guard rejects a pipe
+    whose reading end is a program it has no model for, which is what the
+    superseded `... | uv run ... python redact_output.py` shape always was.
+    A `< /literal/path` redirect is what that guard accepts, so if this ever
+    goes back to a pipe, every Bash call in a worktree breaks again --
+    including `true`. See ISSUES.md, 2026-09-11."""
+    command = _wrapped_command("Bash", "echo hi")
+    assert "| uv run" not in command
+    assert "|" not in command
+    assert f"{_ENV_PATH} < " in command
+
+
+def test_bash_wrap_names_the_sink_literally_not_via_command_substitution():
+    """A shell-side `$(mktemp)` would be a value computed at runtime, which
+    the isolation guard refuses as a redirect target -- the sink has to be
+    created by the hook so the path it writes is a literal."""
+    command = _wrapped_command("Bash", "echo hi")
+    assert "$(" not in command
+    assert "mktemp" not in command
+
+
+def test_bash_wrap_uses_no_trap():
+    """The isolation guard rejects `trap` outright: it is handed shell text
+    the guard cannot prove is git-free. Cleanup is therefore an ordinary
+    `rm` on the normal path, plus the hook-side sweep for the abnormal one."""
+    assert "trap" not in _wrapped_command("Bash", "echo hi")
+
+
+def test_bash_wrap_lets_a_filter_failure_override_the_command_status():
+    """Fail-closed: a redaction error must never surface as the original
+    command's success, because that is the shape in which unfiltered
+    content would look like a normal result."""
+    command = _wrapped_command("Bash", "echo hi")
+    assert "if [ $__redact_filter_rc -ne 0 ]; then exit $__redact_filter_rc; fi" in command
+    assert command.endswith("exit $__redact_rc")
 
 
 def test_bash_wrap_invokes_redact_script_via_no_project_directory():
@@ -234,6 +293,7 @@ def test_configured_invocation_wraps_bash_commands():
     decision = _decision(out)
     assert decision["permissionDecision"] == "allow"
     assert "redact_output.py" in decision["updatedInput"]["command"]
+    _discard_sink(decision["updatedInput"]["command"])
 
 
 def test_configured_invocation_does_not_depend_on_project_sync():

@@ -25,9 +25,22 @@ def _key_names(path: Path) -> set[str]:
     This function is the reason a test may look at .env at all: it can only
     ever produce names, so no assertion built on it can print a secret. See
     CLAUDE.md's "Secret handling" section.
+
+    SKIPS rather than returning an empty set when the file is absent. Both
+    .env and .env.config are gitignored, so they exist only on a developer's
+    machine: CI never creates either, a git worktree never materializes them,
+    and neither does a fresh clone. Returning set() there made every placement
+    assertion below pass VACUOUSLY -- a green run that never tested its own
+    invariant, which is a worse signal than no test at all. Skipping reports
+    those guards as skipped exactly where they cannot run, and leaves them
+    meaningful where they can (the main checkout).
     """
     if not path.is_file():
-        return set()
+        pytest.skip(
+            f"{path.name} is gitignored and absent here (CI, worktree, or fresh "
+            "clone) -- this placement invariant can only be checked in a "
+            "developer's main checkout"
+        )
     return {
         match.group(1)
         for line in path.read_text().splitlines()
