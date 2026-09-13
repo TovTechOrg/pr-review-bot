@@ -126,12 +126,18 @@ def test_ambiguous_shapes_ask_rather_than_deny(command):
     assert decision["permissionDecision"] == "ask"
 
 
-def test_docker_build_context_containing_a_protected_path_asks():
+def test_docker_build_context_containing_a_protected_path_asks(tmp_path):
     """The command line never names `.env` directly -- only the build
-    context directory's own contents do. `_PROJECT_ROOT` genuinely holds a
-    real `.env` (mode 400, chattr +i), so this is a real directory-contents
-    check, not a fixture standing in for one."""
-    rc, out, _err = _run("docker build -t x .", cwd=_PROJECT_ROOT)
+    context directory's own contents do. Uses a synthetic build context
+    (a throwaway `.env` under `tmp_path`), not the real project checkout: an
+    earlier version of this test pointed at `_PROJECT_ROOT` and relied on a
+    real `.env` existing there, which is true on a developer's own machine
+    (gitignored, created and `chattr +i`'d locally) but never true in a CI
+    checkout -- CI never materializes a gitignored file, so this test was
+    silently unrunnable in CI until it was actually pushed and hit exactly
+    that gap (see ISSUES.md)."""
+    (tmp_path / ".env").write_text("SOME_KEY=abcdefgh12345678\n")
+    rc, out, _err = _run("docker build -t x .", cwd=tmp_path)
     assert rc == 0
     decision = json.loads(out)["hookSpecificOutput"]
     assert decision["permissionDecision"] == "ask"
