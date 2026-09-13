@@ -282,6 +282,17 @@ gate alike), not in prose about who calls you.
   HTML/CSS and reasoning about layout is not a substitute for actually
   rendering the page (see the skill for why, and the incident it
   generalizes from).
+- **The `.claude/hooks/` files are shared with the sibling repo and must stay
+  byte-identical.** `~/pr-review-bot` and `~/onboarding-wizard` each carry
+  their own copy of `check_env_access.py`, `redact_output.py` and
+  `check_exfiltration.py`. Neither repo's CI can see the other, so nothing
+  mechanical catches drift -- and `check_env_access.py` already drifted once,
+  silently, leaving the wizard on the superseded pipe-based wrapper. Changing
+  a hook in one repo means porting it to the other **in the same session**,
+  verified with `diff <repo-a>/.claude/hooks/<file> <repo-b>/.claude/hooks/<file>`
+  printing nothing, before either change is considered done. Per-repo
+  differences belong in `check_exfiltration.py`'s `_PROTECTED` list, which was
+  designed wide enough that nothing else should need one.
 
 ## Docker image: no `chown -R` (2026-09-07)
 
@@ -428,6 +439,64 @@ something to rely on being reversible.)
   deliberate generation call — not a workaround for the rule above.
 - This applies to **any** LLM provider's free tier, not just Gemini — Groq and
   future alternatives should get the same restraint.
+
+## Workspace isolation: worktree vs inline (2026-09-13)
+
+The redaction wrapper (`check_env_access.py` part 2) and the harness's
+`EnterWorktree` isolation guard do not compose. The guard refuses any command
+naming `git` unless it is a *plain single command*, and a wrapped command can
+never be plain -- redaction needs at minimum a redirect and a second statement.
+See `docs/superpowers/specs/2026-09-12-redaction-wrapper-worktree-design.md`
+and `ISSUES.md`'s 2026-09-11 entry.
+
+**Measured 2026-09-13: that guard is scoped to the `EnterWorktree` *session
+mode*, not to the directory being a worktree.** A worktree created with plain
+`git worktree add` and used from an ordinary session runs git freely --
+verified with both a bare `git status --short` and a piped, multi-statement
+`git log --oneline -1 | cat && echo ...`, wrapper active throughout. The
+wrapper therefore costs one *tool*, not the workflow.
+
+### Which to use
+
+**Inline -- a plain feature branch in the main checkout -- is the default.**
+Use it for single-task changes, and for anything needing real credentials or
+the synced venv: running the app locally, `ui-visual-review`, `deploy-verify`,
+and any run where `tests/test_config.py`'s three placement guards should
+actually execute rather than skip. The existing rule about checking the
+*target* branch for pre-existing uncommitted changes before merging binds
+harder here, since there is only one working tree to collide in.
+
+**A manual worktree (`git worktree add`, never `EnterWorktree`)** for SDD
+plans, genuinely independent parallel tasks, and experiments that may be thrown
+away. This path is already sanctioned: the `superpowers:using-git-worktrees`
+skill describes itself as working "via native tools *or git worktree
+fallback*". The existing rule about writing or committing a plan file *inside*
+the worktree still applies -- see the next section.
+
+**Never `EnterWorktree` while the wrapper lives.** Every git command in such a
+session is refused, a bare `git status` included, leaving a session that can
+edit and test but not commit or merge. That is unusable for anything
+SDD-shaped, where the commit boundary arrives once per task rather than once
+per branch. If there is reason to think harness behaviour has changed, the
+probe is two commands -- `git worktree add <tmp> -b probe/x`, then `cd <tmp> &&
+git status --short`. If that runs, this guidance still holds.
+
+### Worktree caveats
+
+- **No `.env`, no `.env.config`, no `.venv`** -- all gitignored, so a worktree
+  never materializes them. Consequences: `uv run` builds a fresh venv there
+  (time and disk); anything needing real credentials must run in the main
+  checkout; and `tests/test_config.py`'s three placement guards **skip** rather
+  than run (deliberate as of 2026-09-13 -- they previously passed *vacuously*,
+  reporting green on an invariant they had not checked). Redaction itself is
+  unaffected: `check_env_access.py` resolves an absolute `_ENV_PATH` against
+  the main checkout and `CLAUDE_PROJECT_DIR` stays pinned there (measured, see
+  `ISSUES.md` 2026-09-11).
+- **`ExitWorktree` will not clean up a manual worktree** -- by documented
+  design it only touches worktrees it created itself. Use `git worktree
+  remove` plus `git branch -d`.
+- **Never call `EnterWorktree --path` on a manual worktree.** It converts it
+  into a guarded session and reintroduces the entire problem.
 
 ## Plan-execution / multi-agent process hygiene
 
