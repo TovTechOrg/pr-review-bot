@@ -340,13 +340,39 @@ async def test_guided_apply_reports_its_outcome_outside_the_dialog():
     which lives INSIDE <dialog id="guidedModal"> -- close() on the next line
     hid it immediately, so a partial apply was never visible and the
     refreshed var table (one added row) was the operator's only feedback.
-    It must report into #renderSaveResult, which sits outside the dialog."""
+    Once anything has actually been pushed to Render/written to the DB, it
+    must report into #renderSaveResult, which sits outside the dialog --
+    #guidedModalResult is reserved for the nothing-applied-yet case (see
+    test_guided_apply_shows_a_nothing_applied_failure_inline_without_closing),
+    which returns before this close-and-report path ever runs."""
     client = await _client()
     body = (await client.get("/")).text
     apply_start = body.index('document.getElementById("guidedApplyBtn").addEventListener')
     handler = body[apply_start : body.index('document.getElementById("guidedCancelBtn")')]
-    assert 'document.getElementById("renderSaveResult").innerHTML' in handler
-    assert 'document.getElementById("guidedModalResult").textContent' not in handler
+    close_path = handler[handler.index("result2.applied.length === 0") :]
+    close_path = close_path[close_path.index("return;") :]
+    assert 'document.getElementById("renderSaveResult").innerHTML' in close_path
+    assert 'document.getElementById("guidedModalResult").textContent' not in close_path
+
+
+async def test_guided_apply_shows_a_nothing_applied_failure_inline_without_closing():
+    """A failure that happened before anything was pushed to Render or
+    written to the DB (most commonly: the chosen model is listed by the
+    provider but not callable, which Validate's catalog listing can't have
+    caught) is fully safe to retry from the same dialog state -- so it must
+    be shown inside the dialog (#guidedModalResult) and the dialog must stay
+    open, not force the operator all the way back through Validate just to
+    pick a different model."""
+    client = await _client()
+    body = (await client.get("/")).text
+    apply_start = body.index('document.getElementById("guidedApplyBtn").addEventListener')
+    handler = body[apply_start : body.index('document.getElementById("guidedCancelBtn")')]
+    nothing_applied_branch = handler.index("result2.applied.length === 0")
+    close_call = handler.index('document.getElementById("guidedModal").close()')
+    assert nothing_applied_branch < close_call
+    branch = handler[nothing_applied_branch:close_call]
+    assert 'document.getElementById("guidedModalResult").textContent' in branch
+    assert "return;" in branch
 
 
 async def test_guided_modal_resets_its_family_select_on_any_close():

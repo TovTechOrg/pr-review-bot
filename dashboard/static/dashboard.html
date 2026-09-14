@@ -2168,6 +2168,18 @@
           body: JSON.stringify(body),
         });
         const result2 = await resp.json();
+        if (result2.applied.length === 0 && result2.failed.length > 0) {
+          // Nothing was pushed to Render or written to the DB yet -- this is
+          // the pre-push guard in _apply_llm_credential (most commonly: the
+          // chosen model is listed by the provider but not callable, which
+          // Validate's catalog listing can't have caught). Fully safe to
+          // retry from here: keep the dialog open with the credential/model
+          // picker intact instead of forcing the operator all the way back
+          // through Validate just to pick a different model.
+          document.getElementById("guidedModalResult").textContent =
+            `${t("env_invalid")}: ${tError(result2.failed[0].error)}`;
+          return;
+        }
         // Report into #renderSaveResult, NOT #guidedModalResult: the latter
         // lives inside the <dialog>, so close() below hid it the instant it
         // was written and a partial apply ("failed: VERTEX_MODEL") was never
