@@ -716,6 +716,10 @@
           <button type="button" id="deleteConfirmOkBtn" data-i18n="env_delete_confirm_ok"></button>
           <button type="button" id="deleteConfirmCancelBtn" data-i18n="env_guided_cancel"></button>
         </dialog>
+        <dialog id="deleteActiveProviderBlockedModal">
+          <div data-i18n="env_delete_active_provider_blocked"></div>
+          <button type="button" id="deleteActiveProviderBlockedOkBtn" data-i18n="env_delete_active_provider_dismiss"></button>
+        </dialog>
       </section>
 
       <section class="env-section">
@@ -864,6 +868,8 @@
         env_guided_app_id_placeholder: "App ID",
         env_delete_confirm_title: "This will also clear:",
         env_delete_confirm_ok: "Delete anyway",
+        env_delete_active_provider_blocked: "This credential is the active provider's active slot. Switch the active provider or slot in the Config section below and save, then retry the delete.",
+        env_delete_active_provider_dismiss: "OK",
         cfg_group_cooldown: "Re-review cooldown",
         cfg_group_backoff: "Failure backoff",
         cfg_group_usage_cap: "Per-key daily usage cap",
@@ -1024,6 +1030,8 @@
         env_guided_app_id_placeholder: "מזהה אפליקציה",
         env_delete_confirm_title: "פעולה זו תנקה גם:",
         env_delete_confirm_ok: "מחק בכל זאת",
+        env_delete_active_provider_blocked: "האישור הזה הוא המשבצת הפעילה של הספק הפעיל. החלף ספק או משבצת פעילים בקטע ההגדרות למטה ושמור, ואז נסה למחוק שוב.",
+        env_delete_active_provider_dismiss: "אישור",
         cfg_group_cooldown: "צינון בדיקה חוזרת",
         cfg_group_backoff: "נסיגה לאחר כשל",
         cfg_group_usage_cap: "תקרת שימוש יומית למפתח",
@@ -1775,6 +1783,10 @@
           const resp = await fetch(`/api/environment/render/${key}`, { method: "DELETE" });
           if (resp.status === 409) {
             const data = await resp.json();
+            if (data.error === "active_provider_credential") {
+              document.getElementById("deleteActiveProviderBlockedModal").showModal();
+              return;
+            }
             document.getElementById("deleteConfirmList").innerHTML =
               data.dependents.map((d) => `<li>${esc(d)}</li>`).join("");
             const modal = document.getElementById("deleteConfirmModal");
@@ -2199,6 +2211,10 @@
 
     document.getElementById("deleteConfirmCancelBtn").addEventListener("click", () => {
       document.getElementById("deleteConfirmModal").close();
+    });
+
+    document.getElementById("deleteActiveProviderBlockedOkBtn").addEventListener("click", () => {
+      document.getElementById("deleteActiveProviderBlockedModal").close();
     });
 
     document.getElementById("addVarForm").addEventListener("submit", (event) => {

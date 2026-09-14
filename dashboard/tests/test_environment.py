@@ -1313,14 +1313,30 @@ async def test_delete_dependent_slot_without_confirm_returns_409(monkeypatch):
     assert resp.json()["dependents"] == ["key_index override"]
 
 
-async def test_delete_active_provider_credential_without_confirm_returns_409(monkeypatch):
+async def test_delete_active_provider_credential_is_blocked_even_with_confirm(monkeypatch):
+    """Cascading this to store.set_provider_override(None, ...) would leave
+    runtime_config.provider null, which fails main.py's boot gate on the
+    next Render redeploy -- so this is refused outright, not just gated
+    behind confirm=true like the other dependents-having deletes below."""
     monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {})
     monkeypatch.setattr(store, "get_provider_override", lambda: "gemini")
     monkeypatch.setattr(store, "get_slot_config", lambda family, index: None)
+
+    def _fail(*args, **kwargs):
+        raise AssertionError("must not touch Render or runtime_config when blocked")
+
+    monkeypatch.setattr(render_client, "find_service_id", _fail)
+    monkeypatch.setattr(render_client, "delete_env_var", _fail)
+    monkeypatch.setattr(store, "set_provider_override", _fail)
     client = await _client()
-    resp = await client.delete("/api/environment/render/GEMINI_API_KEY")
+
+    resp = await client.delete("/api/environment/render/GEMINI_API_KEY?confirm=true")
+
     assert resp.status_code == 409
-    assert resp.json()["dependents"] == ["active provider override"]
+    body = resp.json()
+    assert body["error"] == "active_provider_credential"
+    assert body["provider"] == "gemini"
+    assert body["slot"] == 0
 
 
 async def test_delete_slot_with_configured_slot_config_without_confirm_returns_409(monkeypatch):
@@ -1370,29 +1386,60 @@ async def test_confirmed_delete_of_a_slot_with_slot_config_removes_the_row(monke
     assert deleted == {"family": "groq", "index": 3}
 
 
-async def test_confirmed_delete_cascades_runtime_config(monkeypatch):
+async def test_confirmed_delete_of_the_active_slot_for_the_active_provider_is_blocked(
+    monkeypatch,
+):
+    """This is the active provider's active slot -- blocked outright, same
+    as the base-slot case above, regardless of confirm."""
+    monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"gemini": 2})
+    monkeypatch.setattr(store, "get_provider_override", lambda: "gemini")
+    monkeypatch.setattr(store, "get_slot_config", lambda family, index: None)
+
+    def _fail(*args, **kwargs):
+        raise AssertionError("must not touch Render or runtime_config when blocked")
+
+    monkeypatch.setattr(render_client, "find_service_id", _fail)
+    monkeypatch.setattr(render_client, "delete_env_var", _fail)
+    monkeypatch.setattr(store, "set_key_index_override", _fail)
+    monkeypatch.setattr(store, "set_provider_override", _fail)
+    client = await _client()
+
+    resp = await client.delete("/api/environment/render/GEMINI_API_KEY_2?confirm=true")
+
+    assert resp.status_code == 409
+    body = resp.json()
+    assert body["error"] == "active_provider_credential"
+    assert body["provider"] == "gemini"
+    assert body["slot"] == 2
+
+
+async def test_confirmed_delete_of_an_inactive_slot_still_cascades_its_own_dependents(
+    monkeypatch,
+):
+    """A spare slot's leftover key_index_override, with a *different*
+    provider active, has no active-provider tie -- the existing
+    confirm-and-cascade flow still applies to it."""
     cleared = {}
     monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
     monkeypatch.setattr(render_client, "delete_env_var", lambda *a, **k: None)
     monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
     monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"gemini": 2})
-    monkeypatch.setattr(store, "get_provider_override", lambda: "gemini")
+    monkeypatch.setattr(store, "get_provider_override", lambda: "groq")
     monkeypatch.setattr(store, "get_slot_config", lambda family, index: None)
 
     def _set_key_index(provider, index, now):
         cleared["key_index"] = (provider, index)
 
-    def _set_provider(provider, now):
-        cleared["provider"] = provider
+    def _fail_set_provider(*args, **kwargs):
+        raise AssertionError("must not touch provider_override for an inactive-provider slot")
 
     monkeypatch.setattr(store, "set_key_index_override", _set_key_index)
-    monkeypatch.setattr(store, "set_provider_override", _set_provider)
+    monkeypatch.setattr(store, "set_provider_override", _fail_set_provider)
     client = await _client()
     resp = await client.delete("/api/environment/render/GEMINI_API_KEY_2?confirm=true")
     assert resp.status_code == 200
     assert resp.json()["applied"] == ["GEMINI_API_KEY_2"]
     assert cleared["key_index"] == ("gemini", None)
-    assert cleared["provider"] is None
 
 
 async def test_protected_key_delete_still_refused():

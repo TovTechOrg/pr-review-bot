@@ -1139,10 +1139,14 @@ def _cascade_delete(key: str, confirm: bool) -> tuple[int, dict]:
     # the slot's current slot_config row here and hand it in, same as
     # key_index_overrides/provider_override above.
     slot_config_row = None
+    slot_family = None
+    slot_index = None
     for family in _LLM_PROVIDER_FAMILIES:
         index = config_deps.slot_index_for_var(family, key)
         if index is not None:
             slot_config_row = store.get_slot_config(family, index)
+            slot_family = family
+            slot_index = index
             break
     dependents = config_deps.dependents_of(
         key,
@@ -1150,6 +1154,19 @@ def _cascade_delete(key: str, confirm: bool) -> tuple[int, dict]:
         provider_override=provider_override,
         slot_config_row=slot_config_row,
     )
+
+    # Cascading this one specifically to store.set_provider_override(None, ...)
+    # would leave runtime_config.provider null, which fails main.py's boot
+    # gate on the next Render redeploy -- unlike the other dependents below,
+    # this is never allowed to proceed, confirm=true included. The operator
+    # must switch the active provider/slot in the Config section and save
+    # first, then retry the delete.
+    if dependents is not None and dependents.provider_override:
+        return 409, {
+            "error": "active_provider_credential",
+            "provider": slot_family,
+            "slot": slot_index,
+        }
 
     if dependents is not None and dependents.any() and not confirm:
         return 409, {"dependents": dependents.labels()}
@@ -1178,8 +1195,6 @@ def _cascade_delete(key: str, confirm: bool) -> tuple[int, dict]:
                 continue
             if dependents.key_index_override:
                 store.set_key_index_override(family, None, now)
-            if dependents.provider_override:
-                store.set_provider_override(None, now)
             if dependents.slot_config:
                 store.delete_slot_config(family, index)
             break
