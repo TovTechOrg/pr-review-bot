@@ -21,6 +21,13 @@ cost.md
 .env.config
 **/.env.config
 *.pem
+# Any service-account / private-key JSON, whatever it happens to be named.
+# `gcp-service-account-key*.json` alone silently failed to match the real
+# on-disk `vertex-ai-private-key.json`, so a local `docker build .` (which
+# the deploy-verify skill runs) swept a live GCP service-account key into the
+# build context. The explicit name stays below the glob for documentation.
+*private-key*.json
+*service-account*.json
 gcp-service-account-key*.json
 
 .git/
