@@ -83,12 +83,25 @@ def demo_chrome_installed():
     behavior it registers present for this test" -- exactly what these
     tests need to be independently reliable regardless of test order.
     """
+    from pathlib import Path
+
+    from fastapi.staticfiles import StaticFiles
     from starlette.middleware.base import BaseHTTPMiddleware
 
     from demo.app import _cookieless_bypasses_login, app
     from demo.routes import router as demo_router
 
     app.include_router(demo_router)
+    # Same reasoning as the router/middleware above: conftest.py's autouse
+    # restore fixture wipes `app.router.routes` back to its pristine,
+    # demo-app-unaware snapshot after every test -- a static Mount is just
+    # another entry in that same list, so it needs the same per-test
+    # re-registration to be reliably present regardless of test order.
+    app.mount(
+        "/demo-static",
+        StaticFiles(directory=Path(__file__).resolve().parent.parent / "demo" / "static"),
+        name="demo-static",
+    )
     app.add_middleware(BaseHTTPMiddleware, dispatch=_cookieless_bypasses_login)
     app.middleware_stack = None
     yield app
@@ -240,3 +253,27 @@ async def test_cookieless_request_still_reaches_a_login_gated_route(
     assert response.status_code == 200
     body = response.json()
     assert "stats" in body
+
+
+async def test_demo_static_mount_serves_demo_js(demo_chrome_installed):
+    """Concrete proof the static mount is actually wired, not just that
+    demo/static/demo.js exists on disk. A task reviewer found that
+    demo.js -- banner injection, readonly login prefill, the bootstrap
+    fetch -- was created but never mounted or referenced anywhere, so the
+    whole visible point of this task's chrome never ran in a real page
+    load. This hits the ASGI app the same way a browser's <script src=...>
+    tag would."""
+    from httpx import ASGITransport, AsyncClient
+
+    from demo.app import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/demo-static/demo.js")
+
+    assert response.status_code == 200
+    assert "text/javascript" in response.headers["content-type"] or (
+        "javascript" in response.headers["content-type"]
+    )
+    assert "demoBanner" in response.text
+    assert "prefillLogin" in response.text

@@ -14,7 +14,10 @@ the existing tests patch.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import github_app as real_github_app
+from fastapi.staticfiles import StaticFiles
 from review_queue import store as real_store
 
 from demo import github_app as demo_github_app
@@ -62,6 +65,17 @@ __all__ = ["app", "install_mocks"]
 from demo.routes import router as demo_router  # noqa: E402
 
 app.include_router(demo_router)
+
+# Overrides nothing in main.py -- `/demo-static` is a path main.py never
+# mounts (its own static mount lives at `/static/fonts`, see main.py's
+# `app.mount("/static/fonts", ...)`), so this can't collide with it. Serves
+# demo/static/demo.js (banner injection, readonly login prefill, bootstrap
+# fetch), which login.html/dashboard.html load via a <script> tag.
+app.mount(
+    "/demo-static",
+    StaticFiles(directory=Path(__file__).parent / "static"),
+    name="demo-static",
+)
 
 
 @app.middleware("http")
