@@ -1716,7 +1716,7 @@
     }
 
     function maskedValue(value) {
-      return "•".repeat(Math.min(value.length, 24)) || "—";
+      return value ? "*".repeat(8) : "—";
     }
 
     function renderRenderVarsTable() {
