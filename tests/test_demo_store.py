@@ -41,3 +41,52 @@ def test_boot_config_getters_are_valid():
     assert demo_store.get_slot_config(provider, 0) is not None
     assert all(v is not None for v in demo_store.get_cooldown_overrides())
     assert demo_store.get_dispatcher_tuning_config()
+
+
+def test_dashboard_stats_on_empty_store():
+    demo_store.reset()
+    assert demo_store.dashboard_stats() == {
+        "total_reviews": 0,
+        "total_cost_usd": 0.0,
+        "avg_elapsed_ms": 0,
+    }
+
+
+class _FakeReview:
+    def __init__(self, elapsed_ms, cost, tokens_in=100, tokens_out=200):
+        self.provider = "groq"
+        self.model = "fake-model"
+        self.total_elapsed_ms = elapsed_ms
+        self.total_tokens_in = tokens_in
+        self.total_tokens_out = tokens_out
+        self.est_cost_usd = cost
+        self.results = []
+
+
+def test_dashboard_stats_after_recording_reviews():
+    demo_store.reset()
+    demo_store.record_review(
+        "bot-demo/example-app", 1, _FakeReview(1000, 0.001234),
+        None, "2026-09-16T00:00:00+00:00", 0,
+    )
+    demo_store.record_review(
+        "bot-demo/example-app", 2, _FakeReview(2000, 0.002345),
+        None, "2026-09-16T00:01:00+00:00", 0,
+    )
+    stats = demo_store.dashboard_stats()
+    assert stats["total_reviews"] == 2
+    assert stats["total_cost_usd"] == round(0.001234 + 0.002345, 4)
+    assert stats["avg_elapsed_ms"] == 1500
+
+
+def test_dashboard_queue_counts_zero_fills_all_known_statuses():
+    demo_store.reset()
+    assert demo_store.dashboard_queue_counts() == {
+        "pending": 0,
+        "running": 0,
+        "deferred": 0,
+        "retrying": 0,
+        "done": 0,
+        "failed": 0,
+        "cancelled": 0,
+    }

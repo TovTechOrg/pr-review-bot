@@ -274,12 +274,28 @@ def dashboard_reviews(limit: int = 50) -> list[dict]:
     return list(reversed(_reviews))[:limit]
 
 
+_TICKET_STATUSES = (
+    "pending", "running", "deferred", "retrying", "done", "failed", "cancelled"
+)
+
+
 def dashboard_stats() -> dict:
-    return {"reviews_total": len(_reviews)}
+    """Mirrors the real store's SQL aggregate (COUNT/SUM/AVG with COALESCE
+    for the zero-reviews case) over the in-memory `_reviews` list."""
+    n = len(_reviews)
+    if n == 0:
+        return {"total_reviews": 0, "total_cost_usd": 0.0, "avg_elapsed_ms": 0}
+    total_cost = sum(r["est_cost_usd"] for r in _reviews)
+    avg_elapsed = sum(r["elapsed_ms"] for r in _reviews) / n
+    return {
+        "total_reviews": n,
+        "total_cost_usd": round(float(total_cost), 4),
+        "avg_elapsed_ms": int(avg_elapsed),
+    }
 
 
 def dashboard_queue_counts() -> dict[str, int]:
-    counts: dict[str, int] = {}
+    counts = {status: 0 for status in _TICKET_STATUSES}
     for ticket in _tickets.values():
         counts[ticket.status] = counts.get(ticket.status, 0) + 1
     return counts
