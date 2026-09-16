@@ -72,7 +72,7 @@ demo swaps exactly those:
 
 | Repo | Real | Demo |
 |---|---|---|
-| bot | `providers/{gemini,vertex,groq}.py` | `providers/mock.py` |
+| bot | `providers/factory.py::get_provider()` | a mock adapter |
 | bot | `github_app.py` | `github_app_mock.py` |
 | bot | `render_client.py` | `render_client_mock.py` |
 | bot | `review_queue/store.py` | in-memory `MockStore` |
@@ -85,6 +85,24 @@ is structurally just another adapter alongside the three real ones.
 `supabase_client.py` and `uptimerobot_client.py` need no mock: the only steps
 that call them are the ones the trimmed flow collapses, so the demo build
 never invokes them.
+
+**The provider swap happens at the factory, and does not add a provider
+name.** `registry.PROVIDERS` is not a class registry -- it maps each provider
+to its credential and model env-var names (`registry.py:14-29`), with class
+selection living in an if/elif chain inside `factory._build()`. A fourth
+"mock" provider name would therefore need registry entries and a pricing row,
+and would trip `main.py:110`'s boot gate. It would also defeat the point: the
+demo reports the provider the reader chose, so the mock must answer *as*
+gemini, vertex, or groq rather than as itself.
+
+Two constraints follow. The adapter satisfies the `complete()` Protocol in
+`providers/base.py:51-71` and is injected by patching
+`specialists.base.get_provider` -- a from-import, which is why the existing
+tests patch that name rather than `providers.factory`. And the model string it
+reports must be one of the pairs priced in `pricing.py` (`gemini`/`vertex` with
+`gemini-flash-latest`, `vertex` with `gemini-2.5-flash`, `groq` with
+`llama-3.3-70b-versatile`), or `estimate_cost_usd()` returns `None` and the
+demo's review comment renders a blank cost.
 
 ## The reader's path, end to end
 
