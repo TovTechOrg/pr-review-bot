@@ -78,6 +78,41 @@ def test_install_mocks_rebinds_every_external_boundary(demo_env):
     assert specialists.base.get_provider().__class__.__name__ == "MockProvider"
 
 
+def test_install_mocks_does_not_recurse_never_rebind_functions(demo_env):
+    """Regression for the Critical bug found in task-5 review: install_mocks()
+    used to reimplement demo_store's rebinding loop directly over
+    dir(demo_store) with no exclusion for demo/store.py's _NEVER_REBIND set
+    (effective_cooldown/next_cooldown_level/usage_bucket_start -- thin
+    passthrough wrappers that call real_store.<name> internally). Rebinding
+    them pointed real_store.<name> at a wrapper whose own body called
+    real_store.<name> -- which by then *was* the wrapper -- causing
+    RecursionError the instant any of them was called (e.g.
+    review_queue/dispatcher.py's finalize path calling
+    store.effective_cooldown() on every successful review)."""
+    from demo import app as demo_app
+
+    demo_app.install_mocks()
+
+    from datetime import datetime, time
+
+    from review_queue import cooldown_config, store
+
+    # effective_cooldown() reads from cooldown_config's own override cache,
+    # not from the store directly -- populate it the same way
+    # dispatcher.process_next_due() does per ticket (store.get_cooldown_overrides()
+    # -> cooldown_config.set_override_cache(...)), otherwise it legitimately
+    # returns (None, None, None) and effective_cooldown() TypeErrors on
+    # None ** int, unrelated to the recursion bug this test targets.
+    cooldown_config.set_override_cache(*store.get_cooldown_overrides())
+
+    # None of these three should raise RecursionError. Real values checked
+    # (not just "did not raise") to guard against a future change that makes
+    # them silently swallow an exception instead of returning correctly.
+    assert isinstance(store.effective_cooldown(1), float)
+    assert isinstance(store.next_cooldown_level(1), int)
+    assert isinstance(store.usage_bucket_start(datetime(2026, 1, 1), time(0, 0)), datetime)
+
+
 async def test_app_boots_without_a_database_or_network(demo_env, live_operator_apis_allowed):
     # conftest.py's autouse `_quarantine_operator_apis` blanks
     # settings.github_webhook_secret (one of _LIVE_OPERATOR_KEYS) for every
@@ -107,3 +142,43 @@ async def test_app_boots_without_a_database_or_network(demo_env, live_operator_a
         async with app.router.lifespan_context(app):
             response = await client.get("/healthz")
     assert response.status_code == 200
+
+
+async def test_dispatcher_finalizes_a_ticket_end_to_end_with_mocks_installed(demo_env):
+    """The demo's actual purpose: a ticket enqueued against the mocked store
+    must be claimable and reviewable by review_queue.dispatcher.process_next_due
+    without touching a database or the network, and must reach a terminal
+    "done" state -- not get stuck at "running" forever the way the Critical
+    RecursionError bug (store.effective_cooldown() called from the finalize
+    path) would have caused. Nothing in the original Task 5 test suite
+    exercised the dispatcher at all -- only /healthz -- which is exactly how
+    that bug shipped undetected."""
+    from datetime import datetime, timezone
+
+    from demo import app as demo_app
+    from demo import store as demo_store
+
+    demo_app.install_mocks()
+    demo_store.reset()
+    try:
+        from demo.content import DEMO_REPO
+        from review_queue import dispatcher, store
+
+        now = datetime.now(timezone.utc)
+        ticket_id = store.enqueue_or_update(
+            repo_full_name=DEMO_REPO,
+            pr_number=1,
+            head_sha="deadbeef",
+            provider="groq",
+            now=now.isoformat(),
+        )
+
+        result = await dispatcher.process_next_due(now)
+
+        assert result.action == "ran"
+        assert result.ticket_id == ticket_id
+        ticket = store.get_ticket(ticket_id)
+        assert ticket is not None
+        assert ticket.status == "done"
+    finally:
+        demo_store.reset()

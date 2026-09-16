@@ -32,9 +32,16 @@ def install_mocks() -> None:
     for name in _MOCKED_GITHUB:
         setattr(real_github_app, name, getattr(demo_github_app, name))
 
-    for name in dir(demo_store):
-        if not name.startswith("_") and hasattr(real_store, name):
-            setattr(real_store, name, getattr(demo_store, name))
+    # demo_store.install() rebinds every public review_queue.store function
+    # onto the real module -- EXCEPT its own `_NEVER_REBIND` set
+    # (effective_cooldown/next_cooldown_level/usage_bucket_start), which are
+    # thin passthrough wrappers that call `real_store.<name>(...)` internally.
+    # Reimplementing this loop here instead of calling install() (as an
+    # earlier version of this file did) rebinds those three too, pointing
+    # real_store.<name> at a wrapper whose own body calls real_store.<name> --
+    # infinite recursion the instant any of them runs (e.g. dispatcher.py's
+    # finalize path calling store.effective_cooldown()).
+    demo_store.install()
 
     import specialists.base
 

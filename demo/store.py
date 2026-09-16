@@ -192,7 +192,26 @@ def delete_slot_config(provider: str, slot_index: int) -> None:
 
 
 def get_all_slot_configs() -> dict[tuple[str, int], dict]:
-    return {}
+    """Only the currently active provider's slot 0 is ever "configured" in
+    the demo -- MockProvider never reads a real credential, but
+    orchestrator.py's own `_active_model()` still resolves the model to
+    report/price purely through this cache (`providers/active_model.py`,
+    populated once per claimed ticket by
+    review_queue/dispatcher.py::_refresh_slot_config), independently of
+    specialists.base.get_provider()'s demo patch. Returning {} unconditionally
+    (as this did before) left that cache permanently empty, so
+    `_active_model()` always raised "no model configured" and no demo review
+    could ever reach a completed/finalized ticket -- caught by
+    tests/test_demo_app_boot.py's new end-to-end dispatcher test."""
+    from demo.provider import demo_provider_and_model
+    _, model = demo_provider_and_model(_ACTIVE_PROVIDER)
+    return {
+        (_ACTIVE_PROVIDER, 0): {
+            "model": model,
+            "vertex_gcp_project": None,
+            "vertex_gcp_location": None,
+        }
+    }
 
 
 def get_cooldown_overrides() -> tuple[float | None, float | None, float | None]:
