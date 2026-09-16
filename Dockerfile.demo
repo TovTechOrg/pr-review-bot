@@ -1,0 +1,37 @@
+# Demo image. Mirrors Dockerfile, with three differences: it also COPYs
+# demo/, it boots demo.app:app instead of the real Dockerfile's entrypoint,
+# and it bakes its own fake settings so a demo deployment has no env-var
+# configuration to get wrong. None of these values authenticate anything.
+FROM python:3.12-slim
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+WORKDIR /app
+
+# No chown -R: see Dockerfile and CLAUDE.md. Nothing under /app is written
+# to at runtime.
+RUN useradd -m -u 1000 appuser
+
+COPY pyproject.toml uv.lock ./
+COPY dashboard ./dashboard
+RUN uv sync --frozen --no-dev --package pr-review-bot
+
+COPY config.py config_deps.py diff_utils.py formatting.py github_app.py \
+     hmac_verify.py main.py orchestrator.py render_client.py webhook.py ./
+COPY providers/ ./providers/
+COPY review_queue/ ./review_queue/
+COPY specialists/ ./specialists/
+COPY demo/ ./demo/
+
+# Fake-but-present. There is no real credential anywhere in this image.
+ENV GITHUB_WEBHOOK_SECRET="demo-webhook-secret" \
+    GITHUB_APP_ID="1" \
+    GITHUB_APP_INSTALLATION_ID="1" \
+    GITHUB_TARGET_REPO="*" \
+    DASHBOARD_USERNAME="demo" \
+    DASHBOARD_PASSWORD="demo" \
+    DASHBOARD_SESSION_SECRET="demo-session-secret-not-a-real-secret-32"
+
+USER appuser
+EXPOSE 8000
+CMD ["uv", "run", "--no-sync", "--no-dev", "uvicorn", "demo.app:app", "--host", "0.0.0.0", "--port", "8000"]
