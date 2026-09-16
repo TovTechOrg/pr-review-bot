@@ -58,3 +58,26 @@ install_mocks()
 from main import app  # noqa: E402  (must follow install_mocks)
 
 __all__ = ["app", "install_mocks"]
+
+from demo.routes import router as demo_router  # noqa: E402
+
+app.include_router(demo_router)
+
+
+@app.middleware("http")
+async def _cookieless_bypasses_login(request, call_next):
+    """The dashboard session IS a cookie, so a reader who cannot store one
+    could never pass the login form no matter the credentials. Safe only
+    because the demo guards nothing -- every value behind the gate is
+    synthetic. Never a pattern for the real dashboard.
+    """
+    from dashboard.auth import SESSION_COOKIE_NAME, create_session_token
+
+    if SESSION_COOKIE_NAME not in request.cookies:
+        request.scope.setdefault("headers", [])
+        token = create_session_token(remember=False)
+        request.scope["headers"] = [
+            *request.scope["headers"],
+            (b"cookie", f"{SESSION_COOKIE_NAME}={token}".encode()),
+        ]
+    return await call_next(request)
