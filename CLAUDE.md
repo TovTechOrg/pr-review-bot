@@ -70,6 +70,15 @@ the following still rests on judgment:
   the same reason, do not enable verbose/debug HTTP logging (e.g. `curl -v`,
   httpx debug logging) while a real credential is attached to the request —
   it can print an `Authorization` header verbatim.
+- **Any ad hoc `gitleaks` invocation must always include `--redact`**,
+  mirroring the pre-commit hook's own `gitleaks protect --staged --redact
+  -v`. That hook is `--staged`-scoped and would never see an untracked
+  credential file sitting on disk; a plain `-v` scan of the full working
+  tree (e.g. to verify a `.gitleaks.toml` allowlist change) walks into
+  exactly that risk and, without `--redact`, prints a real snippet of any
+  matched secret's bytes straight into the command output — see
+  `ISSUES.md`'s 2026-09-16 entry, where this happened on a real GCP
+  service-account key.
 - **Never let a secret-holding field's validation error or exception
   traceback reach output un-redacted.** Some validators (e.g. pydantic's
   `ValidationError`) echo the rejected `input_value` in the error message —

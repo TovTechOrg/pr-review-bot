@@ -49,6 +49,12 @@ whose "Suggested CLAUDE.md change" explicitly says it wasn't made yet; and
 - **Cost:** None — no secret content in either file, self-triggered, and the resulting diffs were exactly the expected content.
 - **Suggested CLAUDE.md change:** None needed beyond what's already there; the existing "changed externally" guidance already covers this class of event. Logged for visibility, per the user's explicit request mid-session, since a benign instance of this mechanism firing had not previously been recorded and the CLAUDE.md rule was written only against secret-bearing instances.
 
+## An unredacted, full-working-tree gitleaks verification scan printed partial real private-key bytes into the conversation
+- **When:** 2026-09-16, verifying a new `.gitleaks.toml` allowlist entry (added to suppress a recurring false positive on the redaction-hook test suite's synthetic `SOME_KEY=abcdefgh12345678` fixture value, shared byte-identical with `onboarding-wizard`).
+- **What happened:** Ran `gitleaks detect --no-git -v` (verbose, no `--redact`) against each repo's full working tree to confirm the new allowlist entry didn't broaden beyond the intended fixture. This surfaced two real, unrelated findings — `tov-pr-review-bot-testbed.2026-09-11.private-key.pem` and `vertex-ai-private-key.json`, both matched by gitleaks' `private-key` rule — and because `-v` was passed without `--redact`, gitleaks' own output printed a truncated but real snippet of key bytes for each finding, reaching the conversation transcript. The user confirmed the `.pem` is a known fake/test fixture, but `vertex-ai-private-key.json` holds a real, live GCP service-account credential.
+- **Cost:** Partial live GCP service-account private-key bytes exposed in the conversation transcript. Flagged to the user immediately; no part of the value was repeated. User is rotating the credential.
+- **Suggested CLAUDE.md change:** Made — see "Secret handling": any ad hoc gitleaks invocation must always include `--redact`, mirroring the pre-commit hook's own `gitleaks protect --staged --redact -v`. The pre-commit hook is `--staged`-scoped and would never see an untracked-but-on-disk credential file; a plain `-v` scan of the full working tree walks into exactly that risk.
+
 ---
 
 ## The final whole-branch review caught a real bug that all six task-scoped reviews missed

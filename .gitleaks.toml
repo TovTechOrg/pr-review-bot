@@ -1,0 +1,8 @@
+[extend]
+useDefault = true
+
+# Kept byte-identical to the sibling onboarding-wizard repo's copy of this
+# file (same convention as .claude/hooks/ — see CLAUDE.md).
+[allowlist]
+description = "Synthetic fixture value used throughout tests/test_*_hook*.py to exercise the .env redaction hooks (SOME_KEY=abcdefgh12345678 / GITHUB_WEBHOOK_SECRET=abcdefgh12345678) — not a real credential. See ISSUES.md's 2026-09-05 Stripe-shaped-placeholder entry for the class of false positive this guards against recurring."
+regexes = ['''abcdefgh12345678''']
