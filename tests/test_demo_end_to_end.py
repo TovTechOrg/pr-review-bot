@@ -4,6 +4,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 import github_app as _real_github_app
+import render_client as _real_render_client
 import specialists.base as _real_specialists_base
 from config import settings
 from review_queue import store as _real_store
@@ -25,6 +26,13 @@ def _undo_global_rebinding(monkeypatch):
     for name in dir(_real_store):
         if not name.startswith("_"):
             monkeypatch.setattr(_real_store, name, getattr(_real_store, name))
+    # install_mocks() rebinds render_client's five network functions too, for
+    # the same reason and with the same process-wide blast radius -- without
+    # this, dashboard/tests/test_environment.py runs against the demo's fake
+    # Render for the rest of the worker's life.
+    for name in dir(_real_render_client):
+        if not name.startswith("_"):
+            monkeypatch.setattr(_real_render_client, name, getattr(_real_render_client, name))
     monkeypatch.setattr(
         _real_specialists_base, "get_provider", _real_specialists_base.get_provider
     )
@@ -55,6 +63,122 @@ def demo_env(monkeypatch):
     monkeypatch.setattr(settings, "dashboard_username", "demo")
     monkeypatch.setattr(settings, "dashboard_password", "demo")
     monkeypatch.setattr(settings, "dashboard_session_secret", "x" * 32)
+
+
+@pytest.fixture
+def demo_chrome_installed():
+    """Re-register demo.app's router, static mount and middleware onto the
+    shared main.app singleton for this one test -- see
+    tests/test_demo_dashboard.py's identical fixture for the full rationale
+    (conftest.py strips all three back off after every test, so a cache-hit
+    import of demo.app leaves nothing behind)."""
+    from pathlib import Path
+
+    from fastapi.staticfiles import StaticFiles
+    from starlette.middleware.base import BaseHTTPMiddleware
+
+    from demo.app import _demo_request_context, app
+    from demo.routes import router as demo_router
+
+    app.include_router(demo_router)
+    app.mount(
+        "/demo-static",
+        StaticFiles(directory=Path(__file__).resolve().parent.parent / "demo" / "static"),
+        name="demo-static",
+    )
+    app.add_middleware(BaseHTTPMiddleware, dispatch=_demo_request_context)
+    app.middleware_stack = None
+    yield app
+
+
+async def test_two_sessions_get_their_own_review_and_their_own_provider(
+    demo_env, demo_chrome_installed
+):
+    """The regression neither half of the earlier design could have caught.
+
+    Two simulated browsers, each with its own session cookie, each
+    bootstrapping with a DIFFERENT ?provider=, driven through the real
+    webhook -> dispatcher -> dashboard path. Before this fix:
+
+      * `demo.session.current_session` was never set by any production code
+        path, so every review was tagged None and every visitor saw every
+        other visitor's reviews;
+      * `(repo, pr_number)` was a pair of fixed constants, so both visitors
+        collapsed onto ONE shared ticket;
+      * the chosen provider never left the bootstrap route -- demo/store.py
+        answered every `get_provider_override()` with one module-level
+        constant, which the real dispatcher (by its own documented design)
+        gates on globally rather than per ticket.
+
+    Each of the three bugs alone is enough to fail this test.
+    """
+    from datetime import datetime, timezone
+
+    from dashboard import auth
+    from demo import app as demo_app
+    from demo import session as demo_session
+    from demo import store as demo_store
+    from review_queue import dispatcher
+    from webhook import reset_dedup_cache
+
+    demo_app.install_mocks()
+    app = demo_app.app
+    demo_store.reset()
+    demo_session.reset()
+    reset_dedup_cache()
+
+    # Two genuinely different tokens: create_session_token embeds only an exp
+    # claim, so two calls in the same second with the same `remember` value
+    # produce a byte-identical JWT.
+    token_a = auth.create_session_token(remember=False)
+    token_b = auth.create_session_token(remember=True)
+    assert token_a != token_b
+
+    transport = ASGITransport(app=app)
+
+    async def _bootstrap(token: str, provider: str) -> dict:
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            cookies={auth.SESSION_COOKIE_NAME: token},
+        ) as client:
+            response = await client.get(f"/api/demo/bootstrap?provider={provider}")
+        assert response.status_code == 200
+        return response.json()
+
+    async def _dashboard_reviews(token: str) -> list[dict]:
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            cookies={auth.SESSION_COOKIE_NAME: token},
+        ) as client:
+            response = await client.get("/api/dashboard")
+        assert response.status_code == 200
+        return response.json()["reviews"]
+
+    assert (await _bootstrap(token_a, "vertex"))["provider"] == "vertex"
+    assert (await _bootstrap(token_b, "groq"))["provider"] == "groq"
+
+    # Drain the queue exactly as run_forever() would -- serially, one ticket
+    # per call, which is the property the "currently processing" slot in
+    # demo/store.py relies on.
+    actions = []
+    for _ in range(4):
+        result = await dispatcher.process_next_due(datetime.now(timezone.utc))
+        actions.append(result.action)
+        if result.action == "idle":
+            break
+    assert actions.count("ran") == 2, actions
+
+    reviews_a = await _dashboard_reviews(token_a)
+    reviews_b = await _dashboard_reviews(token_b)
+
+    assert len(reviews_a) == 1, "a reader must see their own review and nobody else's"
+    assert len(reviews_b) == 1
+    assert reviews_a[0]["provider"] == "vertex"
+    assert reviews_b[0]["provider"] == "groq"
+    assert reviews_a[0]["pr_number"] != reviews_b[0]["pr_number"]
+    assert "_session" not in reviews_a[0], "the tag is internal, never rendered"
 
 
 async def test_delivery_to_rendered_review(demo_env):

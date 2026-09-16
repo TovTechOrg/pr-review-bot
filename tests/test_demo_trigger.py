@@ -42,6 +42,35 @@ def test_sweep_evicts_only_idle_sessions():
     session.touch("fresh", now=1_000.0)
     session.touch("stale", now=0.0)
     evicted = session.sweep(now=1_000.0 + session.TTL_SECONDS)
-    assert evicted == 1
+    # The ids, not just a count: demo/app.py's sweep task needs them to drop
+    # those sessions' tickets and reviews from demo/store.py too.
+    assert evicted == ["stale"]
     assert session.is_known("fresh") is True
     assert session.is_known("stale") is False
+
+
+def test_each_session_reviews_its_own_pull_request():
+    """review_queue/store.py dedups on (repo, pr_number). With one fixed
+    number every concurrent visitor collapsed onto a single shared ticket,
+    so only one of them could ever have a review at all."""
+    from demo import trigger
+    from demo.session import SHARED_SESSION_ID
+
+    assert trigger.pr_number_for("session-abc") == trigger.pr_number_for("session-abc")
+    assert trigger.pr_number_for("session-abc") != trigger.pr_number_for("session-xyz")
+    # The canonical number is kept for the one shared, cookie-hostile view --
+    # the one the docs and the article's screenshots describe.
+    assert trigger.pr_number_for(None) == DEMO_PR_NUMBER
+    assert trigger.pr_number_for(SHARED_SESSION_ID) == DEMO_PR_NUMBER
+    assert trigger.build_payload("session-abc")["pull_request"]["number"] != DEMO_PR_NUMBER
+
+
+def test_comments_are_capped_rather_than_growing_forever():
+    from demo import github_app as demo_github_app
+
+    demo_github_app.reset()
+    for i in range(5):
+        demo_github_app.upsert_comment("bot-demo/example-app", i, "body")
+    assert len(demo_github_app._comments) == 5
+    demo_github_app.trim_comments(limit=2)
+    assert len(demo_github_app._comments) == 2

@@ -22,6 +22,38 @@ _ids = itertools.count(1)
 _tickets: dict[int, Ticket] = {}
 _reviews: list[dict] = []
 
+# ticket id -> (session id, provider) captured AT ENQUEUE TIME from the
+# request-scoped ContextVars in demo/session.py. The ticket row itself is a
+# real review_queue.store.Ticket (a frozen-shaped dataclass with 17 fields
+# and no room for demo-only ones), so the pair lives in this side table
+# keyed by the same id.
+#
+# This is the hop the ContextVars cannot make on their own: enqueue happens
+# inside the visitor's own bootstrap request (demo/trigger.py's in-process
+# ASGI self-delivery), but the review that reports the provider and gets
+# tagged with the session runs much later, in review_queue/dispatcher.py's
+# `run_forever()` background task -- created once in main.py's lifespan,
+# in a context that predates every request. A ContextVar set in a request
+# can never reach it.
+_ticket_context: dict[int, tuple[str | None, str]] = {}
+
+# The (session, provider) pair of the ticket the dispatcher is processing
+# RIGHT NOW, published by claim_next_due and read by get_provider_override/
+# record_review. A plain module-level variable, not a ContextVar, on
+# purpose: review_queue/dispatcher.py's loop is strictly serial (run_forever
+# awaits one process_next_due at a time, which claims at most one ticket per
+# call), so exactly one ticket is ever in flight. Cleared the moment a claim
+# finds nothing due, so a later dashboard read doesn't report the last
+# visitor's choice as the active provider.
+_processing: tuple[str | None, str] | None = None
+
+# Rolling caps. /api/demo/bootstrap is unauthenticated and publicly
+# loopable, so eviction cannot depend only on the TTL sweep noticing an idle
+# session -- a caller hammering it with fresh cookies would outrun any
+# interval. These bound the process's memory unconditionally.
+MAX_TICKETS = 200
+MAX_REVIEWS = 200
+
 _RUNTIME_CONFIG = {
     "cooldown_base_seconds": 60.0,
     "cooldown_max_seconds": 3600.0,
@@ -52,9 +84,55 @@ _TUNING = {
 
 def reset() -> None:
     """Demo-only: clear all in-memory state (used by tests and TTL sweeps)."""
-    global _tickets, _reviews
+    global _tickets, _reviews, _ticket_context, _processing
     _tickets = {}
     _reviews = []
+    _ticket_context = {}
+    _processing = None
+
+
+def _request_context() -> tuple[str | None, str]:
+    """(session, provider) for the request this call is running inside.
+
+    Imported lazily: demo.session imports dashboard.auth, and this module is
+    imported from demo/app.py before main (and therefore the dashboard) is
+    pulled in.
+    """
+    from demo.session import current_provider, current_session
+
+    return current_session.get(), current_provider.get() or _ACTIVE_PROVIDER
+
+
+def _trim() -> None:
+    """Rolling eviction: drop the oldest rows past the caps above."""
+    global _reviews
+    if len(_reviews) > MAX_REVIEWS:
+        _reviews = _reviews[-MAX_REVIEWS:]
+    while len(_tickets) > MAX_TICKETS:
+        oldest = next(iter(_tickets))
+        del _tickets[oldest]
+        _ticket_context.pop(oldest, None)
+
+
+def evict_sessions(session_ids) -> int:
+    """Demo-only: drop every ticket and review belonging to `session_ids`.
+
+    Called by demo/app.py's periodic sweep with whatever demo.session.sweep()
+    just evicted, so the two stores can't drift apart -- a session evicted
+    from `_last_seen` but still holding rows here is exactly the unbounded
+    growth the sweep exists to prevent.
+    """
+    global _reviews
+    stale = set(session_ids)
+    if not stale:
+        return 0
+    before = len(_reviews) + len(_tickets)
+    _reviews = [row for row in _reviews if row.get("_session") not in stale]
+    for ticket_id, (session, _provider) in list(_ticket_context.items()):
+        if session in stale:
+            _tickets.pop(ticket_id, None)
+            _ticket_context.pop(ticket_id, None)
+    return before - (len(_reviews) + len(_tickets))
 
 
 #  Delegate wrappers below (effective_cooldown/next_cooldown_level/
@@ -104,13 +182,25 @@ def enqueue_or_update(
     """Mirrors the real signature exactly: keyword-only, returns the new id.
 
     One ticket per (repo, pr) like the real ON CONFLICT clause, so a reader
-    refreshing does not pile up rows.
+    refreshing does not pile up rows. Concurrent readers do not collide on
+    that key because each session gets its own PR number
+    (demo/trigger.py::pr_number_for) -- the dedup semantics here stay
+    byte-for-byte the real store's, and session scoping is expressed where a
+    real deployment would express it: in the identity of the pull request.
+
+    The visitor's (session, provider) pair is captured here, from the
+    request-scoped ContextVars, because this is the last moment it is
+    reachable -- see `_ticket_context`'s comment above.
     """
     for existing in _tickets.values():
         if existing.repo_full_name == repo_full_name and existing.pr_number == pr_number:
             existing.head_sha = head_sha
             existing.status = "pending"
             existing.updated_at = now
+            # A reader who comes back with a different ?provider= gets the
+            # new choice, same as a re-push re-runs against whatever is
+            # configured now.
+            _ticket_context[existing.id] = _request_context()
             return existing.id
 
     ticket_id = next(_ids)
@@ -135,20 +225,43 @@ def enqueue_or_update(
         last_error=None,
         defer_reason=None,
     )
+    _ticket_context[ticket_id] = _request_context()
+    _trim()
     return ticket_id
 
 
 def claim_next_due(now: str) -> Ticket | None:
+    """Claim one pending ticket AND publish its (session, provider) pair.
+
+    Publishing here is what carries the visitor's choice across the boundary
+    a ContextVar cannot cross: everything below this point runs in the
+    dispatcher's own long-lived background task.
+    """
+    global _processing
     for ticket in _tickets.values():
         if ticket.status == "pending":
             ticket.status = "running"
             ticket.attempts += 1
             ticket.updated_at = now
+            _processing = _ticket_context.get(ticket.id)
             return ticket
+    _processing = None
     return None
 
 
 def get_provider_override() -> str | None:
+    """The provider of the ticket currently being processed, else the default.
+
+    review_queue/dispatcher.py deliberately gates on the GLOBAL active
+    provider rather than the one recorded on the ticket ("not the provider
+    recorded on the ticket at enqueue time" -- its own comment), which is
+    correct for the real service and fatal for a demo where every concurrent
+    visitor picks their own. Making "the global override" mean "whatever the
+    in-flight ticket asked for" satisfies the real dispatcher's contract
+    unchanged while keeping one reader's choice out of another's review.
+    """
+    if _processing is not None:
+        return _processing[1]
     return _ACTIVE_PROVIDER
 
 
@@ -166,7 +279,12 @@ def set_key_index_override(provider: str, index: int | None, now: str) -> None:
 
 
 def get_all_key_index_overrides() -> dict[str, int]:
-    return {_ACTIVE_PROVIDER: 0}
+    """Slot 0 for every provider, not just the active one: which provider is
+    active is now per-ticket (see get_provider_override), so a map keyed to
+    one of them would be wrong for every other reader in flight."""
+    from demo.provider import _PRICED
+
+    return {provider: 0 for provider in _PRICED}
 
 
 def get_slot_config(provider: str, slot_index: int) -> dict | None:
@@ -192,8 +310,8 @@ def delete_slot_config(provider: str, slot_index: int) -> None:
 
 
 def get_all_slot_configs() -> dict[tuple[str, int], dict]:
-    """Only the currently active provider's slot 0 is ever "configured" in
-    the demo -- MockProvider never reads a real credential, but
+    """Every provider's slot 0 is "configured" in the demo -- MockProvider
+    never reads a real credential, but
     orchestrator.py's own `_active_model()` still resolves the model to
     report/price purely through this cache (`providers/active_model.py`,
     populated once per claimed ticket by
@@ -202,15 +320,21 @@ def get_all_slot_configs() -> dict[tuple[str, int], dict]:
     (as this did before) left that cache permanently empty, so
     `_active_model()` always raised "no model configured" and no demo review
     could ever reach a completed/finalized ticket -- caught by
-    tests/test_demo_app_boot.py's new end-to-end dispatcher test."""
-    from demo.provider import demo_provider_and_model
-    _, model = demo_provider_and_model(_ACTIVE_PROVIDER)
+    tests/test_demo_app_boot.py's new end-to-end dispatcher test.
+
+    All three providers are returned, not just the active one: the active
+    provider is per-ticket now, and the dispatcher's own per-claim refresh
+    (_refresh_slot_config) populates one cache shared by whichever provider
+    that ticket resolves to."""
+    from demo.provider import _PRICED
+
     return {
-        (_ACTIVE_PROVIDER, 0): {
+        (provider, 0): {
             "model": model,
             "vertex_gcp_project": None,
             "vertex_gcp_location": None,
         }
+        for provider, model in _PRICED.items()
     }
 
 
@@ -285,7 +409,7 @@ def record_review(
     `dashboard_reviews()` returns -- not the argument names."""
     from demo.session import current_session
 
-    row = {
+    row: dict = {
         "repo": repo_full_name,
         "pr_number": pr_number,
         "provider": review.provider,
@@ -303,15 +427,30 @@ def record_review(
         ),
         "specialists": [r.model_dump() for r in review.results],
     }
-    row["_session"] = current_session.get()
+    # Tagged from the ticket being processed, NOT from the ContextVar: this
+    # runs deep inside the dispatcher's background task (orchestrator.py ->
+    # asyncio.to_thread), where the visitor's request context is long gone
+    # and current_session is always None. The ContextVar remains the
+    # fallback for a direct, in-request call (and for unit tests that set it
+    # explicitly).
+    row["_session"] = _processing[0] if _processing is not None else current_session.get()
     _reviews.append(row)
+    _trim()
 
 
 def dashboard_reviews(limit: int = 50) -> list[dict]:
     """Read-time filtered so one reader never sees another's run.
 
-    A cookie-less visitor (session None) sees every unowned review, which is
-    the stateless shared view the spec calls for.
+    Every review row now carries a REAL session tag (record_review reads it
+    off the ticket the dispatcher is processing), which is what makes this
+    filter mean anything -- while nothing set the tag, every row was None and
+    this returned everyone's reviews to everyone.
+
+    Cookie-hostile visitors all share one identity
+    (demo.session.SHARED_SESSION_ID), so they see each other's rows and
+    nobody else's: the stateless shared view the spec calls for. A row tagged
+    None (no session at all) stays visible to everyone, since it belongs to
+    nobody.
     """
     from demo.session import current_session
 

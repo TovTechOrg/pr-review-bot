@@ -261,6 +261,9 @@ import main as _main_module  # noqa: E402
 
 _PRISTINE_APP_MIDDLEWARE = list(_main_module.app.user_middleware)
 _PRISTINE_APP_ROUTES = list(_main_module.app.router.routes)
+# demo/app.py also wraps the lifespan context (to attach its periodic session
+# sweep) -- same singleton, same leak, same snapshot-and-restore.
+_PRISTINE_APP_LIFESPAN = _main_module.app.router.lifespan_context
 
 
 @pytest.fixture(autouse=True)
@@ -298,4 +301,5 @@ def _restore_main_app_after_demo_app_mutation():
     yield
     _main_module.app.user_middleware[:] = _PRISTINE_APP_MIDDLEWARE
     _main_module.app.router.routes[:] = _PRISTINE_APP_ROUTES
+    _main_module.app.router.lifespan_context = _PRISTINE_APP_LIFESPAN
     _main_module.app.middleware_stack = None

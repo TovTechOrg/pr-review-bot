@@ -14,15 +14,23 @@ the existing tests patch.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import logging
 from pathlib import Path
 
 import github_app as real_github_app
+import render_client as real_render_client
 from fastapi.staticfiles import StaticFiles
 from review_queue import store as real_store
 
 from demo import github_app as demo_github_app
+from demo import render_client as demo_render_client
+from demo import session as demo_session
 from demo import store as demo_store
 from demo.provider import MockProvider, demo_provider_and_model
+
+logger = logging.getLogger(__name__)
 
 _MOCKED_GITHUB = (
     "fetch_pr_diff", "upsert_comment", "append_review_footnote",
@@ -30,10 +38,25 @@ _MOCKED_GITHUB = (
     "discover_and_verify_installation_id",
 )
 
+# dashboard/environment.py calls all five on the module object. Without this
+# rebinding the Environment panel makes a real HTTPS call to api.render.com
+# with no API key on a service that deliberately has none -- a 401 and a 500
+# on GET /api/environment/render, on a page whose whole premise is that no
+# external call can fail it.
+_MOCKED_RENDER = (
+    "find_service_id", "env_vars", "push_env_var", "delete_env_var", "trigger_deploy",
+)
+
+# How often idle sessions (and their tickets/reviews/comments) are evicted.
+SWEEP_INTERVAL_SECONDS = 300.0
+
 
 def install_mocks() -> None:
     for name in _MOCKED_GITHUB:
         setattr(real_github_app, name, getattr(demo_github_app, name))
+
+    for name in _MOCKED_RENDER:
+        setattr(real_render_client, name, getattr(demo_render_client, name))
 
     # demo_store.install() rebinds every public review_queue.store function
     # onto the real module -- EXCEPT its own `_NEVER_REBIND` set
@@ -78,20 +101,133 @@ app.mount(
 )
 
 
+# A non-secret marker, readable by JavaScript on purpose: demo/static/demo.js
+# checks for it on the login page to find out whether this browser kept the
+# cookie it was just handed. Not `secure`, so it also survives the plain-HTTP
+# transport the test suite uses.
+PROBE_COOKIE_NAME = "demo_cookie_probe"
+PROBE_MAX_AGE_SECONDS = 60 * 60
+# Set by demo.js on the redirect it issues once it has PROVEN cookies do not
+# stick. Honoured only for a request that carries no cookies at all, so it
+# cannot short-circuit login for a browser that simply has not logged in yet.
+COOKIELESS_QUERY_PARAM = "cookieless"
+
+
+def _cookie_hostile(request) -> bool:
+    """True only for a visitor PROVEN unable to store cookies.
+
+    The first half (`not request.cookies`) is necessary and nowhere near
+    sufficient: a normal browser's very first request ever also carries no
+    cookies, and bypassing on that alone meant the login screen -- an
+    explicit step in the design's reader path, running the real auth check --
+    never rendered for anyone, on any browser, ever. It also minted a fresh
+    session JWT per request, which for a genuinely cookie-hostile visitor
+    changed their identity on every single request, breaking webhook.py's
+    delivery dedup and growing demo/session.py's `_last_seen` unbounded.
+
+    The second half is the actual proof: every response below hands out a
+    plain, JS-readable probe cookie, and demo/static/demo.js only adds this
+    query parameter after reloading and finding that cookie absent.
+    """
+    return (
+        not request.cookies
+        and request.query_params.get(COOKIELESS_QUERY_PARAM) == "1"
+    )
+
+
 @app.middleware("http")
-async def _cookieless_bypasses_login(request, call_next):
-    """The dashboard session IS a cookie, so a reader who cannot store one
-    could never pass the login form no matter the credentials. Safe only
-    because the demo guards nothing -- every value behind the gate is
-    synthetic. Never a pattern for the real dashboard.
+async def _demo_request_context(request, call_next):
+    """Establish the visitor's demo identity, and let a cookie-hostile one in.
+
+    The dashboard session IS a cookie, so a reader who cannot store one could
+    never pass the login form no matter the credentials. Safe only because
+    the demo guards nothing -- every value behind the gate is synthetic.
+    Never a pattern for the real dashboard.
     """
     from dashboard.auth import SESSION_COOKIE_NAME, create_session_token
 
-    if SESSION_COOKIE_NAME not in request.cookies:
+    cookies = dict(request.cookies)
+    bypass = _cookie_hostile(request)
+    if bypass:
         request.scope.setdefault("headers", [])
         token = create_session_token(remember=False)
         request.scope["headers"] = [
             *request.scope["headers"],
             (b"cookie", f"{SESSION_COOKIE_NAME}={token}".encode()),
         ]
-    return await call_next(request)
+
+    # Never the freshly-minted token above: that changes on every request.
+    # A cookie-hostile visitor gets one stable shared identity, which is
+    # exactly the "stateless shared view" the design calls for.
+    demo_session_id = cookies.get(SESSION_COOKIE_NAME) or (
+        demo_session.SHARED_SESSION_ID if bypass else None
+    )
+    # `or current_session.get()` covers the in-process self-delivery:
+    # demo/trigger.py POSTs to this same app over an ASGI transport from
+    # inside the bootstrap request, so that nested request passes through
+    # here too -- carrying no cookies of its own. Without this it would reset
+    # the identity to None right before enqueue_or_update reads it.
+    demo_session_id = demo_session_id or demo_session.current_session.get()
+
+    if demo_session_id is not None:
+        demo_session.touch(demo_session_id)
+    context_token = demo_session.current_session.set(demo_session_id)
+    try:
+        response = await call_next(request)
+    finally:
+        demo_session.current_session.reset(context_token)
+
+    if PROBE_COOKIE_NAME not in cookies:
+        response.set_cookie(
+            PROBE_COOKIE_NAME,
+            "1",
+            max_age=PROBE_MAX_AGE_SECONDS,
+            httponly=False,
+            samesite="lax",
+        )
+    return response
+
+
+async def sweep_once() -> int:
+    """Evict idle sessions and everything they own. Returns rows dropped."""
+    evicted = demo_session.sweep()
+    dropped = demo_store.evict_sessions(evicted)
+    demo_github_app.trim_comments()
+    if evicted:
+        logger.info("demo sweep: evicted %d sessions, %d rows", len(evicted), dropped)
+    return dropped
+
+
+async def _sweep_forever() -> None:
+    while True:
+        await asyncio.sleep(SWEEP_INTERVAL_SECONDS)
+        try:
+            await sweep_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 -- a sweep failure must never kill the loop
+            logger.exception("demo sweep failed")
+
+
+_main_lifespan_context = app.router.lifespan_context
+
+
+@contextlib.asynccontextmanager
+async def _demo_lifespan(app):
+    """main.py's own lifespan, wrapped -- not replaced, and main.py untouched.
+
+    Starlette ignores `on_startup`/`on_shutdown` handlers entirely once a
+    lifespan context manager is supplied, so wrapping the existing one is the
+    only way to attach the demo's eviction task without editing main.py.
+    """
+    async with _main_lifespan_context(app):
+        task = asyncio.create_task(_sweep_forever())
+        try:
+            yield
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
+app.router.lifespan_context = _demo_lifespan

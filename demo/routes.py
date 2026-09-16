@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from demo.provider import demo_provider_and_model
-from demo.session import session_id_for, touch
+from demo.session import SHARED_SESSION_ID, current_session, touch
 from demo.trigger import ensure_review_for_session
 
 logger = logging.getLogger(__name__)
@@ -17,8 +17,16 @@ router = APIRouter()
 
 @router.get("/api/demo/bootstrap")
 async def bootstrap(request: Request) -> JSONResponse:
-    """Called by the dashboard on load; makes sure a review exists."""
-    session_id = session_id_for(request)
+    """Called by the dashboard on load; makes sure a review exists.
+
+    The session id comes from the ContextVar demo/app.py's middleware
+    already resolved for this request (the dashboard session cookie, or the
+    one shared identity every cookie-hostile visitor gets) rather than being
+    re-derived from the raw cookie here -- otherwise a cookie-hostile
+    visitor, whose synthetic session exists only in that middleware, would
+    be indistinguishable from "no session" and lose their own review.
+    """
+    session_id = current_session.get()
     if session_id is not None:
         touch(session_id)
     requested = request.query_params.get("provider")
@@ -28,15 +36,16 @@ async def bootstrap(request: Request) -> JSONResponse:
     # Analytics: a structured line per step reached, read from Render's logs
     # during the launch window. No database, no third-party script, and no
     # stored identifier -- `cookieless` is a boolean, not a visitor id.
+    cookieless = session_id is None or session_id == SHARED_SESSION_ID
     logger.info(
         "demo_step step=%s provider=%s cookieless=%s",
-        "dashboard_reached", provider, session_id is None,
+        "dashboard_reached", provider, cookieless,
     )
     return JSONResponse({
         "demo": True,
         "provider": provider,
         "model": model,
-        "cookieless": session_id is None,
+        "cookieless": cookieless,
     })
 
 

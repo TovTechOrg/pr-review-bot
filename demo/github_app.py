@@ -14,6 +14,12 @@ from github_app import COMMENT_MARKER, PrDiff  # noqa: F401  (re-exported)
 _ids = itertools.count(1001)
 _comments: dict[int, "DemoComment"] = {}
 
+# Comments are keyed by their own generated id, not by session, so they are
+# capped rather than swept: /api/demo/bootstrap is unauthenticated and
+# publicly loopable, and one comment per review would otherwise accumulate
+# for the life of the process.
+MAX_COMMENTS = 500
+
 
 class DemoComment:
     """Duck-types PyGithub's IssueComment: .id, .body, .edit()."""
@@ -30,6 +36,16 @@ def reset() -> None:
     _comments.clear()
 
 
+def trim_comments(limit: int | None = None) -> int:
+    """Drop the oldest comments past `limit`. Returns how many went."""
+    cap = MAX_COMMENTS if limit is None else limit
+    dropped = 0
+    while len(_comments) > cap:
+        del _comments[next(iter(_comments))]
+        dropped += 1
+    return dropped
+
+
 def fetch_pr_diff(repo: str, pr: int) -> PrDiff:
     return PrDiff(text=DEMO_DIFF, repo_full_name=DEMO_REPO, draft=False)
 
@@ -40,7 +56,9 @@ def upsert_comment(repo: str, pr: int, body: str, comment_id: int | None = None)
         return _comments[comment_id]
     new_id = next(_ids)
     _comments[new_id] = DemoComment(new_id, body)
-    return _comments[new_id]
+    comment = _comments[new_id]
+    trim_comments()
+    return comment
 
 
 def append_review_footnote(repo: str, pr: int, footnote: str,

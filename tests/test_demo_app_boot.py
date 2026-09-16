@@ -1,6 +1,7 @@
 import pytest
 
 import github_app as _real_github_app
+import render_client as _real_render_client
 import specialists.base as _real_specialists_base
 from config import settings
 from review_queue import store as _real_store
@@ -31,6 +32,13 @@ def _undo_global_rebinding(monkeypatch):
     for name in dir(_real_store):
         if not name.startswith("_"):
             monkeypatch.setattr(_real_store, name, getattr(_real_store, name))
+    # install_mocks() rebinds render_client's five network functions too, for
+    # the same reason and with the same process-wide blast radius -- without
+    # this, dashboard/tests/test_environment.py runs against the demo's fake
+    # Render for the rest of the worker's life.
+    for name in dir(_real_render_client):
+        if not name.startswith("_"):
+            monkeypatch.setattr(_real_render_client, name, getattr(_real_render_client, name))
     monkeypatch.setattr(
         _real_specialists_base, "get_provider", _real_specialists_base.get_provider
     )
@@ -73,8 +81,17 @@ def test_install_mocks_rebinds_every_external_boundary(demo_env):
     import specialists.base
     from review_queue import store
 
+    import render_client
+
     assert github_app.fetch_pr_diff.__module__ == "demo.github_app"
     assert store.claim_next_due.__module__ == "demo.store"
+    # render_client was the boundary install_mocks() forgot: dashboard/
+    # environment.py calls all five of these on the module object, so without
+    # the rebinding the Environment panel made a live api.render.com request
+    # from a service that holds no API key at all.
+    for name in ("find_service_id", "env_vars", "push_env_var", "delete_env_var",
+                 "trigger_deploy"):
+        assert getattr(render_client, name).__module__ == "demo.render_client", name
     assert specialists.base.get_provider().__class__.__name__ == "MockProvider"
 
 
