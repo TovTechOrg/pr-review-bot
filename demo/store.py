@@ -30,9 +30,23 @@ _RUNTIME_CONFIG = {
     "key_usage_reset_time_utc": "00:00",
 }
 _TUNING = {
-    "idle_sleep_seconds": 1.0,
-    "notice_poll_seconds": 30.0,
-    "claim_batch_size": 1,
+    # The 9 knobs review_queue/dispatcher_tuning_config.py's problems()
+    # validates on every boot (main.py's lifespan gate) -- see that module's
+    # _BOUNDS for the exact predicates these values must satisfy -- plus
+    # dispatcher_idle_sleep_seconds, which get_dispatcher_tuning_config()
+    # includes for parity with the real store's 10-key shape (the dashboard
+    # config panel's one editable surface) even though it isn't itself
+    # validated by problems().
+    "llm_request_timeout_seconds": 30.0,
+    "dispatcher_default_retry_after_seconds": 1.0,
+    "dispatcher_failure_base_backoff_seconds": 1.0,
+    "dispatcher_failure_max_backoff_seconds": 60.0,
+    "dispatcher_max_failure_attempts": 5,
+    "dispatcher_max_notice_post_attempts": 3,
+    "dispatcher_min_retry_after_seconds": 0.0,
+    "dispatcher_backoff_jitter_seconds": 0.0,
+    "dispatcher_notice_sweep_batch_size": 50,
+    "dispatcher_idle_sleep_seconds": 1.0,
 }
 
 
@@ -225,7 +239,7 @@ def set_dispatcher_tuning_config(
 
 
 def get_idle_sleep_seconds() -> float | None:
-    return _TUNING["idle_sleep_seconds"]
+    return _TUNING["dispatcher_idle_sleep_seconds"]
 
 
 def get_review_draft_override() -> bool | None:
