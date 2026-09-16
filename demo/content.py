@@ -25,21 +25,21 @@ index 1a2b3c4..5d6e7f8 100644
 +        return False
      user.set_password(new_password)
      return True
- diff --git a/app/api/users.py b/app/api/users.py
- index 2b3c4d5..6e7f8a9 100644
- --- a/app/api/users.py
- +++ b/app/api/users.py
- @@ -142,6 +142,8 @@ def list_team_members(team_id: int) -> list[dict]:
+diff --git a/app/api/users.py b/app/api/users.py
+index 2b3c4d5..6e7f8a9 100644
+--- a/app/api/users.py
++++ b/app/api/users.py
+@@ -142,6 +142,8 @@ def list_team_members(team_id: int) -> list[dict]:
      members = []
      for membership in Membership.objects.filter(team_id=team_id):
 +        profile = Profile.objects.get(user_id=membership.user_id)
 +        members.append({"name": profile.name, "email": profile.email})
      return members
- diff --git a/app/utils/format.py b/app/utils/format.py
- index 3c4d5e6..7f8a9b0 100644
- --- a/app/utils/format.py
- +++ b/app/utils/format.py
- @@ -20/,6 +20,8 @@ def format_created_at(value):
+diff --git a/app/utils/format.py b/app/utils/format.py
+index 3c4d5e6..7f8a9b0 100644
+--- a/app/utils/format.py
++++ b/app/utils/format.py
+@@ -20,6 +20,8 @@ def format_created_at(value):
  -    return value.strftime("%Y-%m-%d")
  +    return value.strftime("%Y-%m-%d")
  +
