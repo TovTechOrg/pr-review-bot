@@ -283,7 +283,9 @@ def record_review(
 ) -> None:
     """Positional, exactly like the real one, and stores the SQL-aliased shape
     `dashboard_reviews()` returns -- not the argument names."""
-    _reviews.append({
+    from demo.session import current_session
+
+    row = {
         "repo": repo_full_name,
         "pr_number": pr_number,
         "provider": review.provider,
@@ -300,11 +302,25 @@ def record_review(
             else None
         ),
         "specialists": [r.model_dump() for r in review.results],
-    })
+    }
+    row["_session"] = current_session.get()
+    _reviews.append(row)
 
 
 def dashboard_reviews(limit: int = 50) -> list[dict]:
-    return list(reversed(_reviews))[:limit]
+    """Read-time filtered so one reader never sees another's run.
+
+    A cookie-less visitor (session None) sees every unowned review, which is
+    the stateless shared view the spec calls for.
+    """
+    from demo.session import current_session
+
+    session = current_session.get()
+    visible = [
+        review for review in reversed(_reviews)
+        if session is None or review.get("_session") in (session, None)
+    ]
+    return [{k: v for k, v in r.items() if k != "_session"} for r in visible][:limit]
 
 
 _TICKET_STATUSES = (

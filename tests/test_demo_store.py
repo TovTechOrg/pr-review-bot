@@ -90,3 +90,29 @@ def test_dashboard_queue_counts_zero_fills_all_known_statuses():
         "failed": 0,
         "cancelled": 0,
     }
+
+
+def test_one_session_never_sees_anothers_review():
+    from demo.session import current_session
+    from specialists.schemas import ReviewResult
+
+    review = ReviewResult(
+        pr_number=7, provider="groq", model="llama-3.3-70b-versatile",
+        results=[], total_elapsed_ms=10, total_tokens_in=1, total_tokens_out=1,
+        est_cost_usd=0.0001,
+    )
+
+    demo_store.reset()
+    current_session.set("reader-a")
+    demo_store.record_review(
+        "bot-demo/example-app", 7, review, 1001, "2026-09-16T00:00:00+00:00", 0,
+    )
+
+    current_session.set("reader-b")
+    assert demo_store.dashboard_reviews() == []
+
+    current_session.set("reader-a")
+    visible = demo_store.dashboard_reviews()
+    assert len(visible) == 1
+    assert visible[0]["repo"] == "bot-demo/example-app"
+    assert "_session" not in visible[0], "the tag is internal, never rendered"
