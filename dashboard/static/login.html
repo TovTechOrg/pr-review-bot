@@ -464,7 +464,12 @@
         });
         const data = await response.json();
         if (data.valid) {
-          window.location.href = "/";
+          // Carry the query string through the redirect. The demo's
+          // ?provider= choice arrives here before authentication and is
+          // reported by a review that is generated only after it, so
+          // dropping it here silently falls every reader back to the
+          // default provider no matter what they picked in the wizard.
+          window.location.href = "/" + window.location.search;
         } else {
           errorEl.textContent = t("error_invalid_credentials");
         }
@@ -475,5 +480,6 @@
 
     applyLanguage(currentLang);
   </script>
+  <script src="/demo-static/demo.js"></script>
 </body>
 </html>

@@ -175,6 +175,82 @@ Recorded here so they aren't silently lost. Format:
 - **Follow-up:** what closing it would take
 ```
 
+### [2026-09-16, demo-bot branch] Cookie-hostile visitors get an infinite redirect loop, not a working demo
+
+- **Found during:** `feat/demo-bot` final whole-branch review's fix-wave re-review (opus, scoped re-review of the fix for the review's own Finding 2 "unconditional cookie-less bypass"), walking both the cookie-capable and cookie-hostile scenarios against the live app.
+- **What:** The original bug (the cookie-less bypass fired for every cookie-less request, including a normal browser's very first visit, so the login screen never rendered for anyone) was fixed by gating the bypass on `?cookieless=1` plus "no cookies present." But the query param only arrives on the top-level navigation; every dashboard XHR (`/api/dashboard`, etc.) is a bare-path fetch with no `?cookieless=1`, so a genuinely cookie-hostile browser gets `200` on the page load, `401` on the first XHR, a client-side redirect to `/login`, and `demo.js`'s own redirect-back-to-`/?cookieless=1` logic — looping forever.
+- **Status: RESOLVED (commit `1b5148f`).** `demo/static/demo.js` now monkey-patches `window.fetch` at top-level script-parse time to append `?cookieless=1` to same-origin relative fetches once the page URL shows cookie-hostile mode. Fixing this required going beyond the original fix plan: `dashboard.html`'s own inline `<script>` block fetches `/api/dashboard` *synchronously during its own parse* (not gated behind `DOMContentLoaded`), so the patch also had to move `demo.js`'s `<script>` tag to load *before* that inline block, not after (it was previously the last tag in the file). Independently re-verified in the final re-review: all 18 of `dashboard.html`'s fetch call sites are covered, the DOM-querying code in `demo.js` is safely deferred to `DOMContentLoaded` so moving the tag earlier doesn't break it, and both the cookie-hostile and cookie-capable scenarios were manually confirmed in real Chromium via Playwright (no committed pytest test, matching this repo's existing precedent of Playwright being manual/skill-driven verification, not CI-enforced).
+- **Residual minor:** two stale comments (`demo/static/demo.js`'s own header comment and a matching test docstring in `tests/test_demo_dashboard.py`) still describe the OLD, disproven premise ("this tag is last, so it patches after listeners are registered") rather than the real reason (the tag must load first because the inline block fetches synchronously, not via a listener at all). Cosmetic only — the code and tests are correct, just the prose explaining why is now backwards. Fix by rewriting those two comments to state the real mechanism.
+
+### [2026-09-16, demo-bot branch] A logged-out visitor's `?provider=` choice is dropped one hop before `login.html` ever sees it
+
+- **Found during:** Same fix-wave re-review as above, verifying the fix for the review's Finding 5 ("`?provider=` doesn't survive the login redirect").
+- **What:** The fix wave correctly made `login.html`'s own post-login redirect preserve `?provider=`, and made `demo.js` only fire the bootstrap trigger on the dashboard page (not pre-auth). But the design spec's actual entry point for a logged-out reader is `GET /?provider=X` (the wizard's "Finish & Deploy" redirect target) — and `main.py`'s `SessionRequired` dependency, on an unauthenticated `GET /`, returns a hardcoded `RedirectResponse("/login")` with no query string at all.
+- **Status: RESOLVED (commit `1b5148f`).** `demo/app.py` now registers its own `SessionRequired` exception handler via `app.add_exception_handler` (a post-hoc override of `main.py`'s registration — `main.py` itself is untouched), reproducing the real handler's `/api/`-path JSON-401 branch character-for-character and appending the incoming request's query string to the `/login` redirect when one is present (confirmed not to produce a trailing `/login?` when there's no query string). Independently re-verified: the override mechanism is sound (Starlette's exception-handler registration is a plain dict assignment, later registration wins), `conftest.py`'s existing app-state-restore fixture correctly does a full `exception_handlers` dict restore (not just an add-back of one key), and no open-redirect/header-injection risk exists (the path is a fixed literal, only the query string is reflected).
+
+### [2026-09-16, demo-bot branch] The demo's fix wave introduced a few small, non-blocking gaps alongside the two above
+
+- **Found during:** Same fix-wave re-review.
+- **What:** (1) The cookieless-bypass middleware now `touch()`es `demo/session.py::_last_seen` with whatever string is in the session cookie, on every request, with no JWT validation and no size cap — unlike the `_tickets`/`_reviews`/`_comments` stores, which the same fix wave correctly capped. A client minting fresh cookie values can grow this dict faster than the 5-minute sweep interval clears it. (2) No test asserts the periodic sweep task is actually scheduled (`asyncio.create_task(_sweep_forever())` in `demo/app.py`'s lifespan) — only that `sweep_once()` works when called directly; deleting the scheduling line would leave the suite green. (3) `demo/store.py`'s ticket-trimming evicts by insertion order regardless of status, so a still-`pending` ticket could theoretically be dropped under sustained load (harmless at demo scale). (4) `get_provider_override()`'s "currently processing" slot is only cleared when a claim finds nothing due, so the dashboard's Config panel can show the previous visitor's provider for up to one idle dispatcher tick (cosmetic).
+- **Why parked:** All four are Minor severity and none were part of the fix wave's required scope; (1) is the only one worth prioritizing if this branch is revisited, since it's the same unbounded-growth failure mode Finding 4 was originally about, just on a store that wasn't in scope for that fix.
+- **Follow-up:** Cap `_last_seen`'s size the same way `_tickets`/`_reviews`/`_comments` were capped; add a lifespan-wiring assertion test; consider status-aware trimming if this ever needs to survive real sustained traffic (unlikely for a demo).
+
+### [2026-09-16, demo-bot branch] `demo/content.py`'s third canned file's diff hunk body lines aren't recognized as "added" by `diff_utils.annotate_and_cap`
+
+- **Found during:** Task 2's task review (confirmed in the final whole-branch review as still non-load-bearing).
+- **What:** After Task 2's fix round corrected the diff *headers*' stray leading space, the `app/utils/format.py` hunk's *body* lines (`-`/`+` markers) still carry a leading space, so `diff_utils._annotate`'s `line.startswith("+")`/`("-")` check treats them as unchanged context rather than added lines.
+- **Why parked:** `demo/provider.py::MockProvider.complete()` ignores the annotated diff's content entirely (findings are hardcoded), so this has zero effect on what a reader sees. Confirmed twice (task review and final review) that this reasoning still holds.
+- **Follow-up:** A one-line comment in `demo/content.py` noting the hunk is deliberately not fully annotation-clean would save a future reader from "fixing" it and being confused when nothing visibly changes. Not worth its own fix round.
+
+### [2026-09-16, demo-bot branch] `demo/github_app.py::clear_schedule_notice` is a complete no-op
+
+- **Found during:** Task 4's task review.
+- **What:** Unlike the real `github_app.clear_schedule_notice`, the demo's version doesn't strip the "will retry at..." footnote from a comment body — it just returns the comment unchanged.
+- **Why parked:** The deferral/notice-cleanup path that would call this is unreachable in the demo by design (`MockProvider` never returns 429 or fails), consistent with `demo/store.py`'s own explicit stubbing of the deferral paths for the same reason.
+- **Follow-up:** If the demo's provider mock is ever extended to simulate failures, this needs a real implementation mirroring the real `_strip_existing_footnote` behavior.
+
+### `demo/github_app.py` has two small latent inconsistencies, both currently unreachable
+
+- **Found during:** Task 4's task review.
+- **What:** (1) `append_review_footnote`/`clear_schedule_notice` use a falsy `if comment_id` check instead of `is not None`, inconsistent with `upsert_comment`'s correct check three lines above. (2) The module's `_ids` counter is never reset by `reset()`, so ids climb monotonically across a test session instead of restarting at 1001.
+- **Why parked:** (1) is unreachable since the module's own ids start at 1001, never 0/falsy. (2) is harmless since only id uniqueness is ever asserted.
+- **Follow-up:** One-line fixes if this file is touched again for another reason.
+
+### The demo's `<script src="/demo-static/demo.js">` tag also loads on the real, non-demo dashboard/login pages
+
+- **Found during:** Task 7's fix-round re-review.
+- **What:** The script tag needed for the demo's banner/chrome was added directly to the shared `dashboard/static/dashboard.html`/`login.html` files (not a demo-only copy), so it also renders on the real production dashboard, where `/demo-static` is never mounted — resulting in a harmless 404 in the browser console.
+- **Why parked:** Confirmed no functional impact (no catch-all route in `main.py`, plain 404, no information disclosure) — accepted tradeoff of keeping the demo's chrome changes in the same two files Task 8's mobile CSS pass also needed to touch.
+- **Follow-up:** If this bothers a future reviewer of the real service, either inject the tag via `demo/app.py` rewriting the served HTML instead of a static edit, or add a one-line comment in both files noting the expected 404.
+
+### `dashboard/static/dashboard.html`'s `.info-tooltip` mobile-overflow bug likely also exists in the real (non-demo) dashboard
+
+- **Found during:** Task 8's `ui-visual-review` mobile pass (Playwright `scrollWidth`/`clientWidth` measurement), confirmed independently in the final whole-branch review.
+- **What:** Absolutely-positioned `.info-tooltip` elements (invisible by default) were pushed past the mobile viewport edge, causing ~150px of real horizontal scroll on the Environment panel and config form. Fixed for the demo by adding `position: relative` to their containing elements inside the existing `@media (max-width: 640px)` block. This CSS file is shared with the real dashboard — the same file, same bug, likely present in production too, just not exercised by this branch's own testing (which is demo-scoped).
+- **Why parked:** Out of scope for a demo-only branch; the fix itself is safe to have landed since it only affects a mobile breakpoint's tooltip positioning, but verifying/deploying it to production is a separate decision outside this branch.
+- **Follow-up:** Since the fix already landed in the shared file, no further action is needed here — it will reach production the next time this branch (or an equivalent cherry-pick) merges. Flagged only so nobody assumes this was a demo-only artifact.
+
+### `Dockerfile.demo` doesn't explain why `COPY dashboard ./dashboard` is required
+
+- **Found during:** Task 9's task review.
+- **What:** Unlike the real `Dockerfile`, which comments on why `dashboard/`'s own `pyproject.toml` must be physically present for `uv`'s workspace discovery, `Dockerfile.demo` copies the same directory with no such explanation.
+- **Why parked:** Cosmetic; the header comment already says "Mirrors Dockerfile," which points a reader in the right direction.
+- **Follow-up:** Add the one-line comment if this file is touched again.
+
+### The demo test suite's `demo_env`/`_undo_global_rebinding` fixture pair is now copy-pasted across three test files
+
+- **Found during:** Task 10's task review.
+- **What:** `tests/test_demo_app_boot.py`, `tests/test_demo_dashboard.py`, and `tests/test_demo_end_to_end.py` each carry their own copy of the same settings-monkeypatching and module-state-restore fixtures, and (per the final whole-branch review) the copies have already started to drift in their docstrings.
+- **Why parked:** Each individual task correctly followed the established convention rather than unilaterally refactoring shared test infrastructure mid-task.
+- **Follow-up:** Extract to a shared `conftest.py` fixture the next time a fourth demo test file is added, or opportunistically now if someone touches this area.
+
+### CI's demo-image boot step never `docker rm`s its container
+
+- **Found during:** Task 10's task review.
+- **What:** `.github/workflows/ci.yml`'s new "Boot the demo image" step starts a container and never removes it.
+- **Why parked:** Harmless on ephemeral GitHub Actions runners, verbatim from the plan's own brief.
+- **Follow-up:** None needed unless this pattern is copied into a long-lived environment.
+
 ### `readConfigValue`'s blank/zero handling briefly makes `usage_cap_tokens=0` a hard 422 instead of the old silent "cap off"
 
 - **Found during:** dashboard-typed-config-controls Task 2, by the opus reviewer subagent spawned to draft fixes for two test/plan discrepancies (its "Additional flags" item 3), while examining `readConfigValue`'s exact semantics against the pre-refactor `saveConfig`.

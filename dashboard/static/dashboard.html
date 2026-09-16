@@ -521,11 +521,26 @@
     #renderVarsTable td:first-child { font-weight: 600; word-break: break-word; }
     .env-value-cell { flex-wrap: wrap; }
     #renderVarsTable input.env-value-input { flex: 1 1 100%; }
+    /* Measured with Playwright, not assumed: every .info-tooltip is
+       absolutely positioned relative to its own .info-wrap, right after
+       whatever text precedes the (i) icon -- a key name here, a config
+       field's label in #configForm below. inset-inline-start:0 anchors the
+       tooltip wherever that text happens to end, often well past the
+       row/label's own left edge. Even hidden (opacity:0/visibility:hidden),
+       it still counts toward document.scrollWidth, which measured out to a
+       genuine ~150px of horizontal page scroll on the Environment panel at
+       mobile width despite nothing being visibly cut off. Moving the
+       positioning context up to the now block-level, full-width ancestor
+       (the row's first td here; #configForm's label below) anchors each
+       tooltip flush with that row's own left edge instead. */
+    #renderVarsTable td:first-child { position: relative; }
+    .info-wrap { position: static; }
     /* #configForm's label/input pairs are separate grid items; collapsing
        to one column stacks each pair (label above its field) instead of
        squeezing every input into whatever's left after the widest label
        (e.g. "Usage cap reset (UTC)") claims the fixed max-content column. */
     #configForm { grid-template-columns: 1fr; }
+    #configForm label { position: relative; }
   }
   .review-row .chevron {
     position: absolute;
@@ -740,6 +755,23 @@
       </section>
     </section>
   </main>
+
+  <!-- Deliberately BEFORE this page's own inline script, not after it (where
+       this tag used to live, and where login.html still carries it).
+       demo.js installs a window.fetch wrapper at parse time that propagates
+       the demo's `?cookieless=1` marker onto same-origin XHRs, and the very
+       first `fetch("/api/dashboard")` on this page is made synchronously
+       while the script below is still being parsed -- applyLanguage() ->
+       refreshDashboard(), NOT from a DOMContentLoaded listener. A tag placed
+       after that script loads too late to wrap that first call, which for a
+       cookie-discarding browser 401s and sends the page to /login, which
+       demo.js sends straight back here: the infinite loop this ordering
+       exists to prevent. Measured in a real Chromium (Playwright) -- top-level
+       code in demo.js alone is NOT sufficient with the old tag position.
+       Harmless on the real, non-demo dashboard, where /demo-static is never
+       mounted: a classic <script src> that 404s just fails to load and
+       parsing continues (see ISSUES.md's existing note on this same tag). -->
+  <script src="/demo-static/demo.js"></script>
 
   <script>
     const STRINGS = {

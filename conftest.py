@@ -248,3 +248,65 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         if _touches_shared_postgres(item):
             item.add_marker(pytest.mark.db)
             item.add_marker(pytest.mark.xdist_group(name="db"))
+
+
+# Snapshotting `main.app`'s middleware/route lists here, at conftest import
+# time, is load-bearing: this is the repo-root conftest, so pytest imports it
+# before collecting a single test module in any directory -- guaranteeing
+# this snapshot is taken before any test file's own body has had a chance to
+# import demo.app (the only thing that mutates these lists; see the fixture
+# below). Importing `main` for the snapshot itself is harmless -- dozens of
+# test files already do `from main import app` at their own module level.
+import main as _main_module  # noqa: E402
+
+_PRISTINE_APP_MIDDLEWARE = list(_main_module.app.user_middleware)
+_PRISTINE_APP_ROUTES = list(_main_module.app.router.routes)
+# demo/app.py also wraps the lifespan context (to attach its periodic session
+# sweep) -- same singleton, same leak, same snapshot-and-restore.
+_PRISTINE_APP_LIFESPAN = _main_module.app.router.lifespan_context
+# demo/app.py also re-registers a `SessionRequired` handler (to keep the
+# incoming query string on the `/` -> `/login` redirect, which main.py's own
+# handler drops). `add_exception_handler` overwrites main.py's entry in this
+# same dict, so it leaks exactly like the router/middleware above.
+_PRISTINE_APP_EXCEPTION_HANDLERS = dict(_main_module.app.exception_handlers)
+
+
+@pytest.fixture(autouse=True)
+def _restore_main_app_after_demo_app_mutation():
+    """demo/app.py (task-7, 2026-09-16) does `from main import app` and then
+    permanently appends a router and an HTTP middleware onto that object at
+    MODULE IMPORT time -- by design, since the demo entrypoint
+    (`uvicorn demo.app:app`) reuses this exact same FastAPI instance and
+    needs the cookie-less-login-bypass middleware to see every request, not
+    just the demo's own routes.
+
+    In this test suite, `main.app` is a process-wide singleton that dozens
+    of other test files (e.g. dashboard/tests/test_auth.py) import directly
+    and treat as pristine -- import demo.app even once, anywhere, for any
+    reason (a single test in tests/test_demo_app_boot.py doing so is
+    enough), and every later test asserting "an unauthenticated/cookie-less
+    request gets 401 or a login redirect" silently starts passing with a
+    200 instead, because the bypass middleware now auto-injects a valid
+    session cookie for every cookie-less request through the whole process
+    for the rest of that pytest-xdist worker's life -- confirmed directly:
+    dashboard/tests/test_auth.py::test_unauthenticated_api_dashboard_
+    request_gets_401_json and test_unauthenticated_dashboard_page_request_
+    redirects_to_login started failing the moment demo/app.py gained this
+    code, with no changes to either test or to dashboard/auth.py itself.
+
+    Restoring `user_middleware`/`router.routes` to their snapshotted-at-
+    collection-time pristine contents after every single test (regardless
+    of whether that particular test is the one that imported demo.app)
+    keeps this invariant true for the rest of the suite regardless of
+    import order or which worker/test happens to trigger the first import.
+    `middleware_stack` must also be reset to None: Starlette builds and
+    caches it lazily from `user_middleware` on first use, so restoring the
+    list alone leaves a stale cached stack that still runs the bypass.
+    """
+    yield
+    _main_module.app.user_middleware[:] = _PRISTINE_APP_MIDDLEWARE
+    _main_module.app.router.routes[:] = _PRISTINE_APP_ROUTES
+    _main_module.app.router.lifespan_context = _PRISTINE_APP_LIFESPAN
+    _main_module.app.exception_handlers.clear()
+    _main_module.app.exception_handlers.update(_PRISTINE_APP_EXCEPTION_HANDLERS)
+    _main_module.app.middleware_stack = None

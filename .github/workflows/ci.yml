@@ -38,6 +38,19 @@ jobs:
       - name: Test (pytest)
         run: uv run pytest -v
 
+      - name: Build the demo image
+        run: docker build -f Dockerfile.demo -t demo-pr-review-engine .
+
+      - name: Boot the demo image
+        run: |
+          docker run -d --name demo -p 8000:8000 demo-pr-review-engine
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/healthz; then exit 0; fi
+            sleep 1
+          done
+          docker logs demo
+          exit 1
+
   docs:
     runs-on: ubuntu-latest
     steps:
