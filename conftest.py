@@ -264,6 +264,11 @@ _PRISTINE_APP_ROUTES = list(_main_module.app.router.routes)
 # demo/app.py also wraps the lifespan context (to attach its periodic session
 # sweep) -- same singleton, same leak, same snapshot-and-restore.
 _PRISTINE_APP_LIFESPAN = _main_module.app.router.lifespan_context
+# demo/app.py also re-registers a `SessionRequired` handler (to keep the
+# incoming query string on the `/` -> `/login` redirect, which main.py's own
+# handler drops). `add_exception_handler` overwrites main.py's entry in this
+# same dict, so it leaks exactly like the router/middleware above.
+_PRISTINE_APP_EXCEPTION_HANDLERS = dict(_main_module.app.exception_handlers)
 
 
 @pytest.fixture(autouse=True)
@@ -302,4 +307,6 @@ def _restore_main_app_after_demo_app_mutation():
     _main_module.app.user_middleware[:] = _PRISTINE_APP_MIDDLEWARE
     _main_module.app.router.routes[:] = _PRISTINE_APP_ROUTES
     _main_module.app.router.lifespan_context = _PRISTINE_APP_LIFESPAN
+    _main_module.app.exception_handlers.clear()
+    _main_module.app.exception_handlers.update(_PRISTINE_APP_EXCEPTION_HANDLERS)
     _main_module.app.middleware_stack = None

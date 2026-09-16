@@ -101,6 +101,50 @@ app.mount(
 )
 
 
+async def _demo_session_required(request, exc):
+    """main.py's `_handle_session_required`, with the query string kept.
+
+    The demo's documented entry point is `GET /?provider=vertex` -- the
+    wizard's "Finish & Deploy" redirect target -- reached by a reader who is
+    not logged in yet. main.py's handler answers that with a bare
+    `RedirectResponse("/login")`, dropping the provider choice one hop
+    BEFORE login.html's own (already query-preserving) post-login redirect
+    ever runs, so the review silently reports the default provider instead
+    of the one the reader picked.
+
+    Registered here rather than fixed in main.py because main.py is the real,
+    production dashboard's code and is shared with the non-demo service.
+    Starlette resolves an exception handler through `app.exception_handlers`,
+    a plain dict keyed by exception class, so a later `add_exception_handler`
+    for the same class replaces the earlier registration outright -- the same
+    post-hoc override shape this module already uses for the router, the
+    middleware, the static mount and the lifespan.
+
+    The `/api/` branch is byte-for-byte main.py's, deliberately: only the
+    redirect branch is being changed here.
+    """
+    from fastapi.responses import JSONResponse, RedirectResponse
+
+    if request.url.path.startswith("/api/"):
+        return JSONResponse({"valid": False, "reason": "unauthenticated"}, status_code=401)
+    query = request.url.query
+    return RedirectResponse("/login" + (f"?{query}" if query else ""), status_code=303)
+
+
+def install_session_redirect_override() -> None:
+    """Idempotent, and callable by tests after conftest.py restores app state."""
+    from dashboard.auth import SessionRequired
+
+    app.add_exception_handler(SessionRequired, _demo_session_required)
+    # Starlette caches the built ExceptionMiddleware in `middleware_stack` on
+    # first use; without this the restored/stale stack keeps main.py's
+    # handler for the life of the process.
+    app.middleware_stack = None
+
+
+install_session_redirect_override()
+
+
 # A non-secret marker, readable by JavaScript on purpose: demo/static/demo.js
 # checks for it on the login page to find out whether this browser kept the
 # cookie it was just handed. Not `secure`, so it also survives the plain-HTTP

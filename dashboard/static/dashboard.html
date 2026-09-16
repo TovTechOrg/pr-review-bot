@@ -756,6 +756,23 @@
     </section>
   </main>
 
+  <!-- Deliberately BEFORE this page's own inline script, not after it (where
+       this tag used to live, and where login.html still carries it).
+       demo.js installs a window.fetch wrapper at parse time that propagates
+       the demo's `?cookieless=1` marker onto same-origin XHRs, and the very
+       first `fetch("/api/dashboard")` on this page is made synchronously
+       while the script below is still being parsed -- applyLanguage() ->
+       refreshDashboard(), NOT from a DOMContentLoaded listener. A tag placed
+       after that script loads too late to wrap that first call, which for a
+       cookie-discarding browser 401s and sends the page to /login, which
+       demo.js sends straight back here: the infinite loop this ordering
+       exists to prevent. Measured in a real Chromium (Playwright) -- top-level
+       code in demo.js alone is NOT sufficient with the old tag position.
+       Harmless on the real, non-demo dashboard, where /demo-static is never
+       mounted: a classic <script src> that 404s just fails to load and
+       parsing continues (see ISSUES.md's existing note on this same tag). -->
+  <script src="/demo-static/demo.js"></script>
+
   <script>
     const STRINGS = {
       en: {
@@ -3150,6 +3167,5 @@
     applyLanguage(currentLang);
     setInterval(refreshDashboard, POLL_INTERVAL_MS);
   </script>
-  <script src="/demo-static/demo.js"></script>
 </body>
 </html>

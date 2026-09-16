@@ -96,6 +96,7 @@ def demo_chrome_installed():
     from fastapi.staticfiles import StaticFiles
     from starlette.middleware.base import BaseHTTPMiddleware
 
+    from demo import app as demo_app_module
     from demo.app import _demo_request_context, app
     from demo.routes import router as demo_router
 
@@ -111,6 +112,12 @@ def demo_chrome_installed():
         name="demo-static",
     )
     app.add_middleware(BaseHTTPMiddleware, dispatch=_demo_request_context)
+    # Same per-test re-registration reasoning as the router/mount above:
+    # conftest.py's restore fixture puts `app.exception_handlers` back to
+    # main.py's pristine mapping after every test, so demo/app.py's
+    # query-string-preserving SessionRequired handler has to be re-applied
+    # each time a test needs it.
+    demo_app_module.install_session_redirect_override()
     app.middleware_stack = None
     yield app
 
@@ -368,7 +375,14 @@ async def test_the_bypass_is_refused_once_the_browser_has_proven_it_keeps_cookie
         response = await client.get("/?cookieless=1")
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/login"
+    # The query string rides along now (demo/app.py's SessionRequired
+    # override, added for the dropped-`?provider=` finding) -- what this test
+    # asserts is that the redirect to the login gate still HAPPENS, not that
+    # the marker is stripped from it. Landing back on /login?cookieless=1 is
+    # harmless: login.html renders normally, and demo.js's
+    # redirectIfCookieHostile() returns early on a page already carrying the
+    # marker rather than bouncing.
+    assert response.headers["location"] == "/login?cookieless=1"
 
 
 async def test_demo_static_mount_serves_demo_js(demo_chrome_installed):
@@ -466,3 +480,225 @@ def test_the_provider_parameter_survives_the_login_redirect_and_bootstrap_waits(
     bootstrap_at = demo_js.index('fetch("/api/demo/bootstrap"')
     guard_at = demo_js.index("if (isLoginPage()) return;")
     assert guard_at < bootstrap_at
+
+
+async def test_unauthenticated_root_keeps_its_query_string_on_the_login_redirect(
+    demo_env, demo_chrome_installed
+):
+    """Regression for the Finding-B parked issue (2026-09-16).
+
+    The demo's primary documented entry point is `GET /?provider=vertex` --
+    the wizard's "Finish & Deploy" redirect target -- hit by a reader who has
+    not logged in yet. main.py's `_handle_session_required` answers that with
+    a bare `RedirectResponse("/login")`, so the provider choice was gone one
+    hop before login.html's own (query-preserving) post-login redirect ever
+    ran, and the review reported the default provider instead.
+
+    demo/app.py re-registers the handler on the same app object to keep the
+    query string. main.py itself is untouched -- it is the real, non-demo
+    dashboard's code.
+    """
+    from httpx import ASGITransport, AsyncClient
+
+    from demo.app import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test", follow_redirects=False
+    ) as client:
+        response = await client.get("/?provider=vertex")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login?provider=vertex"
+
+
+async def test_unauthenticated_root_without_a_query_string_still_redirects_bare(
+    demo_env, demo_chrome_installed
+):
+    """The override must not invent a trailing `?` where main.py produced
+    none -- `/login`, not `/login?`."""
+    from httpx import ASGITransport, AsyncClient
+
+    from demo.app import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test", follow_redirects=False
+    ) as client:
+        response = await client.get("/")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login"
+
+
+async def test_unauthenticated_api_request_still_gets_the_untouched_json_401(
+    demo_env, demo_chrome_installed
+):
+    """Regression guard for the same registration point: replacing the
+    SessionRequired handler changes ONLY the redirect branch. The `/api/`
+    branch must stay byte-for-byte main.py's -- a 401 with
+    `{"valid": false, "reason": "unauthenticated"}`, which dashboard.html's
+    own 401 handling and the auth tests both depend on."""
+    from httpx import ASGITransport, AsyncClient
+
+    from demo.app import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test", follow_redirects=False
+    ) as client:
+        response = await client.get("/api/dashboard?provider=vertex")
+
+    assert response.status_code == 401
+    assert response.json() == {"valid": False, "reason": "unauthenticated"}
+
+
+def test_the_real_apps_session_redirect_is_not_affected_by_the_demo_override():
+    """The override lives on `main.app`, which IS the real dashboard's app
+    object -- the demo reuses it rather than building its own. Nothing in
+    demo/app.py may change what the real service does when demo.app was
+    never imported, and conftest.py's restore fixture is what keeps that
+    true inside this suite. Asserting main.py's own source still carries the
+    unmodified handler is the part that survives independently of fixture
+    ordering."""
+    from pathlib import Path
+
+    main_src = (Path(__file__).resolve().parent.parent / "main.py").read_text(encoding="utf-8")
+
+    assert 'return RedirectResponse("/login", status_code=303)' in main_src
+    assert "cookieless" not in main_src
+
+
+def test_demo_js_patches_fetch_at_top_level_before_any_domcontentloaded_listener():
+    """Regression for the Finding-A parked issue (2026-09-16), the half a
+    Python test can prove: the ORDERING of the patch inside demo.js.
+
+    demo.js's <script> tag is the last one in dashboard.html, so
+    dashboard.html's own inline script has already registered its
+    DOMContentLoaded listener by the time this file is parsed. Listeners run
+    in registration order, so a fetch patch installed from a listener
+    registered HERE would land after dashboard.html's refreshDashboard() has
+    already fired its first, unpatched `fetch("/api/dashboard")` -- a bare
+    relative path, no cookies, no `?cookieless=1` -> a real 401 ->
+    `location.href = "/login"` -> demo.js redirecting back to
+    `/?cookieless=1`, forever. Only a top-level assignment runs before any
+    DOMContentLoaded listener fires at all.
+    """
+    from pathlib import Path
+
+    demo_js = (
+        Path(__file__).resolve().parent.parent / "demo" / "static" / "demo.js"
+    ).read_text(encoding="utf-8")
+
+    patch_at = demo_js.index("window.fetch = function")
+    listener_at = demo_js.index('document.addEventListener("DOMContentLoaded"')
+    assert patch_at < listener_at, "the fetch patch must not be inside a DOMContentLoaded listener"
+    # Stronger than the index comparison alone: there must be no
+    # DOMContentLoaded registration ANYWHERE above the patch, so the patch
+    # cannot have been nested inside an earlier listener either.
+    assert 'addEventListener("DOMContentLoaded"' not in demo_js[:patch_at]
+    # Only same-origin, root-relative string URLs are rewritten; a Request
+    # object or a protocol-relative "//host/..." URL is left alone.
+    assert 'typeof input !== "string"' in demo_js
+    assert 'input.charAt(1) === "/"' in demo_js
+    # Existing query parameters are preserved, never clobbered.
+    assert 'url.searchParams.set(COOKIELESS_PARAM, "1")' in demo_js
+
+
+def test_dashboard_html_loads_demo_js_before_its_own_inline_script():
+    """The other, load-bearing half of the same fix -- and the half that a
+    real browser, not reading the source, is what proved necessary.
+
+    Top-level code in demo.js is only early enough if demo.js itself is
+    parsed early enough. dashboard.html's inline script does NOT defer its
+    first data call to DOMContentLoaded: it runs
+    `applyLanguage(currentLang)` -> `refreshDashboard()` -> `fetch(
+    "/api/dashboard")` synchronously, while that same script block is still
+    being parsed. With the <script src="/demo-static/demo.js"> tag in its
+    original position (last tag before </body>, where login.html still has
+    it), that first call fires before demo.js exists at all -- measured in
+    Chromium via Playwright: `/api/dashboard -> 401`, then
+    `location.href = "/login"`, then demo.js on /login redirecting back to
+    `/?cookieless=1`, forever. Moving the tag above the inline script turned
+    the same run into `/api/dashboard?cookieless=1 -> 200`, two navigations
+    total, no loop.
+    """
+    from pathlib import Path
+
+    html = (
+        Path(__file__).resolve().parent.parent / "dashboard" / "static" / "dashboard.html"
+    ).read_text(encoding="utf-8")
+
+    demo_tag_at = html.index('<script src="/demo-static/demo.js">')
+    inline_at = html.index("<script>\n    const STRINGS = {")
+    assert demo_tag_at < inline_at, (
+        "demo.js must load before dashboard.html's inline script, which fires its "
+        "first fetch(\"/api/dashboard\") during its own parse"
+    )
+    # Exactly one such tag -- a leftover copy at the bottom would be dead
+    # weight and would re-run the whole IIFE a second time.
+    assert html.count('<script src="/demo-static/demo.js">') == 1
+
+
+async def test_a_cookie_discarding_browsers_full_request_sequence_never_loops(
+    demo_env, demo_chrome_installed
+):
+    """The Finding-A scenario end to end, at the HTTP layer: a client that
+    RECEIVES Set-Cookie and throws it away, following exactly the sequence
+    the patched demo.js produces.
+
+    The previous coverage
+    (test_cookieless_request_still_reaches_a_login_gated_route) was edited to
+    put `?cookieless=1` on its XHR by hand, which is precisely what the
+    browser was NOT doing. Here every request is issued through a client
+    whose cookie jar is cleared after every single response, and the XHR URL
+    is the one demo.js's patch derives from a bare path -- so a 401 anywhere
+    in this chain is the loop.
+    """
+    from httpx import ASGITransport, AsyncClient
+
+    from demo import app as demo_app
+    from demo.app import PROBE_COOKIE_NAME, app
+
+    # Same reason as test_environment_panel_answers_without_a_network_call:
+    # `_undo_global_rebinding` restores the real modules after every test, so
+    # the render/store/github mocks have to be (re-)installed here or
+    # /api/environment/render makes a real HTTPS call to api.render.com.
+    demo_app.install_mocks()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test", follow_redirects=False
+    ) as client:
+        # 1. The wizard's entry point. No cookies -> login redirect, with the
+        #    provider choice intact (Finding B).
+        first = await client.get("/?provider=vertex")
+        client.cookies.clear()
+        assert first.status_code == 303
+        assert first.headers["location"] == "/login?provider=vertex"
+
+        # 2. The login page renders, hands out the probe cookie -- and this
+        #    browser discards it, which is what demo.js detects.
+        login_page = await client.get("/login?provider=vertex")
+        assert login_page.status_code == 200
+        assert PROBE_COOKIE_NAME in login_page.cookies
+        client.cookies.clear()
+
+        # 3. demo.js's redirectIfCookieHostile() reload.
+        dashboard = await client.get("/?provider=vertex&cookieless=1")
+        client.cookies.clear()
+        assert dashboard.status_code == 200
+
+        # 4. Every XHR dashboard.html's own inline script makes, as rewritten
+        #    by demo.js's fetch patch. Each one is a fresh, cookie-free
+        #    request -- exactly what a cookie-discarding browser sends.
+        for path in (
+            "/api/dashboard?cookieless=1",
+            "/api/environment/render?cookieless=1",
+            "/api/environment/config?cookieless=1",
+        ):
+            xhr = await client.get(path)
+            client.cookies.clear()
+            assert xhr.status_code == 200, (
+                f"{path} 401'd -> dashboard.html redirects to /login -> loop"
+            )
