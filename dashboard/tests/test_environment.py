@@ -88,6 +88,38 @@ async def test_patch_render_env_vars_applies_sets_and_fires_one_deploy(monkeypat
     assert deploys == ["srv-1"]
 
 
+async def test_patch_render_env_vars_refuses_a_value_that_looks_like_the_masked_placeholder(
+    monkeypatch,
+):
+    """dashboard.html's maskedValue() displays a hidden row as exactly eight
+    literal asterisks, never the real value's own length. That masked text
+    should never legitimately reach this endpoint -- the input backing it
+    only feeds `sets` while unmasked (the `:not([readonly])` gate) -- but if
+    that client-side gating is ever broken, this key must fail loudly rather
+    than silently overwrite Render's real secret with the placeholder."""
+    monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+    pushed = []
+    monkeypatch.setattr(
+        render_client,
+        "push_env_var",
+        lambda service_id, key, value: pushed.append((key, value)),
+    )
+    monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
+    client = await _client()
+    resp = await client.patch(
+        "/api/environment/render",
+        json={"sets": {"GEMINI_API_KEY": "*" * 8, "FOO": "bar"}, "deletes": []},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["applied"] == ["FOO"]
+    assert body["failed"] == [
+        {"key": "GEMINI_API_KEY", "error": "looks_like_masked_placeholder"}
+    ]
+    # The masked key must never reach Render at all -- only the real value.
+    assert pushed == [("FOO", "bar")]
+
+
 async def test_patch_render_env_vars_rejects_a_protected_delete_without_touching_render(
     monkeypatch,
 ):

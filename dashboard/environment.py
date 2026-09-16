@@ -63,6 +63,18 @@ class EnvironmentRenderPatch(BaseModel):
     deletes: list[str] = []
 
 
+# Mirrors dashboard.html's maskedValue() -- a hidden row always displays
+# exactly this fixed placeholder, never the real value's own length. The
+# input backing it only feeds `stagedEdits` (and so this request's `sets`)
+# while unmasked/editable (dashboard.html's `:not([readonly])` gate), so
+# this placeholder should never legitimately arrive here. It exists as a
+# backend backstop for that client-side contract -- checked with no browser
+# test and no new CI dependency -- so that if that gating is ever broken,
+# the affected key fails loudly instead of silently overwriting Render's
+# real secret with eight literal asterisks.
+_MASKED_PLACEHOLDER = "*" * 8
+
+
 _DIRECT_EDIT_VARS = {
     "GEMINI_MODEL": "gemini",
     "GROQ_MODEL": "groq",
@@ -591,6 +603,9 @@ def _apply_render_patch(payload: EnvironmentRenderPatch) -> dict:
     for key, value in payload.sets.items():
         if stopped:
             break
+        if value == _MASKED_PLACEHOLDER:
+            failed.append({"key": key, "error": "looks_like_masked_placeholder"})
+            continue
         if key in _DIRECT_EDIT_VARS:
             try:
                 check = _validate_var(key, value)
