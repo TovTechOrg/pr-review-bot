@@ -233,8 +233,9 @@ def render_checks() -> str:
             "and `UPTIMEROBOT_API_KEY` are both required now (see the guide's "
             "setup steps 6 and 8) -- only `DATABASE_URL` still leaves a check "
             "optional.\n",
-            "- `DATABASE_URL` enables `database` and `provider` — the provider "
-            "override lives in the same database.",
+            "- `DATABASE_URL` enables `database`, `runtime-config`, and "
+            "`provider` — the provider override and the schema check both "
+            "live in the same database.",
         ]
     )
     return "\n".join(lines) + "\n"

@@ -24,4 +24,4 @@
 
 An optional check degrades to `SKIPPED` with a hint, never to a failure, when its operator-local key is unset. `RENDER_API_KEY` and `UPTIMEROBOT_API_KEY` are both required now (see the guide's setup steps 6 and 8) -- only `DATABASE_URL` still leaves a check optional.
 
-- `DATABASE_URL` enables `database` and `provider` — the provider override lives in the same database.
+- `DATABASE_URL` enables `database`, `runtime-config`, and `provider` — the provider override and the schema check both live in the same database.
