@@ -102,17 +102,52 @@ def test_one_session_never_sees_anothers_review():
         est_cost_usd=0.0001,
     )
 
-    demo_store.reset()
-    current_session.set("reader-a")
-    demo_store.record_review(
-        "bot-demo/example-app", 7, review, 1001, "2026-09-16T00:00:00+00:00", 0,
+    token = current_session.set("reader-a")
+    try:
+        demo_store.reset()
+        demo_store.record_review(
+            "bot-demo/example-app", 7, review, 1001, "2026-09-16T00:00:00+00:00", 0,
+        )
+
+        current_session.set("reader-b")
+        assert demo_store.dashboard_reviews() == []
+
+        current_session.set("reader-a")
+        visible = demo_store.dashboard_reviews()
+        assert len(visible) == 1
+        assert visible[0]["repo"] == "bot-demo/example-app"
+        assert "_session" not in visible[0], "the tag is internal, never rendered"
+    finally:
+        current_session.reset(token)
+
+
+def test_cookieless_visitor_sees_only_unowned_reviews():
+    """The exact scenario the reviewer reproduced as broken: two sessions each
+    record a review, then a cookie-less (session None) visitor must see only
+    unowned reviews -- empty here, since both test reviews are session-tagged
+    -- never both sessions' reviews."""
+    from demo.session import current_session
+    from specialists.schemas import ReviewResult
+
+    review = ReviewResult(
+        pr_number=7, provider="groq", model="llama-3.3-70b-versatile",
+        results=[], total_elapsed_ms=10, total_tokens_in=1, total_tokens_out=1,
+        est_cost_usd=0.0001,
     )
 
-    current_session.set("reader-b")
-    assert demo_store.dashboard_reviews() == []
+    token = current_session.set("reader-a")
+    try:
+        demo_store.reset()
+        demo_store.record_review(
+            "bot-demo/example-app", 7, review, 1001, "2026-09-16T00:00:00+00:00", 0,
+        )
 
-    current_session.set("reader-a")
-    visible = demo_store.dashboard_reviews()
-    assert len(visible) == 1
-    assert visible[0]["repo"] == "bot-demo/example-app"
-    assert "_session" not in visible[0], "the tag is internal, never rendered"
+        current_session.set("reader-b")
+        demo_store.record_review(
+            "bot-demo/example-app", 7, review, 1002, "2026-09-16T00:01:00+00:00", 0,
+        )
+
+        current_session.set(None)
+        assert demo_store.dashboard_reviews() == []
+    finally:
+        current_session.reset(token)

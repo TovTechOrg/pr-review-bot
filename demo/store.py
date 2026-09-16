@@ -318,7 +318,7 @@ def dashboard_reviews(limit: int = 50) -> list[dict]:
     session = current_session.get()
     visible = [
         review for review in reversed(_reviews)
-        if session is None or review.get("_session") in (session, None)
+        if review.get("_session") in (session, None)
     ]
     return [{k: v for k, v in r.items() if k != "_session"} for r in visible][:limit]
 
