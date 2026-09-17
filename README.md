@@ -145,7 +145,7 @@ docker run -p 8000:8000 --env-file .env pr-review-engine
 
 ```bash
 uv run ruff check .
-uv run pytest -v
+uv run pytest -q
 ```
 
 The full suite is deterministic and network-free: every GitHub,

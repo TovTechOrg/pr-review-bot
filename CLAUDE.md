@@ -231,10 +231,14 @@ Full incident history and rationale: `docs/conventions/rationale.md#cross-repo-c
   committing them for tidiness is still an unrequested commit.
 - **Partial failure is always visible** in the PR comment (a failed specialist
   renders a real row) — never silently dropped.
-- **Before pushing, always run the full test suite (`uv run pytest -v`) and
+- **Before pushing, always run the full test suite (`uv run pytest -q`) and
   ruff (`uv run ruff check .`), and fix whatever either finds.** Never push
   with a red suite or an unresolved lint error, and never skip either check
-  because a change "looks" too small to affect them.
+  because a change "looks" too small to affect them. Use `-q`, not `-v`, for
+  a routine run — pytest still prints the full traceback for any failure
+  either way; `-v`'s only effect is one extra line per *passing* test, which
+  is pure Bash-output token cost on every green run and adds nothing when
+  there's nothing to report.
   This rule covers `pytest`, `ruff`, and CI's blocking `lint-and-test`/`docs`
   jobs. It deliberately does **not** extend to
   `.github/workflows/consumer-contract-lag.yml`, the scheduled advisory
