@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Starting the demo — PR Review Engine</title>
+<meta name="description" content="Launching the live demo of the PR review engine and its setup wizard.">
+<meta name="robots" content="noindex">
+<style>
+  :root {
+    --bg: #f6f7fb; --card: #ffffff; --fg: #1a1a2e; --muted: #5a5f73;
+    --accent: #5b7cd6; --track: #e3e7f2; --border: #dfe3ef;
+    /* Deliberately NOT --accent: --accent's own lightness is tuned for use
+       as link/progress-bar text against --bg (light and dark both pass
+       WCAG AA there), but --accent as a solid fill under white button text
+       fails AA in both themes (measured: 3.96:1 light, 2.96:1 dark, both
+       below the 4.5:1 body-text threshold) -- no single color satisfies
+       both "light enough to read as text on --bg" and "dark enough for
+       white text on top of it" at once. Kept constant across themes since
+       a solid button fill's contrast only depends on its own text, not the
+       surrounding page background. */
+    --button-bg: #3558b5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12141c; --card: #1b1e29; --fg: #e7ecff; --muted: #a6adc4;
+      --accent: #7b93e0; --track: #2a2f40; --border: #2e3346;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center;
+    justify-content: center; padding: 16px; background: var(--bg); color: var(--fg);
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .card {
+    width: 100%; max-width: 30rem; background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 1.75rem 1.5rem; text-align: center;
+  }
+  h1 { margin: 0 0 .5rem; font-size: 1.35rem; line-height: 1.3; }
+  p { margin: 0 0 1rem; color: var(--muted); font-size: .95rem; }
+  .track { height: 6px; background: var(--track); border-radius: 3px; overflow: hidden; margin: 1.25rem 0; }
+  /* .bar's width is a plain physical-left-anchored block box -- direction:
+     rtl (set on <html> below) does NOT mirror that on its own (verified by
+     rendering, not assumed). Mirroring the whole track visually flips which
+     side reads as "elapsed" for an RTL reader without touching the JS,
+     which only ever sets a plain width percentage. */
+  html[dir="rtl"] .track { transform: scaleX(-1); }
+  .bar { height: 100%; width: 0; background: var(--accent); transition: width .5s linear; }
+  a { color: var(--accent); }
+  .primary {
+    display: inline-block; margin-top: .25rem; padding: .7rem 1.1rem; border-radius: 9px;
+    background: var(--button-bg); color: #fff; text-decoration: none; font-weight: 600;
+  }
+  .links { margin-top: 1.25rem; font-size: .875rem; }
+  .links a { display: inline-block; margin: 0 .5rem; }
+  .lang { margin-top: 1.5rem; font-size: .8rem; color: var(--muted); }
+  #failure { display: none; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main class="card">
+  <div id="waiting">
+    <h1 id="title">Starting the demo…</h1>
+    <p id="status">Waking the demo service — this usually takes about 45 seconds.</p>
+    <div class="track"><div class="bar" id="bar"></div></div>
+    <p><a id="anyway" href="https://demo-onboarding-wizard.onrender.com">Open it anyway →</a></p>
+  </div>
+
+  <div id="failure">
+    <h1 id="failTitle">The demo didn't wake up in time.</h1>
+    <p id="failBody">It runs on free hosting, so this happens occasionally. You can open it directly, or read how it works.</p>
+    <p><a class="primary" id="failLink" href="https://demo-onboarding-wizard.onrender.com">Open it anyway →</a></p>
+  </div>
+
+  <div class="links">
+    <a id="repoLink" href="https://github.com/TovTechOrg/pr-review-bot">View the repository</a>
+    <a id="guideLink" href="https://tovtechorg.github.io/pr-review-bot/setup/">Read the setup guide</a>
+  </div>
+
+  <p class="lang"><a href="?lang=he" id="langLink">עברית</a></p>
+
+  <noscript>
+    <p>This page needs JavaScript to wake the demo. Open a service directly:</p>
+    <p><a href="https://demo-onboarding-wizard.onrender.com">Setup wizard demo</a></p>
+    <p><a href="https://demo-pr-review-bot.onrender.com">Review engine demo</a></p>
+    <p>The first request takes about a minute — free hosting sleeps when idle.</p>
+  </noscript>
+</main>
+
+<script>
+(function () {
+  // The two demo services. HARDCODED, never read from the query string: a
+  // page on the org's own github.io domain that redirected to a
+  // caller-supplied URL would be an open redirect. ?to= picks between these
+  // two literals and nothing else.
+  var DEMO_WIZARD_URL = "https://demo-onboarding-wizard.onrender.com";
+  var DEMO_BOT_URL = "https://demo-pr-review-bot.onrender.com";
+
+  // Measured 2026-09-17: a real cold start took 41.6s and Render HELD the
+  // connection, answering 200 rather than 502. So this is one long request,
+  // not a burst of short ones -- a short per-attempt timeout would abort
+  // requests that were each about to succeed. 120s is ~3x the measurement,
+  // headroom for the heavier bot image and a bad day.
+  var TOTAL_MS = 120000;
+  var RETRY_MS = 3000;
+  var EXPECTED_MS = 45000;
+
+  var STRINGS = {
+    en: {
+      title: "Starting the demo…",
+      starting: "Waking the demo service — this usually takes about 45 seconds.",
+      waking: "Still waking up. Free hosting sleeps when idle.",
+      slow: "This is taking longer than usual.",
+      anyway: "Open it anyway →",
+      failTitle: "The demo didn't wake up in time.",
+      failBody: "It runs on free hosting, so this happens occasionally. You can open it directly, or read how it works.",
+      repo: "View the repository",
+      guide: "Read the setup guide",
+      other: "עברית"
+    },
+    he: {
+      title: "מפעיל את הדמו…",
+      starting: "מעיר את שירות הדמו — זה לוקח בדרך כלל כ-45 שניות.",
+      waking: "עדיין מתעורר. אירוח חינמי נכנס לשינה כשאין פעילות.",
+      slow: "זה לוקח יותר זמן מהרגיל.",
+      anyway: "פתחו בכל זאת",
+      failTitle: "הדמו לא התעורר בזמן.",
+      failBody: "השירות רץ על אירוח חינמי, אז זה קורה מדי פעם. אפשר לפתוח אותו ישירות, או לקרוא איך זה עובד.",
+      repo: "מאגר הקוד",
+      guide: "מדריך ההתקנה",
+      other: "English"
+    }
+  };
+
+  var params = new URLSearchParams(location.search);
+
+  var lang = params.get("lang");
+  if (lang !== "he" && lang !== "en") {
+    lang = (navigator.language || "en").toLowerCase().indexOf("he") === 0 ? "he" : "en";
+  }
+  var T = STRINGS[lang];
+  document.documentElement.lang = lang;
+  document.documentElement.dir = lang === "he" ? "rtl" : "ltr";
+
+  // The ONLY thing ?to= does: pick one of the two literals above.
+  var TARGET = params.get("to") === "bot" ? DEMO_BOT_URL : DEMO_WIZARD_URL;
+
+  function $(id) { return document.getElementById(id); }
+
+  $("title").textContent = T.title;
+  $("status").textContent = T.starting;
+  $("anyway").textContent = T.anyway;
+  $("anyway").href = TARGET;
+  $("failTitle").textContent = T.failTitle;
+  $("failBody").textContent = T.failBody;
+  $("failLink").textContent = T.anyway;
+  $("failLink").href = TARGET;
+  $("repoLink").textContent = T.repo;
+  $("guideLink").textContent = T.guide;
+  $("langLink").textContent = T.other;
+  $("langLink").href = "?" + (params.get("to") === "bot" ? "to=bot&" : "") +
+    "lang=" + (lang === "he" ? "en" : "he");
+
+  // Records the analytics step AND wakes the bot in one request, so the bot
+  // is warm by the time a reader finishes the four wizard steps. no-cors +
+  // POST with no body and no custom headers is a CORS "simple request": no
+  // preflight, so this needs nothing on the server side.
+  try {
+    fetch(DEMO_BOT_URL + "/api/demo/step/launcher", {
+      method: "POST", mode: "no-cors", cache: "no-store"
+    });
+  } catch (err) { /* analytics must never break the launch */ }
+
+  // AbortSignal.timeout is not in older in-app WebViews, and LinkedIn's is
+  // exactly the environment this page has to survive.
+  function timeoutSignal(ms) {
+    if (typeof AbortSignal !== "undefined" && AbortSignal.timeout) {
+      return AbortSignal.timeout(ms);
+    }
+    var controller = new AbortController();
+    setTimeout(function () { controller.abort(); }, ms);
+    return controller.signal;
+  }
+
+  var started = Date.now();
+  var done = false;
+
+  function elapsed() { return Date.now() - started; }
+
+  function tick() {
+    if (done) return;
+    var seconds = Math.floor(elapsed() / 1000);
+    $("status").textContent =
+      seconds < 25 ? T.starting : (seconds < 60 ? T.waking : T.slow);
+    var fraction = Math.min(elapsed() / EXPECTED_MS, 0.95);
+    $("bar").style.width = (fraction * 100) + "%";
+  }
+
+  function succeed() {
+    done = true;
+    location.replace(TARGET);
+  }
+
+  function fail() {
+    done = true;
+    $("waiting").hidden = true;
+    $("failure").style.display = "block";
+  }
+
+  function poll() {
+    if (done) return;
+    var remaining = TOTAL_MS - elapsed();
+    if (remaining <= 0) { fail(); return; }
+    fetch(TARGET + "/healthz", {
+      mode: "cors", cache: "no-store", signal: timeoutSignal(remaining)
+    }).then(function (response) {
+      if (response.ok) { succeed(); return; }
+      retry();
+    }).catch(retry);
+  }
+
+  function retry() {
+    if (done) return;
+    if (elapsed() >= TOTAL_MS) { fail(); return; }
+    setTimeout(poll, RETRY_MS);
+  }
+
+  setInterval(tick, 1000);
+  tick();
+  poll();
+})();
+</script>
+</body>
+</html>
