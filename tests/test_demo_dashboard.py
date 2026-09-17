@@ -99,7 +99,7 @@ def demo_chrome_installed():
     from starlette.middleware.base import BaseHTTPMiddleware
 
     from demo import app as demo_app_module
-    from demo.app import _demo_request_context, app
+    from demo.app import _allow_launcher_health_polling, _demo_request_context, app
     from demo.routes import router as demo_router
 
     app.include_router(demo_router)
@@ -114,6 +114,7 @@ def demo_chrome_installed():
         name="demo-static",
     )
     app.add_middleware(BaseHTTPMiddleware, dispatch=_demo_request_context)
+    app.add_middleware(BaseHTTPMiddleware, dispatch=_allow_launcher_health_polling)
     # Same per-test re-registration reasoning as the router/mount above:
     # conftest.py's restore fixture puts `app.exception_handlers` back to
     # main.py's pristine mapping after every test, so demo/app.py's
