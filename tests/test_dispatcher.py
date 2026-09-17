@@ -7,6 +7,7 @@ unit-tested. Uses the shared Postgres test harness and a cleared blocked_until m
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -92,6 +93,14 @@ def _env(db, monkeypatch):
     # behavior. Seeded here so every test in this file starts with a real,
     # valid tuning config already in place, matching the stub above.
     dispatcher_tuning_config.set_override_cache(_tuning_config_stub())
+    # post_pending_notices' own throttled refresh (the PREREQUISITE fix)
+    # would otherwise leak a real monotonic timestamp across tests -- a test
+    # that runs soon after another one's refresh could see the throttle
+    # suppress a refresh it was relying on, or vice versa. Marked "just
+    # refreshed" here (matching the valid cache seeded above) so a test not
+    # specifically exercising this throttle gets deterministic behavior;
+    # tests that do exercise it (see below) override this explicitly.
+    monkeypatch.setattr(dispatcher, "_last_notice_tuning_refresh", time.monotonic())
     # cooldown_config/usage_cap_config/review_draft_config also lost their
     # env-fallback tier (Task 6) -- stubbed here the same way, reading
     # `settings` live at call time (not snapshotted) so existing test bodies
@@ -192,6 +201,30 @@ async def test_idle_when_no_tickets(monkeypatch):
     _stub_comments(monkeypatch)
     result = await dispatcher.process_next_due(NOW)
     assert result.action == "idle"
+
+
+async def test_post_pending_notices_refreshes_the_tuning_cache_on_an_idle_queue(monkeypatch):
+    """Regression for the PREREQUISITE bug (docs/superpowers/plans/
+    2026-09-17-demo-launcher.md): on an idle queue, claim_next_due returns
+    None and process_next_due returns before ever reaching
+    _refresh_dispatcher_tuning_config, so the tuning cache stays permanently
+    empty from boot onward. post_pending_notices then calls require_config()
+    every single iteration and logs one WARNING per dispatcher_idle_sleep_seconds
+    (1.0s default) forever -- and the notice sweep itself is functionally dead
+    the whole time. Mirrors run_forever's own throttled
+    _IDLE_SLEEP_REFRESH_INTERVAL_SECONDS refresh, which exists for exactly
+    this reason but only covers run_forever's idle-sleep value, not this
+    cache."""
+    monkeypatch.setattr(dispatcher.store, "tickets_needing_notice", lambda *a, **k: [])
+    # Simulate the real never-claimed-a-ticket-yet boot state, and the
+    # throttle's own "never refreshed yet" starting point.
+    dispatcher_tuning_config.reset_override_cache()
+    monkeypatch.setattr(dispatcher, "_last_notice_tuning_refresh", 0.0)
+
+    posted = await dispatcher.post_pending_notices(NOW)
+
+    assert posted == 0
+    assert dispatcher_tuning_config.effective_config() != {}
 
 
 async def test_unavailable_tuning_config_defers_the_ticket_and_posts_a_placeholder(monkeypatch):
@@ -1180,7 +1213,18 @@ def _stub_append_schedule(monkeypatch):
 
 
 async def test_post_pending_notices_skips_when_tuning_config_is_unavailable(monkeypatch, db_exec):
+    """Since post_pending_notices now self-heals an empty cache via its own
+    throttled refresh (the PREREQUISITE fix), merely resetting the cache no
+    longer simulates "unavailable" -- the very next call would just refresh
+    it back from the (valid) DB stub. The genuine unavailable case is a
+    refresh that itself fails."""
     dispatcher_tuning_config.reset_override_cache()
+    monkeypatch.setattr(dispatcher, "_last_notice_tuning_refresh", 0.0)
+
+    def _raise():
+        raise RuntimeError("db unreachable")
+
+    monkeypatch.setattr(dispatcher.store, "get_dispatcher_tuning_config", _raise)
     called = []
     monkeypatch.setattr(
         dispatcher.store, "tickets_needing_notice", lambda *a, **k: called.append((a, k))

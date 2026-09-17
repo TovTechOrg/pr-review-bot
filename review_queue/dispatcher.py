@@ -88,6 +88,16 @@ _IDLE_SLEEP_REFRESH_INTERVAL_SECONDS = 30
 _idle_sleep_seconds: float | None = None
 _last_idle_sleep_refresh: float = 0.0
 
+# post_pending_notices runs every run_forever iteration regardless of queue
+# state, but process_next_due's own per-claimed-ticket refresh
+# (_refresh_dispatcher_tuning_config) only ever runs after claim_next_due
+# actually claims something -- on an idle queue that never happens, so the
+# tuning cache stays permanently empty from boot and require_config() below
+# raises every single call. Throttled the same way as run_forever's own
+# _last_idle_sleep_refresh, and starting at 0.0 for the same reason: the
+# very first call must refresh immediately regardless of interval.
+_last_notice_tuning_refresh: float = 0.0
+
 # Hardcoded floor for the "tuning config unavailable" deferral, NOT a config
 # fallback (same distinction as run_forever's 1.0 idle-sleep floor): the
 # value that would tell us how long to wait is exactly the one that's
@@ -197,6 +207,11 @@ async def post_pending_notices(now: datetime) -> int:
     count posted. Called once per run_forever iteration, alongside
     process_next_due."""
     posted = 0
+    global _last_notice_tuning_refresh
+    now_monotonic = time.monotonic()
+    if now_monotonic - _last_notice_tuning_refresh >= _IDLE_SLEEP_REFRESH_INTERVAL_SECONDS:
+        await _refresh_dispatcher_tuning_config()
+        _last_notice_tuning_refresh = now_monotonic
     try:
         batch_size = dispatcher_tuning_config.require_config()[
             "dispatcher_notice_sweep_batch_size"
