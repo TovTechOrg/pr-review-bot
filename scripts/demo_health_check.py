@@ -31,8 +31,10 @@ import httpx
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
-BOT_URL = "https://demo-pr-review-bot.onrender.com"
-LAUNCHER_URL = "https://tovtechorg.github.io/pr-review-bot/demo/"
+from config import settings
+
+BOT_URL = settings.demo_bot_url
+LAUNCHER_URL = f"{settings.guide_base_url}/demo/"
 
 # The canned security finding from demo/content.py's FINDINGS_BY_SCHEMA.
 # dashboard.html's findingRows() renders finding.description into a

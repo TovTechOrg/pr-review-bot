@@ -64,7 +64,11 @@ These live only in the `runtime_config` table, never as a Render env var, becaus
 
 ## Never pushed: operator-machine settings
 
+- `DEMO_BOT_URL`
+- `DEMO_WIZARD_URL`
+- `GUIDE_BASE_URL`
 - `PUBLIC_BASE_URL`
+- `REAL_WIZARD_URL`
 - `RENDER_SERVICE_NAME`
 
 These configure your local tooling, not the service. Setting them on Render would create dead env vars.

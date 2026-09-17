@@ -120,19 +120,23 @@
   // moment a click on it is plausible. Warming it from the launcher instead
   // would spend the instance-hours minutes too early, and a free service
   // spins back down after ~15 idle minutes.
-  var REAL_WIZARD_URL = "https://onboarding-wizard-mk6m.onrender.com";
-  var GUIDE_URL = "https://tovtechorg.github.io/pr-review-bot/setup/";
+  // Substituted server-side by demo/app.py at import time from `settings`
+  // (config.py) via json.dumps -- these two tokens are deliberately
+  // unquoted here (the substitution supplies the quotes) and must never be
+  // edited directly.
+  var REAL_WIZARD_URL = __REAL_WIZARD_URL__;
+  var GUIDE_URL = __GUIDE_URL__;
 
   var CTA = {
     en: {
       heading: "Like what you see?",
-      body: "That review came from mock data. Point the real engine at your own repository — it takes about 30 minutes.",
+      body: "That review came from mock data. Point the real engine at your own repository — it takes about 10 minutes.",
       primary: "Deploy your own →",
       secondary: "Read the setup guide"
     },
     he: {
       heading: "אהבתם?",
-      body: "הסקירה הזו הופקה מנתונים מדומים. אפשר לחבר את המנוע האמיתי למאגר שלכם — זה לוקח כחצי שעה.",
+      body: "הסקירה הזו הופקה מנתונים מדומים. אפשר לחבר את המנוע האמיתי למאגר שלכם — זה לוקח כ-10 דקות.",
       primary: "התקינו אצלכם",
       secondary: "מדריך ההתקנה"
     }

@@ -1,6 +1,6 @@
 from datetime import time
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Env-var names that hold plain operational config, not credentials. LISTED =
@@ -41,6 +41,10 @@ OPERATIONAL_KEYS = frozenset(
         "GITHUB_TARGET_REPO",
         "PUBLIC_BASE_URL",
         "REVIEW_DRAFT_PRS",
+        "DEMO_BOT_URL",
+        "DEMO_WIZARD_URL",
+        "REAL_WIZARD_URL",
+        "GUIDE_BASE_URL",
     }
 )
 
@@ -185,6 +189,27 @@ class Settings(BaseSettings):
     uptimerobot_api_key: str = ""
     render_api_key: str = ""
     render_service_name: str = "pr-review-engine"
+
+    # --- Demo/guide URLs. Non-secret, just operationally hostname-dependent
+    # (a Render free-tier service name, or the org's GitHub Pages base) --
+    # single source of truth for scripts/deploy.py, scripts/demo_health_check.py,
+    # demo/app.py (CORS origin for the launcher's /healthz poll) and
+    # demo/static/demo.js (the post-review CTA's links). tests/test_launcher_page.py
+    # reads these same defaults to keep guide/demo/index.html's static literals
+    # (GitHub Pages has no backend to read Settings from) from silently drifting.
+    demo_bot_url: str = "https://demo-pr-review-bot.onrender.com"
+    demo_wizard_url: str = "https://demo-onboarding-wizard.onrender.com"
+    real_wizard_url: str = "https://onboarding-wizard-mk6m.onrender.com"
+    guide_base_url: str = "https://tovtechorg.github.io/pr-review-bot"
+
+    @field_validator("guide_base_url")
+    @classmethod
+    def _strip_trailing_slash(cls, value: str) -> str:
+        """Every caller (scripts/deploy.py, scripts/demo_health_check.py,
+        demo/app.py) builds a path onto this by string-concatenating
+        `f"{guide_base_url}/something"` -- a trailing slash left in an
+        operator-set override would silently double up into `//something`."""
+        return value.rstrip("/")
 
     def target_repos(self) -> frozenset[str]:
         """Configured repo allowlist, or empty (= no restriction -- act on

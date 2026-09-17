@@ -16,13 +16,17 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import github_app as real_github_app
 import render_client as real_render_client
-from fastapi.staticfiles import StaticFiles
+from fastapi import Response
 from review_queue import store as real_store
+
+from config import settings
 
 from demo import github_app as demo_github_app
 from demo import render_client as demo_render_client
@@ -89,16 +93,45 @@ from demo.routes import router as demo_router  # noqa: E402
 
 app.include_router(demo_router)
 
-# Overrides nothing in main.py -- `/demo-static` is a path main.py never
-# mounts (its own static mount lives at `/static/fonts`, see main.py's
+# Overrides nothing in main.py -- `/demo-static/demo.js` is a path main.py
+# never mounts (its own static mount lives at `/static/fonts`, see main.py's
 # `app.mount("/static/fonts", ...)`), so this can't collide with it. Serves
 # demo/static/demo.js (banner injection, readonly login prefill, bootstrap
-# fetch), which login.html/dashboard.html load via a <script> tag.
-app.mount(
-    "/demo-static",
-    StaticFiles(directory=Path(__file__).parent / "static"),
-    name="demo-static",
-)
+# fetch, and the post-review CTA), which login.html/dashboard.html load via a
+# <script> tag. Rendered (not a plain StaticFiles mount) so the CTA's wizard
+# and guide links come from `settings` instead of being baked into the file on
+# disk -- read and templated once at import time (not per-request: settings
+# never change over a process's lifetime).
+#
+# json.dumps, not an f-string, for the substituted value: it's dropped in as a
+# bare token (demo.js has `__REAL_WIZARD_URL__` unquoted, not `"...""), so
+# json.dumps supplies both the surrounding quotes and correct escaping -- a
+# plain f-string would let a `"` or `\` in an operator-set REAL_WIZARD_URL/
+# GUIDE_BASE_URL override break out of the string literal.
+_DEMO_JS_TEMPLATE = (Path(__file__).parent / "static" / "demo.js").read_text(encoding="utf-8")
+_DEMO_JS_RENDERED = _DEMO_JS_TEMPLATE.replace(
+    "__REAL_WIZARD_URL__", json.dumps(settings.real_wizard_url)
+).replace("__GUIDE_URL__", json.dumps(f"{settings.guide_base_url}/setup/"))
+
+
+async def _demo_js() -> Response:
+    # text/javascript (not application/javascript): demo.js has Hebrew
+    # strings, and Starlette only auto-appends `; charset=utf-8` for a
+    # text/* media type -- the old StaticFiles mount served exactly this
+    # content-type, so this keeps decoding correct.
+    return Response(content=_DEMO_JS_RENDERED, media_type="text/javascript")
+
+
+def register_demo_static_route(target_app) -> None:
+    """Exists so tests/test_demo_*.py's `demo_chrome_installed` fixtures can
+    re-apply this route onto the shared `main.app` singleton per-test (see
+    their docstrings: conftest.py's autouse restore fixture strips it back
+    off after every test, and a plain module import is a no-op cache hit the
+    second time) without each duplicating this registration inline."""
+    target_app.add_api_route("/demo-static/demo.js", _demo_js, methods=["GET"], name="demo-static")
+
+
+register_demo_static_route(app)
 
 
 async def _demo_session_required(request, exc):
@@ -243,7 +276,8 @@ async def _demo_request_context(request, call_next):
 # another origin. No `Vary: Origin`: the value is a constant that does not
 # depend on the request's own Origin, so there is nothing for a cache to vary
 # on.
-LAUNCHER_ORIGIN = "https://tovtechorg.github.io"
+_guide_parts = urlsplit(settings.guide_base_url)
+LAUNCHER_ORIGIN = f"{_guide_parts.scheme}://{_guide_parts.netloc}"
 
 
 @app.middleware("http")

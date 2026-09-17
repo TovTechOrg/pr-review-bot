@@ -440,6 +440,27 @@ beyond what the code/tests/design docs it references already provide._
 - **Why parked:** Same shape as the pre-existing, accepted `run_forever`/`_last_idle_sleep_refresh` throttle this fix explicitly mirrors — that one also refreshes on its own independent clock regardless of ticket activity. The redundant query is cheap (one `runtime_config` row read, at most twice a minute) against a real correctness gap (the sweep being permanently dead on an idle queue) that has no correct fix without *some* independent refresh path for exactly the case where `process_next_due`'s own refresh doesn't run. Deduplicating the two refresh clocks would add real coupling between `process_next_due` and `post_pending_notices` (one would need to tell the other "I just refreshed, skip yours") for a cost this low.
 - **Follow-up:** If this DB read is ever measured to matter (e.g. connection-pool pressure under sustained load), have `process_next_due`'s own refresh also bump `post_pending_notices`' `_last_notice_tuning_refresh` timestamp so a busy queue's already-warm cache suppresses the redundant one. Not worth doing speculatively.
 
+### [2026-09-17] Softcoded demo/guide URLs: `demo/static/demo.js`'s served response lost `ETag`/`Last-Modified`
+
+- **Found during:** opus review of the URL-softcoding branch (moving `DEMO_BOT_URL`/`DEMO_WIZARD_URL`/`REAL_WIZARD_URL`/`GUIDE_BASE_URL` from scattered hardcoded literals into `config.py` `Settings` fields).
+- **What:** `demo/app.py`'s `/demo-static/demo.js` route used to be a plain `StaticFiles` mount, which Starlette serves with `ETag`/`Last-Modified` for conditional-GET support. Switching to a rendered route (needed so the CTA's wizard/guide links come from `settings` instead of being baked into the file on disk) dropped both, so every page load re-sends the full ~11KB body instead of getting a 304.
+- **Why parked:** No functional regression (the content is still correct and small), and `demo/app.py` already caches the rendered string at import time so there's no added CPU cost — this is a pure bandwidth/caching nicety on a low-traffic demo endpoint, not worth the extra code (compute + compare an ETag, handle `If-None-Match`) for this task's scope.
+- **Follow-up:** If demo bandwidth or load time ever becomes a real concern, compute an ETag (e.g. a hash of `_DEMO_JS_RENDERED`) once at import time alongside the rendered body and honor `If-None-Match` in `_demo_js()`.
+
+### [2026-09-17] Softcoded demo/guide URLs: `tests/test_guide_site.py`'s guide-host pin now indirectly depends on a configurable default
+
+- **Found during:** Same review as above.
+- **What:** `test_deploy_points_at_a_guide_page_that_exists` compares `scripts.deploy._GUIDE_URL` (now `settings.guide_base_url`-derived, previously a hardcoded literal) against a hardcoded `_EXPECTED_GUIDE_BASE`. Its own docstring's rationale ("a rename of the repo or its owner is expected to fail this test") predates `GUIDE_BASE_URL` being an operator-settable `.env.config` override — a fork that sets `GUIDE_BASE_URL` to its own Pages host in `.env.config` would now also fail this test, not just an actual rename.
+- **Why parked:** This only affects a fork's local checkout with a non-default `.env.config`; the shipped default is unchanged and CI never has `.env.config` (see `tests/test_config.py`'s skip-when-absent behavior), so this repo's own suite is unaffected. Judged not worth a fix loop for a fork-only edge case.
+- **Follow-up:** If this ever bites a real fork, reword the test's docstring to acknowledge the override case explicitly, or read the expected host from `.env.config`/`GUIDE_BASE_URL` when set instead of a bare literal.
+
+### [2026-09-17] Softcoded demo/guide URLs: the four new `.env.config.example` entries are untested against `scripts/init_env.py`'s prompt flow
+
+- **Found during:** Same review as above.
+- **What:** `scripts/init_env.py` parses every commented-out key in `.env.config.example` (including now-commented `DEMO_BOT_URL`/`DEMO_WIZARD_URL`/`REAL_WIZARD_URL`/`GUIDE_BASE_URL`) and prompts for each during first-time setup. No test exercises this specific prompt flow for the four new keys.
+- **Why parked:** The prompt mechanism itself is generic and already covered by existing `init_env.py` tests for other operational keys; these four are not a new code path, just new data flowing through an already-tested one. Not worth a dedicated test per key.
+- **Follow-up:** If `init_env.py`'s generic prompt-flow test ever needs a concrete example key, these four are available as one.
+
 ---
 
 ## Design Gaps

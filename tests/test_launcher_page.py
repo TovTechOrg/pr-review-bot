@@ -10,12 +10,20 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from config import Settings
+
 LAUNCHER = (
     Path(__file__).resolve().parent.parent / "guide" / "demo" / "index.html"
 ).read_text(encoding="utf-8")
 
-DEMO_WIZARD_URL = "https://demo-onboarding-wizard.onrender.com"
-DEMO_BOT_URL = "https://demo-pr-review-bot.onrender.com"
+# The Settings CLASS's own declared defaults, never the module-level `settings`
+# instance -- this file is static (GitHub Pages has no backend to read
+# Settings from), so it can only ever be pinned against what an unconfigured
+# deployment's URLs default to, exactly as gen_contract.py does and for the
+# same reason (see CLAUDE.md's secret-handling section).
+DEMO_WIZARD_URL = Settings.model_fields["demo_wizard_url"].default
+DEMO_BOT_URL = Settings.model_fields["demo_bot_url"].default
+GUIDE_URL = f'{Settings.model_fields["guide_base_url"].default}/setup/'
 
 
 def test_both_demo_service_urls_are_pinned():
@@ -24,6 +32,10 @@ def test_both_demo_service_urls_are_pinned():
     is exactly how the sibling repo's DEMO_BOT_URL shipped wrong."""
     assert f'var DEMO_WIZARD_URL = "{DEMO_WIZARD_URL}";' in LAUNCHER
     assert f'var DEMO_BOT_URL = "{DEMO_BOT_URL}";' in LAUNCHER
+
+
+def test_the_setup_guide_link_is_pinned():
+    assert f'href="{GUIDE_URL}"' in LAUNCHER
 
 
 def test_the_redirect_target_is_never_read_from_the_query_string():

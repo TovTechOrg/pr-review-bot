@@ -72,20 +72,13 @@ def demo_chrome_installed():
     tests/test_demo_dashboard.py's identical fixture for the full rationale
     (conftest.py strips all three back off after every test, so a cache-hit
     import of demo.app leaves nothing behind)."""
-    from pathlib import Path
-
-    from fastapi.staticfiles import StaticFiles
     from starlette.middleware.base import BaseHTTPMiddleware
 
-    from demo.app import _demo_request_context, app
+    from demo.app import _demo_request_context, app, register_demo_static_route
     from demo.routes import router as demo_router
 
     app.include_router(demo_router)
-    app.mount(
-        "/demo-static",
-        StaticFiles(directory=Path(__file__).resolve().parent.parent / "demo" / "static"),
-        name="demo-static",
-    )
+    register_demo_static_route(app)
     app.add_middleware(BaseHTTPMiddleware, dispatch=_demo_request_context)
     app.middleware_stack = None
     yield app

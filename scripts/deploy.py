@@ -46,7 +46,7 @@ from scripts._prereqs import _looks_like_local_test_db
 
 _NAME_WIDTH = 18
 _STATUS_WIDTH = 9
-_GUIDE_BASE = "https://tovtechorg.github.io/pr-review-bot"
+_GUIDE_BASE = settings.guide_base_url
 _GUIDE_URL = f"{_GUIDE_BASE}/operations/deploy/"
 _HTTP_TIMEOUT = 10.0
 _DB_CONNECT_TIMEOUT = 10
@@ -149,7 +149,23 @@ _DB_SYNCED_OPERATIONAL_KEYS = frozenset(
 # what public URL to hit. config.py's own field comments say these must
 # NEVER be set on the deployed service itself -- pushing them would just
 # create dead env vars, not fix anything.
-_NEVER_SYNCED_OPERATIONAL_KEYS = frozenset({"RENDER_SERVICE_NAME", "PUBLIC_BASE_URL"})
+#
+# The four demo/guide URLs belong here too: this file's sync-env only ever
+# targets the production `pr-review-engine` service (render.yaml's one
+# listed service), never the separate demo Render services, so pushing them
+# there would be exactly the same "dead env var" case. A fork's own demo
+# deployment that wants non-default URLs sets these directly as Render env
+# vars on that separate service instead.
+_NEVER_SYNCED_OPERATIONAL_KEYS = frozenset(
+    {
+        "RENDER_SERVICE_NAME",
+        "PUBLIC_BASE_URL",
+        "DEMO_BOT_URL",
+        "DEMO_WIZARD_URL",
+        "REAL_WIZARD_URL",
+        "GUIDE_BASE_URL",
+    }
+)
 
 _DEPLOY_POLL_SECONDS = 10
 # A cold Docker build with a full dependency install runs well past five

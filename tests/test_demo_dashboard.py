@@ -94,26 +94,24 @@ def demo_chrome_installed():
     behavior it registers present for this test" -- exactly what these
     tests need to be independently reliable regardless of test order.
     """
-    from pathlib import Path
-
-    from fastapi.staticfiles import StaticFiles
     from starlette.middleware.base import BaseHTTPMiddleware
 
     from demo import app as demo_app_module
-    from demo.app import _allow_launcher_health_polling, _demo_request_context, app
+    from demo.app import (
+        _allow_launcher_health_polling,
+        _demo_request_context,
+        app,
+        register_demo_static_route,
+    )
     from demo.routes import router as demo_router
 
     app.include_router(demo_router)
     # Same reasoning as the router/middleware above: conftest.py's autouse
     # restore fixture wipes `app.router.routes` back to its pristine,
-    # demo-app-unaware snapshot after every test -- a static Mount is just
+    # demo-app-unaware snapshot after every test -- this route is just
     # another entry in that same list, so it needs the same per-test
     # re-registration to be reliably present regardless of test order.
-    app.mount(
-        "/demo-static",
-        StaticFiles(directory=Path(__file__).resolve().parent.parent / "demo" / "static"),
-        name="demo-static",
-    )
+    register_demo_static_route(app)
     app.add_middleware(BaseHTTPMiddleware, dispatch=_demo_request_context)
     app.add_middleware(BaseHTTPMiddleware, dispatch=_allow_launcher_health_polling)
     # Same per-test re-registration reasoning as the router/mount above:
@@ -715,13 +713,37 @@ async def test_a_cookie_discarding_browsers_full_request_sequence_never_loops(
 
 
 def test_the_demo_script_builds_a_cta_pointing_at_the_real_wizard():
-    """The demo's closing move is sending a convinced reader to the real
-    thing. The URL is pinned because nothing else in this repo verifies it."""
+    """The on-disk file is a template (demo/app.py substitutes the real value
+    from `settings` at import time -- see test_demo_static_route_substitutes_
+    settings_urls below for the rendered, served version), so this only
+    checks that the placeholder itself is still there, not a stray hardcoded
+    URL reintroduced by mistake."""
     script = (
         Path(__file__).resolve().parent.parent / "demo" / "static" / "demo.js"
     ).read_text(encoding="utf-8")
-    assert 'var REAL_WIZARD_URL = "https://onboarding-wizard-mk6m.onrender.com";' in script
+    assert "var REAL_WIZARD_URL = __REAL_WIZARD_URL__;" in script
     assert "cta_clicked" in script
+
+
+async def test_demo_static_route_substitutes_settings_urls(demo_chrome_installed):
+    """The served demo.js must reflect `settings.real_wizard_url`/
+    `settings.guide_base_url`, not the raw on-disk placeholder tokens --
+    proof the substitution in demo/app.py actually ran."""
+    import json
+
+    from httpx import ASGITransport, AsyncClient
+
+    transport = ASGITransport(app=demo_chrome_installed)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/demo-static/demo.js")
+
+    assert "text/javascript" in response.headers["content-type"]
+    assert f"var REAL_WIZARD_URL = {json.dumps(settings.real_wizard_url)};" in response.text
+    assert (
+        f'var GUIDE_URL = {json.dumps(f"{settings.guide_base_url}/setup/")};' in response.text
+    )
+    assert "__REAL_WIZARD_URL__" not in response.text
+    assert "__GUIDE_URL__" not in response.text
 
 
 def test_the_cta_warms_the_real_wizard_when_it_renders():

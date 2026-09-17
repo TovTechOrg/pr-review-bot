@@ -44,3 +44,7 @@ Every setting this service reads. `.env.config` holds operational settings and i
 | `UPTIMEROBOT_API_KEY` | `str` | *(empty)* | `.env` |
 | `RENDER_API_KEY` | `str` | *(empty)* | `.env` |
 | `RENDER_SERVICE_NAME` | `str` | `pr-review-engine` | `.env.config` |
+| `DEMO_BOT_URL` | `str` | `https://demo-pr-review-bot.onrender.com` | `.env.config` |
+| `DEMO_WIZARD_URL` | `str` | `https://demo-onboarding-wizard.onrender.com` | `.env.config` |
+| `REAL_WIZARD_URL` | `str` | `https://onboarding-wizard-mk6m.onrender.com` | `.env.config` |
+| `GUIDE_BASE_URL` | `str` | `https://tovtechorg.github.io/pr-review-bot` | `.env.config` |

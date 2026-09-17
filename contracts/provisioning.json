@@ -14,6 +14,12 @@
     "DATABASE_URL": {
       "placement": "always_synced"
     },
+    "DEMO_BOT_URL": {
+      "placement": "never_synced"
+    },
+    "DEMO_WIZARD_URL": {
+      "placement": "never_synced"
+    },
     "DISPATCHER_BACKOFF_JITTER_SECONDS": {
       "placement": "db_only"
     },
@@ -71,6 +77,9 @@
     "GROQ_MODEL": {
       "placement": "slot_zero_seed"
     },
+    "GUIDE_BASE_URL": {
+      "placement": "never_synced"
+    },
     "KEY_USAGE_RESET_TIME_UTC": {
       "placement": "db_only"
     },
@@ -81,6 +90,9 @@
       "placement": "db_only"
     },
     "PUBLIC_BASE_URL": {
+      "placement": "never_synced"
+    },
+    "REAL_WIZARD_URL": {
       "placement": "never_synced"
     },
     "RENDER_API_KEY": {

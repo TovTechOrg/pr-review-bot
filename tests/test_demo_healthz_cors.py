@@ -7,13 +7,24 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from urllib.parse import urlsplit
+
 import main as _main  # noqa: F401  (see tests/test_demo_dashboard.py for why)
 import github_app as _real_github_app
 import render_client as _real_render_client
 import specialists.base as _real_specialists_base
+from config import settings
 from review_queue import store as _real_store
 
-LAUNCHER_ORIGIN = "https://tovtechorg.github.io"
+# Mirrors demo/app.py's own LAUNCHER_ORIGIN derivation. NOT `from demo.app
+# import LAUNCHER_ORIGIN` at module level: demo.app's own module body calls
+# install_mocks() at import time, permanently rebinding review_queue.store
+# for the rest of collection in this xdist worker (see
+# tests/test_demo_dashboard.py's demo_chrome_installed fixture docstring for
+# the full hazard) -- every import of demo.app in this file is deliberately
+# lazy, inside a fixture body, for that reason.
+_guide_parts = urlsplit(settings.guide_base_url)
+LAUNCHER_ORIGIN = f"{_guide_parts.scheme}://{_guide_parts.netloc}"
 
 
 @pytest.fixture(autouse=True)
@@ -57,21 +68,19 @@ def demo_chrome_installed():
     middleware are present on the shared `main.app` singleton for the
     duration of this one test. See tests/test_demo_dashboard.py's fixture
     of the same name for the full rationale."""
-    from pathlib import Path
-
-    from fastapi.staticfiles import StaticFiles
     from starlette.middleware.base import BaseHTTPMiddleware
 
     from demo import app as demo_app_module
-    from demo.app import _allow_launcher_health_polling, _demo_request_context, app
+    from demo.app import (
+        _allow_launcher_health_polling,
+        _demo_request_context,
+        app,
+        register_demo_static_route,
+    )
     from demo.routes import router as demo_router
 
     app.include_router(demo_router)
-    app.mount(
-        "/demo-static",
-        StaticFiles(directory=Path(__file__).resolve().parent.parent / "demo" / "static"),
-        name="demo-static",
-    )
+    register_demo_static_route(app)
     app.add_middleware(BaseHTTPMiddleware, dispatch=_demo_request_context)
     app.add_middleware(BaseHTTPMiddleware, dispatch=_allow_launcher_health_polling)
     demo_app_module.install_session_redirect_override()
