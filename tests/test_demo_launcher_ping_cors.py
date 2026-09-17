@@ -1,6 +1,8 @@
-"""The launcher lives on GitHub Pages and must be able to READ /healthz
-cross-origin to know when the demo has finished waking. Scoped to that one
-path: nothing else in the demo is readable from another origin."""
+"""The launcher lives on GitHub Pages and must be able to READ the launcher
+ping endpoint (config.py's demo_launcher_ping_path, NOT "/healthz" -- see
+that field's own comment for why) cross-origin to know when the demo has
+finished waking. Scoped to that one path: nothing else in the demo,
+including "/healthz" itself, is readable from another origin."""
 
 from __future__ import annotations
 
@@ -25,6 +27,7 @@ from review_queue import store as _real_store
 # lazy, inside a fixture body, for that reason.
 _guide_parts = urlsplit(settings.guide_base_url)
 LAUNCHER_ORIGIN = f"{_guide_parts.scheme}://{_guide_parts.netloc}"
+PING_PATH = settings.demo_launcher_ping_path
 
 
 @pytest.fixture(autouse=True)
@@ -88,19 +91,31 @@ def demo_chrome_installed():
     yield app
 
 
-async def test_healthz_is_readable_from_the_launcher_origin(demo_env, demo_chrome_installed):
+async def test_launcher_ping_is_readable_from_the_launcher_origin(demo_env, demo_chrome_installed):
+    transport = httpx.ASGITransport(app=demo_chrome_installed)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get(PING_PATH)
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == LAUNCHER_ORIGIN
+
+
+async def test_healthz_itself_does_not_get_the_cors_header(demo_env, demo_chrome_installed):
+    """Regression guard for the 2026-09-17 rename: the CORS allowance moved
+    to demo_launcher_ping_path, it did not additionally grow to cover
+    "/healthz" too -- least surface exposed, matching the middleware's own
+    comment."""
     transport = httpx.ASGITransport(app=demo_chrome_installed)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get("/healthz")
     assert response.status_code == 200
-    assert response.headers["access-control-allow-origin"] == LAUNCHER_ORIGIN
+    assert "access-control-allow-origin" not in response.headers
 
 
 async def test_no_other_route_becomes_readable_cross_origin(demo_env, demo_chrome_installed):
     """The header is scoped to one path, not applied app-wide.
 
     Deliberately asserts nothing about the status code: what matters is that
-    no non-/healthz response carries the header, and that holds whether the
+    no non-ping-path response carries the header, and that holds whether the
     route answers 200, redirects to /login, or 404s. Pinning a status here
     would couple this test to the demo's auth behaviour, which it is not
     about.

@@ -65,6 +65,7 @@ These live only in the `runtime_config` table, never as a Render env var, becaus
 ## Never pushed: operator-machine settings
 
 - `DEMO_BOT_URL`
+- `DEMO_LAUNCHER_PING_PATH`
 - `DEMO_WIZARD_URL`
 - `GUIDE_BASE_URL`
 - `PUBLIC_BASE_URL`

@@ -24,6 +24,7 @@ LAUNCHER = (
 DEMO_WIZARD_URL = Settings.model_fields["demo_wizard_url"].default
 DEMO_BOT_URL = Settings.model_fields["demo_bot_url"].default
 GUIDE_URL = f'{Settings.model_fields["guide_base_url"].default}/setup/'
+PING_PATH = Settings.model_fields["demo_launcher_ping_path"].default
 
 
 def test_both_demo_service_urls_are_pinned():
@@ -32,6 +33,17 @@ def test_both_demo_service_urls_are_pinned():
     is exactly how the sibling repo's DEMO_BOT_URL shipped wrong."""
     assert f'var DEMO_WIZARD_URL = "{DEMO_WIZARD_URL}";' in LAUNCHER
     assert f'var DEMO_BOT_URL = "{DEMO_BOT_URL}";' in LAUNCHER
+
+
+def test_the_launcher_ping_path_is_pinned_and_not_healthz():
+    """2026-09-17: an ad-blocker's filter list blocked a literal "/healthz"
+    fetch client-side (see config.py's demo_launcher_ping_path field
+    comment) -- this page must poll the renamed path, not the old one, and
+    the literal here (GitHub Pages has no backend to read Settings from)
+    must not silently drift from config.py's default."""
+    assert f'var PING_PATH = "{PING_PATH}";' in LAUNCHER
+    assert 'fetch(TARGET + "/healthz"' not in LAUNCHER
+    assert "fetch(TARGET + PING_PATH" in LAUNCHER
 
 
 def test_the_setup_guide_link_is_pinned():

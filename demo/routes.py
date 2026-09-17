@@ -7,12 +7,22 @@ import logging
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from config import settings
 from demo.provider import demo_provider_and_model
 from demo.session import SHARED_SESSION_ID, current_session, touch
 from demo.trigger import ensure_review_for_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+# See config.py's demo_launcher_ping_path field comment for why this exists
+# as a second endpoint rather than reusing "/healthz" (main.py) -- same
+# trivial body, but the launcher's own cross-origin poll is the only caller.
+@router.get(settings.demo_launcher_ping_path)
+@router.head(settings.demo_launcher_ping_path)
+async def launcher_ping() -> dict:
+    return {"status": "ok"}
 
 
 @router.get("/api/demo/bootstrap")

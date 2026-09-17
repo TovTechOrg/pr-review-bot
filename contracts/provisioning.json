@@ -17,6 +17,9 @@
     "DEMO_BOT_URL": {
       "placement": "never_synced"
     },
+    "DEMO_LAUNCHER_PING_PATH": {
+      "placement": "never_synced"
+    },
     "DEMO_WIZARD_URL": {
       "placement": "never_synced"
     },

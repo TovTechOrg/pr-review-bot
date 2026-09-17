@@ -48,3 +48,4 @@ Every setting this service reads. `.env.config` holds operational settings and i
 | `DEMO_WIZARD_URL` | `str` | `https://demo-onboarding-wizard.onrender.com` | `.env.config` |
 | `REAL_WIZARD_URL` | `str` | `https://onboarding-wizard-mk6m.onrender.com` | `.env.config` |
 | `GUIDE_BASE_URL` | `str` | `https://tovtechorg.github.io/pr-review-bot` | `.env.config` |
+| `DEMO_LAUNCHER_PING_PATH` | `str` | `/api/demo/ping-7f3a2` | `.env.config` |

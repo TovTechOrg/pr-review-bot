@@ -98,6 +98,17 @@
   var DEMO_WIZARD_URL = "https://demo-onboarding-wizard.onrender.com";
   var DEMO_BOT_URL = "https://demo-pr-review-bot.onrender.com";
 
+  // NOT "/healthz": an ad-blocker/privacy extension's filter list blocked
+  // that literal path client-side (net::ERR_BLOCKED_BY_CLIENT, 2026-09-17),
+  // even though the target service was healthy and reachable to anyone
+  // without that extension -- the visible symptom was this page wrongly
+  // reporting "didn't wake up in time" on a live demo. Both demo services
+  // (pr-review-bot's config.py, onboarding-wizard's config.py) answer this
+  // exact path identically to "/healthz", solely for this poll -- see
+  // pr-review-bot's config.py demo_launcher_ping_path field comment for the
+  // full reasoning and the cross-repo sync this literal requires.
+  var PING_PATH = "/api/demo/ping-7f3a2";
+
   // Measured 2026-09-17: a real cold start took 41.6s and Render HELD the
   // connection, answering 200 rather than 502. So this is one long request,
   // not a burst of short ones -- a short per-attempt timeout would abort
@@ -213,7 +224,7 @@
     if (done) return;
     var remaining = TOTAL_MS - elapsed();
     if (remaining <= 0) { fail(); return; }
-    fetch(TARGET + "/healthz", {
+    fetch(TARGET + PING_PATH, {
       mode: "cors", cache: "no-store", signal: timeoutSignal(remaining)
     }).then(function (response) {
       if (response.ok) { succeed(); return; }

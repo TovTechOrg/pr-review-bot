@@ -164,6 +164,7 @@ _NEVER_SYNCED_OPERATIONAL_KEYS = frozenset(
         "DEMO_WIZARD_URL",
         "REAL_WIZARD_URL",
         "GUIDE_BASE_URL",
+        "DEMO_LAUNCHER_PING_PATH",
     }
 )
 

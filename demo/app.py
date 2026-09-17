@@ -266,16 +266,20 @@ async def _demo_request_context(request, call_next):
 
 
 # The launcher page (guide/demo/index.html, served from GitHub Pages) polls
-# this service's /healthz to know when a cold start has finished. That is a
-# cross-origin read, so the response needs an explicit allow header or the
-# browser hands the launcher an opaque failure indistinguishable from "still
-# booting" -- see the 2026-09-16 design's "The launcher" section.
+# this service's demo_launcher_ping_path (demo/routes.py's launcher_ping) to
+# know when a cold start has finished. That is a cross-origin read, so the
+# response needs an explicit allow header or the browser hands the launcher
+# an opaque failure indistinguishable from "still booting" -- see the
+# 2026-09-16 design's "The launcher" section. NOT scoped to "/healthz"
+# (config.py's demo_launcher_ping_path field comment has the full reason: an
+# ad-blocker/privacy extension's filter list blocked that literal path
+# client-side, 2026-09-17).
 #
-# Scoped to /healthz by path, with no Access-Control-Allow-Credentials, so no
-# cookie ever rides on it and no other demo route becomes readable from
-# another origin. No `Vary: Origin`: the value is a constant that does not
-# depend on the request's own Origin, so there is nothing for a cache to vary
-# on.
+# Scoped to demo_launcher_ping_path by path, with no
+# Access-Control-Allow-Credentials, so no cookie ever rides on it and no
+# other demo route becomes readable from another origin. No `Vary: Origin`:
+# the value is a constant that does not depend on the request's own Origin,
+# so there is nothing for a cache to vary on.
 _guide_parts = urlsplit(settings.guide_base_url)
 LAUNCHER_ORIGIN = f"{_guide_parts.scheme}://{_guide_parts.netloc}"
 
@@ -283,7 +287,7 @@ LAUNCHER_ORIGIN = f"{_guide_parts.scheme}://{_guide_parts.netloc}"
 @app.middleware("http")
 async def _allow_launcher_health_polling(request, call_next):
     response = await call_next(request)
-    if request.url.path == "/healthz":
+    if request.url.path == settings.demo_launcher_ping_path:
         response.headers["access-control-allow-origin"] = LAUNCHER_ORIGIN
     return response
 

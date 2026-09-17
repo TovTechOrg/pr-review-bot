@@ -45,6 +45,7 @@ OPERATIONAL_KEYS = frozenset(
         "DEMO_WIZARD_URL",
         "REAL_WIZARD_URL",
         "GUIDE_BASE_URL",
+        "DEMO_LAUNCHER_PING_PATH",
     }
 )
 
@@ -193,14 +194,36 @@ class Settings(BaseSettings):
     # --- Demo/guide URLs. Non-secret, just operationally hostname-dependent
     # (a Render free-tier service name, or the org's GitHub Pages base) --
     # single source of truth for scripts/deploy.py, scripts/demo_health_check.py,
-    # demo/app.py (CORS origin for the launcher's /healthz poll) and
-    # demo/static/demo.js (the post-review CTA's links). tests/test_launcher_page.py
-    # reads these same defaults to keep guide/demo/index.html's static literals
-    # (GitHub Pages has no backend to read Settings from) from silently drifting.
+    # demo/app.py (CORS origin for the launcher's poll, at
+    # demo_launcher_ping_path below -- not "/healthz", see that field's own
+    # comment) and demo/static/demo.js (the post-review CTA's links).
+    # tests/test_launcher_page.py reads these same defaults to keep
+    # guide/demo/index.html's static literals (GitHub Pages has no backend to
+    # read Settings from) from silently drifting.
     demo_bot_url: str = "https://demo-pr-review-bot.onrender.com"
     demo_wizard_url: str = "https://demo-onboarding-wizard.onrender.com"
     real_wizard_url: str = "https://onboarding-wizard-mk6m.onrender.com"
     guide_base_url: str = "https://tovtechorg.github.io/pr-review-bot"
+
+    # The path the launcher (guide/demo/index.html) cross-origin-polls to
+    # learn a cold-started demo service has finished waking. Deliberately NOT
+    # "/healthz" -- that endpoint is also Render's own configured health
+    # check, the UptimeRobot monitor target, and what scripts/deploy.py,
+    # scripts/demo_health_check.py and CI hit, so it must never be renamed or
+    # go dark. This is a second, narrowly-scoped endpoint (demo/routes.py)
+    # that answers identically, purely so the launcher's own repeated poll
+    # has a path name of its own. Real-world reason: an ad-blocker/privacy
+    # extension's filter list blocked a literal "/healthz" fetch client-side
+    # (net::ERR_BLOCKED_BY_CLIENT, 2026-09-17) even though the service was
+    # healthy and reachable to anyone without that extension -- the visible
+    # symptom was the launcher wrongly reporting "didn't wake up in time" on
+    # a live demo. An unpredictable, non-keyword path can't already be on any
+    # filter list; if this one ever ends up on one too, rotate the value here
+    # (kept in sync with guide/demo/index.html's own hardcoded literal --
+    # GitHub Pages has no backend to read Settings from -- and with the
+    # matching setting in the sibling onboarding-wizard repo, which serves
+    # the other demo target the same launcher polls).
+    demo_launcher_ping_path: str = "/api/demo/ping-7f3a2"
 
     @field_validator("guide_base_url")
     @classmethod
