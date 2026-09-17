@@ -447,13 +447,6 @@ beyond what the code/tests/design docs it references already provide._
 - **Why parked:** No functional regression (the content is still correct and small), and `demo/app.py` already caches the rendered string at import time so there's no added CPU cost — this is a pure bandwidth/caching nicety on a low-traffic demo endpoint, not worth the extra code (compute + compare an ETag, handle `If-None-Match`) for this task's scope.
 - **Follow-up:** If demo bandwidth or load time ever becomes a real concern, compute an ETag (e.g. a hash of `_DEMO_JS_RENDERED`) once at import time alongside the rendered body and honor `If-None-Match` in `_demo_js()`.
 
-### [2026-09-17] Softcoded demo/guide URLs: `tests/test_guide_site.py`'s guide-host pin now indirectly depends on a configurable default
-
-- **Found during:** Same review as above.
-- **What:** `test_deploy_points_at_a_guide_page_that_exists` compares `scripts.deploy._GUIDE_URL` (now `settings.guide_base_url`-derived, previously a hardcoded literal) against a hardcoded `_EXPECTED_GUIDE_BASE`. Its own docstring's rationale ("a rename of the repo or its owner is expected to fail this test") predates `GUIDE_BASE_URL` being an operator-settable `.env.config` override — a fork that sets `GUIDE_BASE_URL` to its own Pages host in `.env.config` would now also fail this test, not just an actual rename.
-- **Why parked:** This only affects a fork's local checkout with a non-default `.env.config`; the shipped default is unchanged and CI never has `.env.config` (see `tests/test_config.py`'s skip-when-absent behavior), so this repo's own suite is unaffected. Judged not worth a fix loop for a fork-only edge case.
-- **Follow-up:** If this ever bites a real fork, reword the test's docstring to acknowledge the override case explicitly, or read the expected host from `.env.config`/`GUIDE_BASE_URL` when set instead of a bare literal.
-
 ### [2026-09-17] Softcoded demo/guide URLs: the four new `.env.config.example` entries are untested against `scripts/init_env.py`'s prompt flow
 
 - **Found during:** Same review as above.
