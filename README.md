@@ -10,10 +10,13 @@ the results as a single comment on the PR itself. Three specialists run in
 parallel, and later pushes edit that same comment in place rather than
 piling up new ones.
 
-**[See it work → live demo](https://tovtechorg.github.io/pr-review-bot/demo/?to=bot)**
-— a pull request getting reviewed, end to end, on mock data. No signup, no
-credentials, nothing real is called. Runs on free hosting, so the first load
-takes about a minute to wake up.
+**[Read the guide →](https://tovtechorg.github.io/pr-review-bot)**
+— start here to try the live demo or walk through setup.
+
+**[See it work → live demo](https://tovtechorg.github.io/pr-review-bot/demo/)**
+— walk through provisioning a bot, then watch it review a pull request end
+to end, on mock data. No signup, no credentials, nothing real is called.
+Runs on free hosting, so the first load takes about a minute to wake up.
 
 **[Deploy your own →](https://tovtechorg.github.io/pr-review-bot/setup/)**
 — the full setup guide, from a fresh clone to a first posted review comment.
