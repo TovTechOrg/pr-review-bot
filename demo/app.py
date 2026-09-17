@@ -232,6 +232,28 @@ async def _demo_request_context(request, call_next):
     return response
 
 
+# The launcher page (guide/demo/index.html, served from GitHub Pages) polls
+# this service's /healthz to know when a cold start has finished. That is a
+# cross-origin read, so the response needs an explicit allow header or the
+# browser hands the launcher an opaque failure indistinguishable from "still
+# booting" -- see the 2026-09-16 design's "The launcher" section.
+#
+# Scoped to /healthz by path, with no Access-Control-Allow-Credentials, so no
+# cookie ever rides on it and no other demo route becomes readable from
+# another origin. No `Vary: Origin`: the value is a constant that does not
+# depend on the request's own Origin, so there is nothing for a cache to vary
+# on.
+LAUNCHER_ORIGIN = "https://tovtechorg.github.io"
+
+
+@app.middleware("http")
+async def _allow_launcher_health_polling(request, call_next):
+    response = await call_next(request)
+    if request.url.path == "/healthz":
+        response.headers["access-control-allow-origin"] = LAUNCHER_ORIGIN
+    return response
+
+
 async def sweep_once() -> int:
     """Evict idle sessions and everything they own. Returns rows dropped."""
     evicted = demo_session.sweep()
