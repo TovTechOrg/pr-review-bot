@@ -1,0 +1,63 @@
+name: Demo health (advisory)
+
+# ADVISORY ONLY -- this workflow must never gate a push, a pull request, or a
+# deploy. The mechanism is the trigger list below: `schedule` and
+# `workflow_dispatch`, and nothing else. Because it never runs on a commit or
+# a PR it can never produce a check run against one, which in turn means it
+# cannot be selected as a required status check in branch protection -- the
+# property is structural, not a convention someone has to remember. Same
+# argument as .github/workflows/consumer-contract-lag.yml.
+#
+# A RED RUN HERE MEANS THE DEPLOYED DEMO IS BROKEN, which CI cannot see (CI
+# only ever checks build time). It is NOT covered by CLAUDE.md's "never push
+# with a red suite" rule. Exit 2 -- not 1 -- means the check could not run at
+# all, which is the case worth actual alarm.
+#
+# NO SECRETS, DELIBERATELY. The demo dashboard's credentials are demo/demo,
+# baked into Dockerfile.demo and already public in this repository. Adding a
+# secret here would create a real credential where the design has none.
+on:
+  schedule:
+    # Weekly, Mondays. Daily would wake the demo 7x a month for no extra
+    # signal, against a 750-instance-hour budget shared by four services;
+    # monthly would let a break sit through most of an article's life.
+    #
+    # :41 rather than :00 because GitHub's scheduler is heavily oversubscribed
+    # on the hour and delays runs queued there.
+    #
+    # GitHub disables scheduled workflows in a repository with no activity for
+    # 60 days. If this silently stops running, check that first.
+    - cron: "41 7 * * 1"
+  workflow_dispatch:
+
+# Least privilege: this job reads a public website and writes a step summary.
+permissions:
+  contents: read
+
+concurrency:
+  group: demo-health
+  cancel-in-progress: true
+
+jobs:
+  demo-health:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.0.1
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Install Chromium
+        run: uv run playwright install --with-deps chromium
+
+      # Waking the demo costs ~0.25 instance-hours (Render spins a free
+      # service down after ~15 idle minutes), i.e. ~1.1 h/month against the
+      # workspace's 750.
+      - name: Check the deployed demo
+        run: uv run python -m scripts.demo_health_check --summary "$GITHUB_STEP_SUMMARY"
