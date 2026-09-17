@@ -4,6 +4,8 @@ cookie-less login bypass.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 import main as _main  # noqa: F401
@@ -432,7 +434,12 @@ async def test_the_sweep_evicts_a_session_and_everything_it_owns():
     demo_store.reset()
     demo_github_app.reset()
 
-    demo_session.touch("gone", now=0.0)
+    # An offset from the real monotonic clock's *current* reading, not an
+    # absolute 0.0 -- time.monotonic()'s reference point is arbitrary (e.g.
+    # process/container start), so a fixed 0.0 is only "well past the TTL"
+    # when the reference point happens to predate it by more than an hour,
+    # which isn't guaranteed on a freshly started CI runner.
+    demo_session.touch("gone", now=time.monotonic() - demo_session.TTL_SECONDS - 1)
     token = demo_session.current_session.set("gone")
     try:
         demo_store.enqueue_or_update(
@@ -448,8 +455,9 @@ async def test_the_sweep_evicts_a_session_and_everything_it_owns():
 
     assert demo_store.dashboard_queue_counts()["pending"] == 1
 
-    # A real, monotonic-clock-independent expiry: touch() recorded now=0.0,
-    # so any current monotonic reading is already well past the TTL.
+    # sweep_once() has no `now` param, so it evicts against the real
+    # time.monotonic() reading -- the touch() call above backdated "gone"
+    # relative to that same clock, so it's already past the TTL by now.
     dropped = await demo_app.sweep_once()
 
     assert dropped == 2
