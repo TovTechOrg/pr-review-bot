@@ -6,6 +6,13 @@ the results as a single comment on the PR itself. Three specialists run in
 parallel, and later pushes edit that same comment in place rather than
 piling up new ones.
 
+!!! tip "Try it first"
+
+    **[Open the live demo →](demo/?to=bot)** — the engine reviewing a pull
+    request on mock data, or **[start from the setup wizard →](demo/)** to see
+    how a deployment gets provisioned. Free hosting, so the first load takes
+    about a minute.
+
 **Needs:** Python 3.12, [uv](https://docs.astral.sh/uv/), and a free
 [Supabase](https://supabase.com) Postgres project — budget about 30 minutes
 for a first working review.
