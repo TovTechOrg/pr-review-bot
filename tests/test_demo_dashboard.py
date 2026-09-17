@@ -5,6 +5,7 @@ cookie-less login bypass.
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import pytest
 
@@ -711,3 +712,23 @@ async def test_a_cookie_discarding_browsers_full_request_sequence_never_loops(
             assert xhr.status_code == 200, (
                 f"{path} 401'd -> dashboard.html redirects to /login -> loop"
             )
+
+
+def test_the_demo_script_builds_a_cta_pointing_at_the_real_wizard():
+    """The demo's closing move is sending a convinced reader to the real
+    thing. The URL is pinned because nothing else in this repo verifies it."""
+    script = (
+        Path(__file__).resolve().parent.parent / "demo" / "static" / "demo.js"
+    ).read_text(encoding="utf-8")
+    assert 'var REAL_WIZARD_URL = "https://onboarding-wizard-mk6m.onrender.com";' in script
+    assert "cta_clicked" in script
+
+
+def test_the_cta_warms_the_real_wizard_when_it_renders():
+    """Not from the launcher: that fires minutes earlier, and a free service
+    spins back down after ~15 idle minutes, so the instance-hours would be
+    spent on a service that is asleep again by the time anyone clicks."""
+    script = (
+        Path(__file__).resolve().parent.parent / "demo" / "static" / "demo.js"
+    ).read_text(encoding="utf-8")
+    assert 'REAL_WIZARD_URL + "/healthz"' in script
