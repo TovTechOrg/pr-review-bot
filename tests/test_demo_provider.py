@@ -63,6 +63,25 @@ def test_a_model_belonging_to_a_different_provider_falls_back_to_the_default():
     assert model == MODELS_BY_PROVIDER["vertex"][0]
 
 
+def test_gemini_catalog_matches_the_onboarding_wizards_offered_models():
+    """Regression for a 2026-09-18 end-to-end finding: picking gemini +
+    gemini-2.5-pro in the wizard's LLM frame silently reported
+    gemini-flash-latest in the demo dashboard's mocked review, because this
+    repo's demo/model_catalog.py hadn't caught up with onboarding-wizard's
+    own demo/content.py::GEMINI_MODELS (which already offered it). The two
+    lists can't share Python across the repo boundary, so this pins the
+    values by hand -- see demo/model_catalog.py's own docstring."""
+    from demo.model_catalog import MODELS_BY_PROVIDER
+
+    assert MODELS_BY_PROVIDER["gemini"] == [
+        "gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-pro",
+    ]
+    assert MODELS_BY_PROVIDER["groq"] == [
+        "llama-3.3-70b-versatile", "llama-3.1-8b-instant",
+    ]
+    assert MODELS_BY_PROVIDER["vertex"] == ["gemini-flash-latest", "gemini-2.5-flash"]
+
+
 def test_an_unrecognized_model_falls_back_to_the_priced_default():
     from demo.model_catalog import MODELS_BY_PROVIDER
 
