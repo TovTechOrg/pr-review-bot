@@ -152,6 +152,9 @@ The full suite is deterministic and network-free: every GitHub,
 LLM-provider, and webhook interaction is mocked. CI runs the same checks on
 every push.
 
+**Pushing alongside `onboarding-wizard`:** push here first, then run
+`uv run python -m scripts.update_bot_contract` there before committing.
+
 A handful of scripts under `scripts/manual_verify_*.py` make real calls
 against real accounts instead, each proving one specific integration (GitHub
 App auth, or one LLM provider's structured-output path).
