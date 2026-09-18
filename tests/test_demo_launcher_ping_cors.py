@@ -16,6 +16,9 @@ import github_app as _real_github_app
 import render_client as _real_render_client
 import specialists.base as _real_specialists_base
 from config import settings
+from providers import catalog as _real_catalog
+from providers import credentials as _real_credentials
+from providers import vertex_credentials as _real_vertex_credentials
 from review_queue import store as _real_store
 
 # Mirrors demo/app.py's own LAUNCHER_ORIGIN derivation. NOT `from demo.app
@@ -35,10 +38,20 @@ def _undo_global_rebinding(monkeypatch):
     """Identical to tests/test_demo_dashboard.py's fixture of the same name --
     importing demo.app runs install_mocks() at import time and permanently
     mutates the real, shared module objects via plain setattr."""
-    for module in (_real_github_app, _real_store, _real_render_client):
+    for module in (
+        _real_github_app, _real_store, _real_render_client,
+        _real_catalog, _real_credentials, _real_vertex_credentials,
+    ):
         for name in dir(module):
             if not name.startswith("_"):
                 monkeypatch.setattr(module, name, getattr(module, name))
+    # _app_jwt_client_for is leading-underscore, so the public-only loop
+    # above skips it -- but install_mocks() rebinds it too (the
+    # github_app-family Guided-setup Validate call), so it needs the same
+    # explicit restoration.
+    monkeypatch.setattr(
+        _real_github_app, "_app_jwt_client_for", _real_github_app._app_jwt_client_for
+    )
     monkeypatch.setattr(
         _real_specialists_base, "get_provider", _real_specialists_base.get_provider
     )

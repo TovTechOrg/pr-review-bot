@@ -41,6 +41,37 @@ def test_every_resolved_pair_is_priced(requested):
     assert estimate_cost_usd(provider, model, 1000, 100) is not None
 
 
+def test_a_requested_model_in_the_providers_own_catalog_is_honored():
+    """The wizard's LLM frame lets a reader pick a SPECIFIC model, not just a
+    provider -- demo_provider_and_model must report that exact pick back, or
+    the mocked review's provider/model line lies about what was chosen."""
+    from demo.model_catalog import MODELS_BY_PROVIDER
+
+    for provider, models in MODELS_BY_PROVIDER.items():
+        for model in models:
+            assert demo_provider_and_model(provider, model) == (provider, model)
+
+
+def test_a_model_belonging_to_a_different_provider_falls_back_to_the_default():
+    """A gemini model name requested for vertex (or any other mismatch) must
+    not be reported/priced as if vertex had actually run it."""
+    from demo.model_catalog import MODELS_BY_PROVIDER
+
+    gemini_only_model = MODELS_BY_PROVIDER["gemini"][0]
+    provider, model = demo_provider_and_model("vertex", gemini_only_model)
+    assert provider == "vertex"
+    assert model == MODELS_BY_PROVIDER["vertex"][0]
+
+
+def test_an_unrecognized_model_falls_back_to_the_priced_default():
+    from demo.model_catalog import MODELS_BY_PROVIDER
+
+    provider, model = demo_provider_and_model("groq", "not-a-real-model")
+    assert provider == "groq"
+    assert model == MODELS_BY_PROVIDER["groq"][0]
+    assert estimate_cost_usd(provider, model, 1000, 100) is not None
+
+
 def test_demo_diff_headers_parse_correctly_and_all_files_appear():
     # Regression test for headers with stray leading spaces or typos that prevent
     # diff_utils.annotate_and_cap from correctly detecting file boundaries and

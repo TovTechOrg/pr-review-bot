@@ -3,8 +3,9 @@
 A public link must not grow the process's memory without bound, and one
 reader must never see another's review.
 
-Two ContextVars carry the request-scoped identity of "who is this, and which
-provider did they ask for" down into demo/store.py's ``enqueue_or_update``.
+Three ContextVars carry the request-scoped identity of "who is this, and
+which provider/model did they ask for" down into demo/store.py's
+``enqueue_or_update``.
 That works only because the demo's self-delivery (demo/trigger.py) POSTs to
 its own ``/webhook`` over an in-process ASGI transport, INSIDE the bootstrap
 request's own async context -- a child task inherits the context it was
@@ -38,6 +39,9 @@ current_session: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 )
 current_provider: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "demo_current_provider", default=None
+)
+current_model: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "demo_current_model", default=None
 )
 
 

@@ -83,3 +83,13 @@ def react_eyes_to_pr(repo: str, pr: int) -> None:
 
 def discover_and_verify_installation_id(expected: int) -> int:
     return 1
+
+
+def _app_jwt_client_for(app_id: int, private_key_b64: str):
+    """Never dereferenced: discover_installation_id_for_app below ignores
+    whatever `client` it's handed in the demo."""
+    return None
+
+
+def discover_installation_id_for_app(client=None) -> int:
+    return 1001

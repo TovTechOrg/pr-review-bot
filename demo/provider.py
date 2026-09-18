@@ -13,22 +13,37 @@ import json
 from pydantic import BaseModel
 
 from demo.content import FINDINGS_BY_SCHEMA
+from demo.model_catalog import MODELS_BY_PROVIDER
 from providers.base import LLMResponse
 
-# Only pairs priced in providers/pricing.py; an unpriced pair renders a blank
-# cost in the comment.
-_PRICED = {
-    "gemini": "gemini-flash-latest",
-    "vertex": "gemini-flash-latest",
-    "groq": "llama-3.3-70b-versatile",
-}
+# The priced default per provider (providers/pricing.py); used whenever no
+# model was requested, or the requested one doesn't belong to that
+# provider's demo/model_catalog.py catalog. An unpriced pair (the catalog's
+# second entry) renders a blank cost in the comment -- see
+# demo/model_catalog.py's own docstring for why that's preferred over a
+# fabricated rate.
+_PRICED = {provider: models[0] for provider, models in MODELS_BY_PROVIDER.items()}
 _DEFAULT_PROVIDER = "groq"
 
 
-def demo_provider_and_model(requested: str | None) -> tuple[str, str]:
-    """Resolve a reader's provider choice to a priced (provider, model) pair."""
-    provider = requested if requested in _PRICED else _DEFAULT_PROVIDER
-    return provider, _PRICED[provider]
+def demo_provider_and_model(
+    requested_provider: str | None, requested_model: str | None = None
+) -> tuple[str, str]:
+    """Resolve a reader's provider/model choice to a (provider, model) pair.
+
+    `requested_model` is honored only when it belongs to the RESOLVED
+    provider's own catalog -- a model name that names another provider's
+    model, or an unrecognized one, falls back to that provider's priced
+    default rather than being reported/priced as something MockProvider
+    never actually "ran".
+    """
+    provider = requested_provider if requested_provider in _PRICED else _DEFAULT_PROVIDER
+    model = (
+        requested_model
+        if requested_model in MODELS_BY_PROVIDER[provider]
+        else _PRICED[provider]
+    )
+    return provider, model
 
 
 class MockProvider:

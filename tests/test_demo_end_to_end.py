@@ -7,6 +7,9 @@ import github_app as _real_github_app
 import render_client as _real_render_client
 import specialists.base as _real_specialists_base
 from config import settings
+from providers import catalog as _real_catalog
+from providers import credentials as _real_credentials
+from providers import vertex_credentials as _real_vertex_credentials
 from review_queue import store as _real_store
 
 
@@ -23,6 +26,13 @@ def _undo_global_rebinding(monkeypatch):
     for name in dir(_real_github_app):
         if not name.startswith("_"):
             monkeypatch.setattr(_real_github_app, name, getattr(_real_github_app, name))
+    # _app_jwt_client_for is leading-underscore, so the public-only loop
+    # above skips it -- but install_mocks() rebinds it too (the
+    # github_app-family Guided-setup Validate call), so it needs the same
+    # explicit restoration.
+    monkeypatch.setattr(
+        _real_github_app, "_app_jwt_client_for", _real_github_app._app_jwt_client_for
+    )
     for name in dir(_real_store):
         if not name.startswith("_"):
             monkeypatch.setattr(_real_store, name, getattr(_real_store, name))
@@ -33,6 +43,14 @@ def _undo_global_rebinding(monkeypatch):
     for name in dir(_real_render_client):
         if not name.startswith("_"):
             monkeypatch.setattr(_real_render_client, name, getattr(_real_render_client, name))
+    # Same leak, same fix, for the three modules dashboard/environment.py's
+    # Guided-setup/config-table credential-validate calls read: without this,
+    # dashboard/tests/test_environment.py runs against demo/providers_mock.py's
+    # always-succeeds catalog for the rest of the worker's life.
+    for module in (_real_catalog, _real_credentials, _real_vertex_credentials):
+        for name in dir(module):
+            if not name.startswith("_"):
+                monkeypatch.setattr(module, name, getattr(module, name))
     monkeypatch.setattr(
         _real_specialists_base, "get_provider", _real_specialists_base.get_provider
     )
@@ -172,6 +190,105 @@ async def test_two_sessions_get_their_own_review_and_their_own_provider(
     assert reviews_b[0]["provider"] == "groq"
     assert reviews_a[0]["pr_number"] != reviews_b[0]["pr_number"]
     assert "_session" not in reviews_a[0], "the tag is internal, never rendered"
+
+
+async def test_a_requested_model_survives_bootstrap_through_to_the_rendered_review(
+    demo_env, demo_chrome_installed
+):
+    """The bug this closes: a reader's wizard model pick used to reach
+    demo/routes.py::bootstrap() (if forwarded at all) and then vanish --
+    demo_provider_and_model() ignored it, and even if it hadn't, nothing
+    threaded a per-ticket model through demo/store.py's ticket-context side
+    table into providers/active_model.py's cache, which orchestrator.py's
+    _active_model() (not MockProvider directly) is what the finished
+    review's `.model` field actually reports/prices from. Driven through the
+    real webhook -> dispatcher -> dashboard path, same discipline as
+    test_two_sessions_get_their_own_review_and_their_own_provider above."""
+    from datetime import datetime, timezone
+
+    from dashboard import auth
+    from demo import app as demo_app
+    from demo import session as demo_session
+    from demo import store as demo_store
+    from demo.model_catalog import MODELS_BY_PROVIDER
+    from review_queue import dispatcher
+    from webhook import reset_dedup_cache
+
+    demo_app.install_mocks()
+    app = demo_app.app
+    demo_store.reset()
+    demo_session.reset()
+    reset_dedup_cache()
+
+    token = auth.create_session_token(remember=False)
+    requested_model = MODELS_BY_PROVIDER["gemini"][1]
+    assert requested_model != MODELS_BY_PROVIDER["gemini"][0], (
+        "the test must request the NON-default model to prove it round-trips"
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test",
+        cookies={auth.SESSION_COOKIE_NAME: token},
+    ) as client:
+        bootstrap = await client.get(
+            f"/api/demo/bootstrap?provider=gemini&model={requested_model}"
+        )
+        assert bootstrap.status_code == 200
+        assert bootstrap.json() == {
+            "demo": True, "provider": "gemini", "model": requested_model,
+            "cookieless": False,
+        }
+
+        result = await dispatcher.process_next_due(datetime.now(timezone.utc))
+        assert result.action == "ran"
+
+        dashboard_response = await client.get("/api/dashboard")
+
+    reviews = dashboard_response.json()["reviews"]
+    assert len(reviews) == 1
+    assert reviews[0]["provider"] == "gemini"
+    assert reviews[0]["model"] == requested_model
+
+
+async def test_an_invalid_requested_model_falls_back_to_the_priced_default(
+    demo_env, demo_chrome_installed
+):
+    from datetime import datetime, timezone
+
+    from dashboard import auth
+    from demo import app as demo_app
+    from demo import session as demo_session
+    from demo import store as demo_store
+    from demo.model_catalog import MODELS_BY_PROVIDER
+    from review_queue import dispatcher
+    from webhook import reset_dedup_cache
+
+    demo_app.install_mocks()
+    app = demo_app.app
+    demo_store.reset()
+    demo_session.reset()
+    reset_dedup_cache()
+
+    token = auth.create_session_token(remember=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test",
+        cookies={auth.SESSION_COOKIE_NAME: token},
+    ) as client:
+        bootstrap = await client.get(
+            "/api/demo/bootstrap?provider=groq&model=not-a-real-model"
+        )
+        assert bootstrap.status_code == 200
+        assert bootstrap.json()["model"] == MODELS_BY_PROVIDER["groq"][0]
+
+        result = await dispatcher.process_next_due(datetime.now(timezone.utc))
+        assert result.action == "ran"
+
+        dashboard_response = await client.get("/api/dashboard")
+
+    reviews = dashboard_response.json()["reviews"]
+    assert reviews[0]["model"] == MODELS_BY_PROVIDER["groq"][0]
 
 
 async def test_delivery_to_rendered_review(demo_env):

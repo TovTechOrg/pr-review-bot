@@ -19,7 +19,7 @@ import httpx
 
 from config import settings
 from demo.content import DEMO_HEAD_SHA, DEMO_PR_NUMBER, DEMO_PR_TITLE, DEMO_REPO
-from demo.session import SHARED_SESSION_ID, current_provider, current_session
+from demo.session import SHARED_SESSION_ID, current_model, current_provider, current_session
 
 _SHARED_SESSION = SHARED_SESSION_ID
 
@@ -63,10 +63,12 @@ def build_payload(session_id: str | None = None) -> dict:
     }
 
 
-async def ensure_review_for_session(session_id: str | None, provider: str | None) -> None:
+async def ensure_review_for_session(
+    session_id: str | None, provider: str | None, model: str | None = None
+) -> None:
     """POST a signed delivery to our own /webhook. Safe to call on every load.
 
-    The two ContextVars are set around the POST rather than left to the
+    The three ContextVars are set around the POST rather than left to the
     caller: the whole point is that they are readable by demo/store.py's
     `enqueue_or_update`, which runs inside this request's own async context
     (the transport below is in-process ASGI -- no socket, no second event
@@ -86,6 +88,7 @@ async def ensure_review_for_session(session_id: str | None, provider: str | None
 
     session_token = current_session.set(session_id)
     provider_token = current_provider.set(provider)
+    model_token = current_model.set(model)
     try:
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://demo") as client:
@@ -102,3 +105,4 @@ async def ensure_review_for_session(session_id: str | None, provider: str | None
     finally:
         current_session.reset(session_token)
         current_provider.reset(provider_token)
+        current_model.reset(model_token)

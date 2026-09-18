@@ -22,30 +22,33 @@ _ids = itertools.count(1)
 _tickets: dict[int, Ticket] = {}
 _reviews: list[dict] = []
 
-# ticket id -> (session id, provider) captured AT ENQUEUE TIME from the
-# request-scoped ContextVars in demo/session.py. The ticket row itself is a
-# real review_queue.store.Ticket (a frozen-shaped dataclass with 17 fields
-# and no room for demo-only ones), so the pair lives in this side table
-# keyed by the same id.
+# ticket id -> (session id, provider, model) captured AT ENQUEUE TIME from
+# the request-scoped ContextVars in demo/session.py. The ticket row itself is
+# a real review_queue.store.Ticket (a frozen-shaped dataclass with 17 fields
+# and no room for demo-only ones), so the triple lives in this side table
+# keyed by the same id. `model` is None whenever the visitor's handoff URL
+# carried no (valid) model -- get_all_slot_configs() then falls back to
+# demo.provider._PRICED's default for that provider, same as it always did.
 #
 # This is the hop the ContextVars cannot make on their own: enqueue happens
 # inside the visitor's own bootstrap request (demo/trigger.py's in-process
-# ASGI self-delivery), but the review that reports the provider and gets
-# tagged with the session runs much later, in review_queue/dispatcher.py's
+# ASGI self-delivery), but the review that reports the provider/model and
+# gets tagged with the session runs much later, in review_queue/dispatcher.py's
 # `run_forever()` background task -- created once in main.py's lifespan,
 # in a context that predates every request. A ContextVar set in a request
 # can never reach it.
-_ticket_context: dict[int, tuple[str | None, str]] = {}
+_ticket_context: dict[int, tuple[str | None, str, str | None]] = {}
 
-# The (session, provider) pair of the ticket the dispatcher is processing
-# RIGHT NOW, published by claim_next_due and read by get_provider_override/
-# record_review. A plain module-level variable, not a ContextVar, on
-# purpose: review_queue/dispatcher.py's loop is strictly serial (run_forever
-# awaits one process_next_due at a time, which claims at most one ticket per
-# call), so exactly one ticket is ever in flight. Cleared the moment a claim
-# finds nothing due, so a later dashboard read doesn't report the last
-# visitor's choice as the active provider.
-_processing: tuple[str | None, str] | None = None
+# The (session, provider, model) triple of the ticket the dispatcher is
+# processing RIGHT NOW, published by claim_next_due and read by
+# get_provider_override/get_all_slot_configs/record_review. A plain
+# module-level variable, not a ContextVar, on purpose: review_queue/
+# dispatcher.py's loop is strictly serial (run_forever awaits one
+# process_next_due at a time, which claims at most one ticket per call), so
+# exactly one ticket is ever in flight. Cleared the moment a claim finds
+# nothing due, so a later dashboard read doesn't report the last visitor's
+# choice as the active provider/model.
+_processing: tuple[str | None, str, str | None] | None = None
 
 # Rolling caps. /api/demo/bootstrap is unauthenticated and publicly
 # loopable, so eviction cannot depend only on the TTL sweep noticing an idle
@@ -91,16 +94,20 @@ def reset() -> None:
     _processing = None
 
 
-def _request_context() -> tuple[str | None, str]:
-    """(session, provider) for the request this call is running inside.
+def _request_context() -> tuple[str | None, str, str | None]:
+    """(session, provider, model) for the request this call is running inside.
 
     Imported lazily: demo.session imports dashboard.auth, and this module is
     imported from demo/app.py before main (and therefore the dashboard) is
     pulled in.
     """
-    from demo.session import current_provider, current_session
+    from demo.session import current_model, current_provider, current_session
 
-    return current_session.get(), current_provider.get() or _ACTIVE_PROVIDER
+    return (
+        current_session.get(),
+        current_provider.get() or _ACTIVE_PROVIDER,
+        current_model.get(),
+    )
 
 
 def _trim() -> None:
@@ -128,7 +135,7 @@ def evict_sessions(session_ids) -> int:
         return 0
     before = len(_reviews) + len(_tickets)
     _reviews = [row for row in _reviews if row.get("_session") not in stale]
-    for ticket_id, (session, _provider) in list(_ticket_context.items()):
+    for ticket_id, (session, _provider, _model) in list(_ticket_context.items()):
         if session in stale:
             _tickets.pop(ticket_id, None)
             _ticket_context.pop(ticket_id, None)
@@ -188,8 +195,8 @@ def enqueue_or_update(
     byte-for-byte the real store's, and session scoping is expressed where a
     real deployment would express it: in the identity of the pull request.
 
-    The visitor's (session, provider) pair is captured here, from the
-    request-scoped ContextVars, because this is the last moment it is
+    The visitor's (session, provider, model) triple is captured here, from
+    the request-scoped ContextVars, because this is the last moment it is
     reachable -- see `_ticket_context`'s comment above.
     """
     for existing in _tickets.values():
@@ -197,9 +204,9 @@ def enqueue_or_update(
             existing.head_sha = head_sha
             existing.status = "pending"
             existing.updated_at = now
-            # A reader who comes back with a different ?provider= gets the
-            # new choice, same as a re-push re-runs against whatever is
-            # configured now.
+            # A reader who comes back with a different ?provider=/&model=
+            # gets the new choice, same as a re-push re-runs against
+            # whatever is configured now.
             _ticket_context[existing.id] = _request_context()
             return existing.id
 
@@ -231,7 +238,7 @@ def enqueue_or_update(
 
 
 def claim_next_due(now: str) -> Ticket | None:
-    """Claim one pending ticket AND publish its (session, provider) pair.
+    """Claim one pending ticket AND publish its (session, provider, model) triple.
 
     Publishing here is what carries the visitor's choice across the boundary
     a ContextVar cannot cross: everything below this point runs in the
@@ -325,8 +332,21 @@ def get_all_slot_configs() -> dict[tuple[str, int], dict]:
     All three providers are returned, not just the active one: the active
     provider is per-ticket now, and the dispatcher's own per-claim refresh
     (_refresh_slot_config) populates one cache shared by whichever provider
-    that ticket resolves to."""
+    that ticket resolves to.
+
+    The active provider's model is overridden from `_processing`'s own
+    third element when the in-flight ticket asked for a specific one (the
+    wizard's LLM frame model pick, carried through demo/routes.py::bootstrap
+    -> demo/trigger.py -> the ContextVars -> here) -- every other provider
+    keeps its `_PRICED` default, since nothing this ticket asked for applies
+    to them."""
     from demo.provider import _PRICED
+
+    models = dict(_PRICED)
+    if _processing is not None:
+        _, active_provider, active_model = _processing
+        if active_model:
+            models[active_provider] = active_model
 
     return {
         (provider, 0): {
@@ -334,7 +354,7 @@ def get_all_slot_configs() -> dict[tuple[str, int], dict]:
             "vertex_gcp_project": None,
             "vertex_gcp_location": None,
         }
-        for provider, model in _PRICED.items()
+        for provider, model in models.items()
     }
 
 

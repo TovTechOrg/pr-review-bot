@@ -4,6 +4,9 @@ import github_app as _real_github_app
 import render_client as _real_render_client
 import specialists.base as _real_specialists_base
 from config import settings
+from providers import catalog as _real_catalog
+from providers import credentials as _real_credentials
+from providers import vertex_credentials as _real_vertex_credentials
 from review_queue import store as _real_store
 
 
@@ -29,6 +32,13 @@ def _undo_global_rebinding(monkeypatch):
     for name in dir(_real_github_app):
         if not name.startswith("_"):
             monkeypatch.setattr(_real_github_app, name, getattr(_real_github_app, name))
+    # _app_jwt_client_for is leading-underscore, so the public-only loop
+    # above skips it -- but install_mocks() rebinds it too (the
+    # github_app-family Guided-setup Validate call), so it needs the same
+    # explicit restoration.
+    monkeypatch.setattr(
+        _real_github_app, "_app_jwt_client_for", _real_github_app._app_jwt_client_for
+    )
     for name in dir(_real_store):
         if not name.startswith("_"):
             monkeypatch.setattr(_real_store, name, getattr(_real_store, name))
@@ -39,6 +49,14 @@ def _undo_global_rebinding(monkeypatch):
     for name in dir(_real_render_client):
         if not name.startswith("_"):
             monkeypatch.setattr(_real_render_client, name, getattr(_real_render_client, name))
+    # Same leak, same fix, for the three modules dashboard/environment.py's
+    # Guided-setup/config-table credential-validate calls read: without this,
+    # dashboard/tests/test_environment.py runs against demo/providers_mock.py's
+    # always-succeeds catalog for the rest of the worker's life.
+    for module in (_real_catalog, _real_credentials, _real_vertex_credentials):
+        for name in dir(module):
+            if not name.startswith("_"):
+                monkeypatch.setattr(module, name, getattr(module, name))
     monkeypatch.setattr(
         _real_specialists_base, "get_provider", _real_specialists_base.get_provider
     )

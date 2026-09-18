@@ -14,6 +14,9 @@ import github_app as _real_github_app
 import render_client as _real_render_client
 import specialists.base as _real_specialists_base
 from config import settings
+from providers import catalog as _real_catalog
+from providers import credentials as _real_credentials
+from providers import vertex_credentials as _real_vertex_credentials
 from review_queue import store as _real_store
 
 # Importing plain `main` above, at module import time (during collection),
@@ -54,6 +57,13 @@ def _undo_global_rebinding(monkeypatch):
     for name in dir(_real_github_app):
         if not name.startswith("_"):
             monkeypatch.setattr(_real_github_app, name, getattr(_real_github_app, name))
+    # _app_jwt_client_for is leading-underscore, so the public-only loop
+    # above skips it -- but install_mocks() rebinds it too (the
+    # github_app-family Guided-setup Validate call), so it needs the same
+    # explicit restoration.
+    monkeypatch.setattr(
+        _real_github_app, "_app_jwt_client_for", _real_github_app._app_jwt_client_for
+    )
     for name in dir(_real_store):
         if not name.startswith("_"):
             monkeypatch.setattr(_real_store, name, getattr(_real_store, name))
@@ -64,6 +74,14 @@ def _undo_global_rebinding(monkeypatch):
     for name in dir(_real_render_client):
         if not name.startswith("_"):
             monkeypatch.setattr(_real_render_client, name, getattr(_real_render_client, name))
+    # Same leak, same fix, for the three modules dashboard/environment.py's
+    # Guided-setup/config-table credential-validate calls read: without this,
+    # dashboard/tests/test_environment.py runs against demo/providers_mock.py's
+    # always-succeeds catalog for the rest of the worker's life.
+    for module in (_real_catalog, _real_credentials, _real_vertex_credentials):
+        for name in dir(module):
+            if not name.startswith("_"):
+                monkeypatch.setattr(module, name, getattr(module, name))
     monkeypatch.setattr(
         _real_specialists_base, "get_provider", _real_specialists_base.get_provider
     )
@@ -205,6 +223,126 @@ async def test_environment_panel_answers_without_a_network_call(
     # module drives is present and true for a protected key.
     assert next(r for r in body["vars"] if r["key"] == "DATABASE_URL")["protected"] is True
     assert set(body["available_key_slots"]) == {"gemini", "groq", "vertex"}
+
+
+async def test_guided_setup_validate_answers_without_a_live_provider_call(
+    demo_env, demo_chrome_installed
+):
+    """Before install_mocks() rebound providers.catalog too, this endpoint
+    called the real catalog.list_gemini_models(api_key) with whatever the
+    reader typed in -- a live outbound call to Gemini/Groq/Vertex on a
+    service that deliberately holds no real credential. Mocked success with
+    the demo's own model catalog (demo/model_catalog.py) is what makes the
+    Guided-setup dialog's model dropdown non-empty in the demo."""
+    from httpx import ASGITransport, AsyncClient
+
+    from dashboard import auth
+    from demo import app as demo_app
+    from demo.model_catalog import MODELS_BY_PROVIDER
+
+    demo_app.install_mocks()
+    transport = ASGITransport(app=demo_app.app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        cookies={auth.SESSION_COOKIE_NAME: auth.create_session_token(remember=False)},
+    ) as client:
+        response = await client.post(
+            "/api/environment/credential/gemini/validate",
+            data={"api_key": "demo-api-key-not-real", "slot": 0},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert set(body["models"]) == set(MODELS_BY_PROVIDER["gemini"])
+
+
+async def test_guided_setup_validate_mocks_vertex_and_github_app_too(
+    demo_env, demo_chrome_installed
+):
+    """The other two credential families' Validate calls also reach real
+    external services when unmocked (Vertex via google-genai, github_app via
+    a real App JWT + installation lookup) -- both mocked the same way."""
+    import json
+
+    from httpx import ASGITransport, AsyncClient
+
+    from dashboard import auth
+    from demo import app as demo_app
+    from demo.model_catalog import MODELS_BY_PROVIDER
+
+    demo_app.install_mocks()
+    transport = ASGITransport(app=demo_app.app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        cookies={auth.SESSION_COOKIE_NAME: auth.create_session_token(remember=False)},
+    ) as client:
+        vertex_response = await client.post(
+            "/api/environment/credential/vertex/validate",
+            data={"slot": 0},
+            files={
+                "credential_file": (
+                    "demo-service-account.json",
+                    json.dumps({"project_id": "demo-project"}),
+                    "application/json",
+                )
+            },
+        )
+        github_response = await client.post(
+            "/api/environment/credential/github_app/validate",
+            data={"app_id": 123456},
+            files={
+                "credential_file": (
+                    "demo-github-app.pem",
+                    "-----BEGIN RSA PRIVATE KEY-----\ndemo\n-----END RSA PRIVATE KEY-----\n",
+                    "application/x-pem-file",
+                )
+            },
+        )
+
+    assert vertex_response.status_code == 200
+    vertex_body = vertex_response.json()
+    assert vertex_body["ok"] is True
+    assert set(vertex_body["models"]) == set(MODELS_BY_PROVIDER["vertex"])
+
+    assert github_response.status_code == 200
+    github_body = github_response.json()
+    assert github_body["ok"] is True
+    assert github_body["installation_id"] is not None
+
+
+async def test_config_table_model_list_answers_with_no_credential_configured(
+    demo_env, demo_chrome_installed
+):
+    """The config table's per-row model list resolves the slot's STORED
+    credential (providers.credentials.resolve / vertex_credentials.
+    resolve_service_account_info), not one freshly typed in -- and the demo
+    service's real GEMINI_API_KEY/GROQ_API_KEY/VERTEX_GCP_SERVICE_ACCOUNT_KEY
+    are unset (config.py's own defaults), so without mocking those two
+    resolvers too this short-circuits on "no_credential_configured" before
+    ever reaching the catalog, leaving the config table's model dropdown
+    permanently empty."""
+    from httpx import ASGITransport, AsyncClient
+
+    from dashboard import auth
+    from demo import app as demo_app
+    from demo.model_catalog import MODELS_BY_PROVIDER
+
+    demo_app.install_mocks()
+    transport = ASGITransport(app=demo_app.app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        cookies={auth.SESSION_COOKIE_NAME: auth.create_session_token(remember=False)},
+    ) as client:
+        for family in ("gemini", "groq", "vertex"):
+            response = await client.get(f"/api/environment/credential/{family}/models")
+            assert response.status_code == 200
+            body = response.json()
+            assert body["ok"] is True, (family, body)
+            assert set(body["models"]) == set(MODELS_BY_PROVIDER[family])
 
 
 def test_cookieless_request_has_no_session_id():

@@ -98,6 +98,87 @@
     pass.readOnly = true;
   }
 
+  // ---------------------------------------------------------------------
+  // Environment tab: Guided setup dialog credential mocking.
+  //
+  // Mirrors onboarding-wizard/demo/static/demo.js's mockAndLockFileInput/
+  // lockTextInputReadOnly pattern exactly. The backend's own Validate/Apply
+  // calls are separately mocked (demo/providers_mock.py, wired in
+  // demo/app.py::install_mocks()) to always succeed regardless of what's in
+  // these fields -- this only makes the fields themselves look pre-filled
+  // and non-interactive, the same way the wizard's credential fields do,
+  // rather than inviting a reader to type a real key into a public demo.
+  // ---------------------------------------------------------------------
+
+  const DEMO_LLM_API_KEY = "demo-api-key-not-real";
+  const DEMO_GITHUB_APP_ID = "123456";
+  const DEMO_VERTEX_SERVICE_ACCOUNT_JSON = JSON.stringify({
+    type: "service_account",
+    project_id: "demo-project",
+    client_email: "demo@demo-project.iam.gserviceaccount.com",
+  });
+  // Structurally PEM-shaped (so nothing downstream chokes on the format)
+  // but not a real key -- same discipline as demo/render_client.py's
+  // synthetic values.
+  const DEMO_GITHUB_APP_PEM =
+    "-----BEGIN RSA PRIVATE KEY-----\ndemo-not-a-real-key\n-----END RSA PRIVATE KEY-----\n";
+
+  // A file input's .value can never be assigned (every browser forbids it);
+  // a DataTransfer is the supported way to hand it a synthetic file, and the
+  // change event must be dispatched explicitly since assigning .files fires
+  // none on its own. Deliberately fires "change" only, not "input" --
+  // dashboard.html's own #guidedModalBody "input" listener would otherwise
+  // treat this as an edit and reset the (not-yet-started) validation state.
+  function mockAndLockFileInput(inputEl, filename, mimeType, body) {
+    if (!inputEl) return;
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([body], filename, { type: mimeType }));
+    inputEl.files = transfer.files;
+    inputEl.dispatchEvent(new Event("change", { bubbles: true }));
+    inputEl.disabled = true;
+  }
+
+  function lockTextInputReadOnly(inputEl, value) {
+    if (!inputEl) return;
+    inputEl.value = value;
+    // readonly, not disabled: disabled inputs are excluded from FormData,
+    // and the Guided-setup Validate handler reads these via .value.
+    inputEl.readOnly = true;
+  }
+
+  function mockGuidedSetupInputs(family) {
+    if (family === "gemini" || family === "groq") {
+      lockTextInputReadOnly(document.getElementById("guidedApiKey"), DEMO_LLM_API_KEY);
+    } else if (family === "vertex") {
+      mockAndLockFileInput(
+        document.getElementById("guidedCredentialFile"),
+        "demo-service-account.json", "application/json", DEMO_VERTEX_SERVICE_ACCOUNT_JSON
+      );
+    } else if (family === "github_app") {
+      lockTextInputReadOnly(document.getElementById("guidedAppId"), DEMO_GITHUB_APP_ID);
+      mockAndLockFileInput(
+        document.getElementById("guidedCredentialFile"),
+        "demo-github-app.pem", "application/x-pem-file", DEMO_GITHUB_APP_PEM
+      );
+    }
+  }
+
+  // Registered here, not moved into dashboard.html: this file's script tag
+  // is the LAST one in dashboard.html, so a second "change" listener added
+  // here always runs AFTER dashboard.html's own -- which is what rebuilds
+  // #guidedModalBody's innerHTML for the newly picked family. Listening for
+  // the same event dashboard.html already listens for, rather than a
+  // MutationObserver, is enough because listeners fire in registration
+  // order (documented at the top of this file for the cookieless-fetch
+  // patch, which relies on the same ordering guarantee).
+  function wireGuidedSetupMocks() {
+    const select = document.getElementById("guidedSetupSelect");
+    if (!select) return;
+    select.addEventListener("change", (event) => {
+      mockGuidedSetupInputs(event.target.value);
+    });
+  }
+
   // The server hands every response a plain, JS-readable probe cookie. If it
   // is missing by the time the login page has rendered, this browser cannot
   // store cookies at all (LinkedIn's in-app browser, some private modes) --
@@ -228,8 +309,15 @@
     // authenticating and the review reporting it is not generated until
     // after. login.html carries the parameter through its own redirect.
     if (isLoginPage()) return;
-    const provider = new URLSearchParams(location.search).get("provider");
-    fetch("/api/demo/bootstrap" + (provider ? "?provider=" + provider : ""));
+    const params = new URLSearchParams(location.search);
+    const provider = params.get("provider");
+    const model = params.get("model");
+    const bootstrapParams = new URLSearchParams();
+    if (provider) bootstrapParams.set("provider", provider);
+    if (model) bootstrapParams.set("model", model);
+    const bootstrapQuery = bootstrapParams.toString();
+    fetch("/api/demo/bootstrap" + (bootstrapQuery ? "?" + bootstrapQuery : ""));
     addClosingCta();
+    wireGuidedSetupMocks();
   });
 })();

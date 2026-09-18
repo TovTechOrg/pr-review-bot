@@ -24,11 +24,15 @@ from urllib.parse import urlsplit
 import github_app as real_github_app
 import render_client as real_render_client
 from fastapi import Response
+from providers import catalog as real_catalog
+from providers import credentials as real_credentials
+from providers import vertex_credentials as real_vertex_credentials
 from review_queue import store as real_store
 
 from config import settings
 
 from demo import github_app as demo_github_app
+from demo import providers_mock as demo_providers_mock
 from demo import render_client as demo_render_client
 from demo import session as demo_session
 from demo import store as demo_store
@@ -40,6 +44,11 @@ _MOCKED_GITHUB = (
     "fetch_pr_diff", "upsert_comment", "append_review_footnote",
     "append_schedule_notice", "clear_schedule_notice", "react_eyes_to_pr",
     "discover_and_verify_installation_id",
+    # dashboard/environment.py's github_app guided-setup Validate calls these
+    # two directly on the module object -- without this rebinding it makes a
+    # real GitHub App JWT/installation-discovery call on a service that has
+    # no real GitHub App credential.
+    "_app_jwt_client_for", "discover_installation_id_for_app",
 )
 
 # dashboard/environment.py calls all five on the module object. Without this
@@ -51,6 +60,21 @@ _MOCKED_RENDER = (
     "find_service_id", "env_vars", "push_env_var", "delete_env_var", "trigger_deploy",
 )
 
+# dashboard/environment.py's Guided-setup Validate/Apply and the config
+# table's per-row Validate all call these on the module objects too. Without
+# this rebinding, the Environment tab's credential-validate/model-catalog
+# calls either 401 against a real provider with a typed-in demo value, or
+# (for the config table's slot-based lookups) short-circuit on
+# "no_credential_configured" since the demo service's real *_API_KEY/
+# VERTEX_GCP_SERVICE_ACCOUNT_KEY env vars are unset -- either way, empty
+# model dropdowns on a page whose premise is that nothing here fails.
+_MOCKED_CATALOG = (
+    "list_gemini_models", "list_groq_models", "list_vertex_models",
+    "probe_vertex_model", "probe_gemini_model", "list_accessible_projects",
+)
+_MOCKED_CREDENTIALS = ("resolve",)
+_MOCKED_VERTEX_CREDENTIALS = ("resolve_service_account_info",)
+
 # How often idle sessions (and their tickets/reviews/comments) are evicted.
 SWEEP_INTERVAL_SECONDS = 300.0
 
@@ -61,6 +85,13 @@ def install_mocks() -> None:
 
     for name in _MOCKED_RENDER:
         setattr(real_render_client, name, getattr(demo_render_client, name))
+
+    for name in _MOCKED_CATALOG:
+        setattr(real_catalog, name, getattr(demo_providers_mock, name))
+    for name in _MOCKED_CREDENTIALS:
+        setattr(real_credentials, name, getattr(demo_providers_mock, name))
+    for name in _MOCKED_VERTEX_CREDENTIALS:
+        setattr(real_vertex_credentials, name, getattr(demo_providers_mock, name))
 
     # demo_store.install() rebinds every public review_queue.store function
     # onto the real module -- EXCEPT its own `_NEVER_REBIND` set
@@ -74,10 +105,18 @@ def install_mocks() -> None:
     demo_store.install()
 
     import specialists.base
+    from providers import active_model
 
     def _demo_provider() -> MockProvider:
+        # active_model's cache is refreshed once per claimed ticket by
+        # review_queue/dispatcher.py::_refresh_slot_config, BEFORE any
+        # specialist (and therefore this function) runs -- so by the time
+        # this is called it already reflects the ticket-scoped model
+        # demo/store.py::get_all_slot_configs resolved (the reader's own
+        # pick, or the priced default when none was requested/valid).
         provider = real_store.get_provider_override() or "groq"
-        provider, model = demo_provider_and_model(provider)
+        model = active_model.active_model(provider, 0)
+        provider, model = demo_provider_and_model(provider, model)
         return MockProvider(provider=provider, model=model)
 
     specialists.base.get_provider = _demo_provider

@@ -39,9 +39,10 @@ async def bootstrap(request: Request) -> JSONResponse:
     session_id = current_session.get()
     if session_id is not None:
         touch(session_id)
-    requested = request.query_params.get("provider")
-    provider, model = demo_provider_and_model(requested)
-    await ensure_review_for_session(session_id, provider)
+    requested_provider = request.query_params.get("provider")
+    requested_model = request.query_params.get("model")
+    provider, model = demo_provider_and_model(requested_provider, requested_model)
+    await ensure_review_for_session(session_id, provider, model)
 
     # Analytics: a structured line per step reached, read from Render's logs
     # during the launch window. No database, no third-party script, and no
