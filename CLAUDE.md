@@ -217,6 +217,15 @@ store-layer docstring** ("the only caller always writes the full pair") —
 validate it in a shared predicate every writer calls instead.
 Full incident history and rationale: `docs/conventions/rationale.md#cross-repo-contract-direction-2026-09-10`.
 
+**Push ordering when a change set spans both repos:** push here to `main`
+first, then in `onboarding-wizard` run
+`uv run python -m scripts.update_bot_contract` before committing and
+pushing there. That script re-vendors `contracts/provisioning.json` and its
+pin against this repo's `origin/main` — running it before this repo's own
+push pins against a commit that's about to be superseded, and skipping it
+after leaves onboarding-wizard's vendored copy silently behind whatever
+this repo actually shipped.
+
 ## Conventions
 
 - Async throughout; one-purpose modules with narrow interfaces.
