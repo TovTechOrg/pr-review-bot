@@ -308,3 +308,22 @@ advisory, so there is no manual re-run to prevent. A red run there is the
 normal transient state between a contract change landing here and the
 consumer catching up, and gating anything on it would invert the ownership
 direction the cross-repo contract design establishes.
+
+## Front-matter on specs, and why not on plans (2026-09-23)
+
+New spec documents under `docs/superpowers/specs/` open with a YAML
+front-matter block carrying `title`, `date`, `status`
+(`draft`/`accepted`/`superseded`) and a `sections` list of heading slugs, so
+a reader can `head` the block and `sed` one section instead of reading a
+50 KB document whole.
+
+**Plans are deliberately excluded.** The shared `writing-plans` skill
+requires every plan to *start with* `# <Feature> Implementation Plan`, and
+plan files are consumed by `executing-plans` and
+`subagent-driven-development`. Front-matter above that heading would violate
+the skill's own contract. A plan's task headings already function as its
+index; if a plan needs more, it goes in the body, not above the title.
+
+**Existing documents are not retrofitted.** Roughly fifty historical plans
+at 50-100 KB each are write-once artifacts; indexing them buys nothing. This
+applies to documents created from 2026-09-23 onward.
