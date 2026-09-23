@@ -20,7 +20,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 ISSUES_MD = REPO_ROOT / "ISSUES.md"
 
 # Headings that are structure or templates, not incident entries.
-_NON_ENTRY_HEADINGS = {"## <short title>", "### <short title>", "## Parked Issues"}
+_NON_ENTRY_HEADINGS = {
+    "## <short title>",
+    "### <short title>",
+    "## Parked Issues",
+    "## Design Gaps",
+}
 
 
 def _slug(heading_line: str) -> str:
@@ -96,22 +101,55 @@ def test_every_body_entry_appears_in_the_index():
     )
 
 
+def _parked_range(body: str) -> tuple[int, int]:
+    """The '## Parked Issues' section's own extent -- from its heading to the
+    next '## ' heading, or EOF if there is none.
+
+    A heading counts as parked only if it falls *inside* this range, not
+    merely anywhere after the '## Parked Issues' heading. A structural
+    section like '## Design Gaps', or a real top-level incident, can
+    legitimately follow '## Parked Issues' in the file without itself being
+    parked.
+    """
+    start = body.index("## Parked Issues")
+    after_heading = start + len("## Parked Issues")
+    match = re.search(r"^## ", body[after_heading:], re.MULTILINE)
+    end = after_heading + match.start() if match else len(body)
+    return start, end
+
+
+def test_parked_range_stops_at_the_next_top_level_heading():
+    body = (
+        "## Parked Issues\n"
+        "### parked entry\n"
+        "content\n"
+        "## Design Gaps\n"
+        "### not parked\n"
+        "content\n"
+        "## Trailing incident\n"
+        "content\n"
+    )
+    start, end = _parked_range(body)
+    assert body[start:end] == "## Parked Issues\n### parked entry\ncontent\n"
+
+
 def test_parked_flag_matches_where_the_entry_actually_sits():
     """'parked: true' is the whole point of the flag: it is how a reader
     skips forty deferred findings to reach the dozen real incidents."""
     _, body = _split_front_matter(ISSUES_MD.read_text(encoding="utf-8"))
-    parked_start = body.index("## Parked Issues")
+    parked_start, parked_end = _parked_range(body)
     by_anchor = {entry["anchor"]: entry for entry in _index()}
     wrong = []
     for heading in _entry_headings(body):
         entry = by_anchor.get(_slug(heading))
         if entry is None:
             continue  # test_every_body_entry_appears_in_the_index owns this
-        actually_parked = body.index(heading) > parked_start
+        pos = body.index(heading)
+        actually_parked = parked_start <= pos < parked_end
         if entry["parked"] != actually_parked:
             wrong.append(
                 f"{entry['anchor']}: index says parked={entry['parked']}, but "
-                f"it sits {'after' if actually_parked else 'before'} "
-                "'## Parked Issues'"
+                f"it sits {'inside' if actually_parked else 'outside'} "
+                "the '## Parked Issues' section"
             )
     assert not wrong, "\n".join(wrong)

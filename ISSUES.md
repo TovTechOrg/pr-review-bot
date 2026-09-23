@@ -147,15 +147,12 @@ read_index:
   - anchor: 2026-09-17-softcoded-demoguide-urls-the-four-new-envconfigexample-entries-are-untested-against-scriptsinitenvpys-prompt-flow
     title: "[2026-09-17] Softcoded demo/guide URLs: the four new `.env.config.example` entries are untested against `scrip"
     parked: true
-  - anchor: design-gaps
-    title: "Design Gaps"
-    parked: true
   - anchor: botscriptsdeploypy---sync-env-and-botscriptssetoverridepy-are-now-redundant-with-the-dashboard-environment-tab
     title: "`bot/scripts/deploy.py --sync-env` and `bot/scripts/set_override.py` are now redundant with the dashboard Envi"
-    parked: true
+    parked: false
   - anchor: cross-repo-ordering-bug-onboarding-wizards-provisioning-write-defeated-seedruntimeconfigdefaults-leaving-every-wizard-deployed-instance-permanently-stuck-behind-dispatcher-configuration-issue
     title: "Cross-repo ordering bug: onboarding wizard's provisioning write defeated `_seed_runtime_config_defaults`, leav"
-    parked: true
+    parked: false
 ---
 # Issues log — vertex AI provider implementation
 
