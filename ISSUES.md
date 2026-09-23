@@ -1,3 +1,192 @@
+---
+read_index:
+  - anchor: controller-mistake-a-broad-grep-for-an-unrelated-keyword-printed-a-full-secret-value
+    title: "Controller mistake: a broad grep for an unrelated keyword printed a full secret value"
+    parked: false
+  - anchor: idle-queue-dispatcher-spammed-one-warningsecond-forever-and-the-notice-sweep-was-functionally-dead-for-deferred-tickets
+    title: "Idle-queue dispatcher spammed one WARNING/second forever, and the notice sweep was functionally dead for defer"
+    parked: false
+  - anchor: harness-surfaced-a-full-env-diff-every-secret-in-the-file-into-the-conversation-with-no-command-run
+    title: "Harness surfaced a full `.env` diff (every secret in the file) into the conversation with no command run"
+    parked: false
+  - anchor: harness-file-changed-externally-notification-fired-twice-for-non-secret-files-during-the-exfiltration-guard-implementation
+    title: "Harness 'file changed externally' notification fired twice for non-secret files during the exfiltration-guard "
+    parked: false
+  - anchor: an-unredacted-full-working-tree-gitleaks-verification-scan-printed-partial-real-private-key-bytes-into-the-conversation
+    title: "An unredacted, full-working-tree gitleaks verification scan printed partial real private-key bytes into the co"
+    parked: false
+  - anchor: the-final-whole-branch-review-caught-a-real-bug-that-all-six-task-scoped-reviews-missed
+    title: "The final whole-branch review caught a real bug that all six task-scoped reviews missed"
+    parked: false
+  - anchor: controller-mistake-printed-a-fragment-of-the-base64-encoded-credential-to-the-transcript
+    title: "Controller mistake: printed a fragment of the base64-encoded credential to the transcript"
+    parked: false
+  - anchor: controller-ran-the-safe-env-presence-check-pattern-against-env-itself--twice-in-two-different-sessions
+    title: "Controller ran the 'safe' `.env` presence-check pattern against `.env` itself — twice, in two different sessio"
+    parked: false
+  - anchor: a-requested-security--code-review-of-the-whole-onboarding-wizard-found-a-real-ssrf-vulnerability-in-the-vertex-credential-frame-plus-9-correctness-bugs--all-fixed-in-one-pass
+    title: "A requested security + code review of the whole onboarding wizard found a real SSRF vulnerability in the Verte"
+    parked: false
+  - anchor: bot-silently-enqueued-nothing-after-a-real-pr-open-cause-still-unconfirmed-added-logging-along-the-whole-webhook-dispatch-chain-to-diagnose-it-live
+    title: "Bot silently enqueued nothing after a real PR open, cause still unconfirmed; added logging along the whole web"
+    parked: false
+  - anchor: live-deployments-environment-tab-listed-zero-render-vars-renderservicename-is-a-render-reserved-env-var-not-a-settable-one
+    title: "Live deployment's Environment tab listed zero Render vars: `RENDER_SERVICE_NAME` is a Render-reserved env var,"
+    parked: false
+  - anchor: controller-ran-a-directory-recursive-grep-that-swept-in-botenv-without-naming-it
+    title: "Controller ran a directory-recursive `grep` that swept in `bot/.env` without naming it"
+    parked: false
+  - anchor: checkenvaccesspys-bash-rewrite-made-the-harnesss-own-worktree-isolation-guard-block-every-command-in-a-fresh-worktree-session
+    title: "`check_env_access.py`'s Bash rewrite made the harness's own worktree-isolation guard block every command, in a"
+    parked: false
+  - anchor: 2026-09-16-demo-bot-branch-cookie-hostile-visitors-get-an-infinite-redirect-loop-not-a-working-demo
+    title: "[2026-09-16, demo-bot branch] Cookie-hostile visitors get an infinite redirect loop, not a working demo"
+    parked: true
+  - anchor: 2026-09-16-demo-bot-branch-a-logged-out-visitors-provider-choice-is-dropped-one-hop-before-loginhtml-ever-sees-it
+    title: "[2026-09-16, demo-bot branch] A logged-out visitor's `?provider=` choice is dropped one hop before `login.html"
+    parked: true
+  - anchor: 2026-09-16-demo-bot-branch-the-demos-fix-wave-introduced-a-few-small-non-blocking-gaps-alongside-the-two-above
+    title: "[2026-09-16, demo-bot branch] The demo's fix wave introduced a few small, non-blocking gaps alongside the two "
+    parked: true
+  - anchor: 2026-09-16-demo-bot-branch-democontentpys-third-canned-files-diff-hunk-body-lines-arent-recognized-as-added-by-diffutilsannotateandcap
+    title: "[2026-09-16, demo-bot branch] `demo/content.py`'s third canned file's diff hunk body lines aren't recognized a"
+    parked: true
+  - anchor: 2026-09-16-demo-bot-branch-demogithubapppyclearschedulenotice-is-a-complete-no-op
+    title: "[2026-09-16, demo-bot branch] `demo/github_app.py::clear_schedule_notice` is a complete no-op"
+    parked: true
+  - anchor: demogithubapppy-has-two-small-latent-inconsistencies-both-currently-unreachable
+    title: "`demo/github_app.py` has two small latent inconsistencies, both currently unreachable"
+    parked: true
+  - anchor: the-demos-script-srcdemo-staticdemojs-tag-also-loads-on-the-real-non-demo-dashboardlogin-pages
+    title: "The demo's `<script src='/demo-static/demo.js'>` tag also loads on the real, non-demo dashboard/login pages"
+    parked: true
+  - anchor: dashboardstaticdashboardhtmls-info-tooltip-mobile-overflow-bug-likely-also-exists-in-the-real-non-demo-dashboard
+    title: "`dashboard/static/dashboard.html`'s `.info-tooltip` mobile-overflow bug likely also exists in the real (non-de"
+    parked: true
+  - anchor: dockerfiledemo-doesnt-explain-why-copy-dashboard-dashboard-is-required
+    title: "`Dockerfile.demo` doesn't explain why `COPY dashboard ./dashboard` is required"
+    parked: true
+  - anchor: the-demo-test-suites-demoenvundoglobalrebinding-fixture-pair-is-now-copy-pasted-across-three-test-files
+    title: "The demo test suite's `demo_env`/`_undo_global_rebinding` fixture pair is now copy-pasted across three test fi"
+    parked: true
+  - anchor: cis-demo-image-boot-step-never-docker-rms-its-container
+    title: "CI's demo-image boot step never `docker rm`s its container"
+    parked: true
+  - anchor: readconfigvalues-blankzero-handling-briefly-makes-usagecaptokens0-a-hard-422-instead-of-the-old-silent-cap-off
+    title: "`readConfigValue`'s blank/zero handling briefly makes `usage_cap_tokens=0` a hard 422 instead of the old silen"
+    parked: true
+  - anchor: the-count-kind-steppers-mobile-touch-target-is-38px-tall-short-of-the-plans-own-stated-44px-goal
+    title: "The `count`-kind stepper's mobile touch target is ~38px tall, short of the plan's own stated ~44px goal"
+    parked: true
+  - anchor: cooldown-previews-reaching-value-at-the-31st-re-review-tail-names-the-wrong-re-review-number-when-the-cap-is-hit-between-levels-6-and-30
+    title: "Cooldown preview's 'reaching {value} at the 31st re-review' tail names the wrong re-review number when the cap"
+    parked: true
+  - anchor: live-cooldown-preview-keeps-rendering-chips-for-an-individually-invalid-field-value-eg-a-negative-base-when-no-cross-field-rule-catches-it
+    title: "Live cooldown preview keeps rendering chips for an individually-invalid field value (e.g. a negative base) whe"
+    parked: true
+  - anchor: ci-run-for-the-dashboard-typed-config-controls-merge-logged-several-warnings-all-pre-existing-infrastructure-noise-unrelated-to-the-change
+    title: "CI run for the dashboard-typed-config-controls merge logged several warnings, all pre-existing infrastructure "
+    parked: true
+  - anchor: no-mechanical-backstop-for-outbound-exfiltration-of-a-secret-bearing-file
+    title: "No mechanical backstop for outbound exfiltration of a secret-bearing file"
+    parked: true
+  - anchor: a-redaction-sink-holding-unredacted-output-can-outlive-its-session-indefinitely
+    title: "A redaction sink holding unredacted output can outlive its session indefinitely"
+    parked: true
+  - anchor: scriptssetoverridepy---model--clear-model-writes-to-a-column-the-dispatcher-no-longer-reads
+    title: "`scripts/set_override.py --model`/`--clear-model` writes to a column the dispatcher no longer reads"
+    parked: true
+  - anchor: scriptscheckconsumercontractpys---bot-contract-override-silently-skips-the-committed-contract-stalenessmissing-cross-check
+    title: "`scripts/check_consumer_contract.py`'s `--bot-contract` override silently skips the committed-contract stalene"
+    parked: true
+  - anchor: scriptscheckconsumercontractpys-flatten-silently-collapses-duplicate-column-keys-in-a-consumers-vendored-contract
+    title: "`scripts/check_consumer_contract.py`'s `_flatten()` silently collapses duplicate `column` keys in a consumer's"
+    parked: true
+  - anchor: scriptscheckconsumercontractpys-generic-diff-framing-has-exactly-one-hardcoded-identity-key-column
+    title: "`scripts/check_consumer_contract.py`'s generic-diff framing has exactly one hardcoded identity key (`'column'`"
+    parked: true
+  - anchor: scriptscheckconsumercontractpys-flatten-cant-distinguish-an-empty-block-from-a-missing-one
+    title: "`scripts/check_consumer_contract.py`'s `_flatten()` can't distinguish an empty block from a missing one"
+    parked: true
+  - anchor: scriptscheckconsumercontractpys-error-path-edges-left-uncovered-after-the-final-review
+    title: "`scripts/check_consumer_contract.py`'s error-path edges left uncovered after the final review"
+    parked: true
+  - anchor: scriptscheckconsumercontractpys-differencescompare-do-some-redundant-work
+    title: "`scripts/check_consumer_contract.py`'s `differences()`/`compare()` do some redundant work"
+    parked: true
+  - anchor: teststeststoreschemapyexpectedcolumns-is-an-undocumented-fifth-touchpoint-for-a-new-runtimeconfigslotconfig-column
+    title: "`tests/test_store_schema.py::EXPECTED_COLUMNS` is an undocumented fifth touchpoint for a new `runtime_config`/"
+    parked: true
+  - anchor: a-persistent-local-test-postgres-container-is-a-leak-hazard-for-any-future-throwaway-schema-drill-like-stage-5-task-1s
+    title: "A persistent local test Postgres container is a leak hazard for any future throwaway-schema drill like Stage 5"
+    parked: true
+  - anchor: the-environment-tabs-per-slot-config-editor-silently-discards-unsaved-edits-in-every-other-row-on-any-rows-save
+    title: "The Environment tab's per-slot config editor silently discards unsaved edits in every other row on any row's S"
+    parked: true
+  - anchor: setoverridepy---clear-model-with-activation-probes-the-model-its-about-to-delete-then-arms-a-slot-with-no-model-at-all
+    title: "`set_override.py --clear-model` (with activation) probes the model it's about to delete, then arms a slot with"
+    parked: true
+  - anchor: a-404-from-the-vertex-entitlement-probe-is-always-attributed-to-the-model-even-when-a-wrong-project-or-location-caused-it
+    title: "A 404 from the vertex entitlement probe is always attributed to the model, even when a wrong project or locati"
+    parked: true
+  - anchor: googleauthexceptionstransporterror-during-a-probe-maps-to-providerunreachable-not-modelprobeunavailable
+    title: "`google.auth.exceptions.TransportError` during a probe maps to `provider_unreachable`, not `model_probe_unavai"
+    parked: true
+  - anchor: the-per-row-vertex-baselines-location-fallback-changed-from-vertexlocations0-to--when-task-7-made-the-baseline-map-provider-agnostic
+    title: "The per-row vertex baseline's location fallback changed from `vertexLocations[0]` to `''` when Task 7 made the"
+    parked: true
+  - anchor: new-probemodelcheck-test-coverage-has-a-few-pinning-gaps
+    title: "New probe/model_check test coverage has a few pinning gaps"
+    parked: true
+  - anchor: 2026-09-17-postpendingnotices-new-throttled-tuning-cache-refresh-is-redundant-not-just-unnecessary-while-the-queue-is-busy
+    title: "[2026-09-17] `post_pending_notices`' new throttled tuning-cache refresh is redundant, not just unnecessary, wh"
+    parked: true
+  - anchor: 2026-09-17-softcoded-demoguide-urls-demostaticdemojss-served-response-lost-etaglast-modified
+    title: "[2026-09-17] Softcoded demo/guide URLs: `demo/static/demo.js`'s served response lost `ETag`/`Last-Modified`"
+    parked: true
+  - anchor: 2026-09-17-softcoded-demoguide-urls-the-four-new-envconfigexample-entries-are-untested-against-scriptsinitenvpys-prompt-flow
+    title: "[2026-09-17] Softcoded demo/guide URLs: the four new `.env.config.example` entries are untested against `scrip"
+    parked: true
+  - anchor: botscriptsdeploypy---sync-env-and-botscriptssetoverridepy-are-now-redundant-with-the-dashboard-environment-tab
+    title: "`bot/scripts/deploy.py --sync-env` and `bot/scripts/set_override.py` are now redundant with the dashboard Envi"
+    parked: false
+  - anchor: cross-repo-ordering-bug-onboarding-wizards-provisioning-write-defeated-seedruntimeconfigdefaults-leaving-every-wizard-deployed-instance-permanently-stuck-behind-dispatcher-configuration-issue
+    title: "Cross-repo ordering bug: onboarding wizard's provisioning write defeated `_seed_runtime_config_defaults`, leav"
+    parked: false
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-slug-drops-underscores-producing-anchors-that-dont-match-githubs-real-heading-slugs
+    title: "[2026-09-23, rootstock-practices-adoption branch] `_slug()` drops underscores, producing anchors that don't ma"
+    parked: true
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-testdocanchorspys-missing-file-and-duplicate-slug-branches-are-never-exercised-against-a-failing-input
+    title: "[2026-09-23, rootstock-practices-adoption branch] `test_doc_anchors.py`'s missing-file and duplicate-slug bran"
+    parked: true
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-the-exempt-heading-prefix-match-in-the-byte-budget-test-can-be-gamed-by-a-second-matching-heading
+    title: "[2026-09-23, rootstock-practices-adoption branch] The exempt-heading prefix match in the byte-budget test can "
+    parked: true
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-sectionheading-splitting-doesnt-handle--fences-or-nested-backtick-counts-and-heading-extraction-for-anchorsissues-doesnt-skip-fences-at-all
+    title: "[2026-09-23, rootstock-practices-adoption branch] Section/heading splitting doesn't handle `~~~` fences or nes"
+    parked: true
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-the-plans-claim-that-a-duplicate-issuesmd-heading-would-fail-testissuesindexpy-is-wrong
+    title: "[2026-09-23, rootstock-practices-adoption branch] The plan's claim that a duplicate `ISSUES.md` heading would "
+    parked: true
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-bots-claudemd-budget-headroom-20-kb-is-below-the-specs-stated-floor-of-26-kb
+    title: "[2026-09-23, rootstock-practices-adoption branch] Bot's CLAUDE.md budget headroom (~2.0 KB) is below the spec'"
+    parked: true
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-the-ledger-eligibility-rationales-the-image-copys-the-whole-tree-claim-is-factually-wrong
+    title: "[2026-09-23, rootstock-practices-adoption branch] The ledger-eligibility rationale's 'the image COPYs the whol"
+    parked: true
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-issuesmds-readindex-dropped-the-specs-date-field
+    title: "[2026-09-23, rootstock-practices-adoption branch] `ISSUES.md`'s `read_index` dropped the spec's `date` field"
+    parked: true
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-the-issuesmd-index-generator-is-fragile-title-truncation-mid-word-unescaped-yaml
+    title: "[2026-09-23, rootstock-practices-adoption branch] The `ISSUES.md` index generator is fragile (title truncation"
+    parked: true
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-tier-cs-spec-front-matter-convention-has-no-discoverability-mechanism
+    title: "[2026-09-23, rootstock-practices-adoption branch] Tier C's spec-front-matter convention has no discoverability"
+    parked: true
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-bots-hook-parity-bullet-doesnt-mention-the-pre-existing-sinkdir-naming-exception-the-wizards-copy-does
+    title: "[2026-09-23, rootstock-practices-adoption branch] Bot's hook-parity bullet doesn't mention the pre-existing `_"
+    parked: true
+---
 # Issues log — vertex AI provider implementation
 
 Running log of anything that went wrong (mine or a subagent's) while executing
@@ -182,6 +371,83 @@ Recorded here so they aren't silently lost. Format:
 - **Why parked:** why it didn't get fixed in-session
 - **Follow-up:** what closing it would take
 ```
+
+### [2026-09-23, rootstock-practices-adoption branch] `_slug()` drops underscores, producing anchors that don't match GitHub's real heading slugs
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption` (Opus, single-agent).
+- **What:** `tests/test_doc_anchors.py::_slug()` (and the copy in `tests/test_issues_index.py`) strips every character outside `[a-z0-9 -]`, which drops `_` — but GitHub's real slugger keeps underscores. A heading containing `_` (none of the 10 anchors this was empirically verified against do) would slugify differently here than on GitHub: about 15 `read_index` anchor values in `ISSUES.md` are not real GitHub anchors today, and a future `CLAUDE.md` link to an underscore-containing heading would be marked broken by the guard even if correctly spelled GitHub-style, or would pass the guard while being broken on GitHub if spelled this repo's way.
+- **Why parked:** No anchor link in `CLAUDE.md` currently targets a heading with `_` in it, so nothing is actually broken today; fixing it means widening `_slug()`, `_ANCHOR_LINK_RE`'s anchor character class, and regenerating `ISSUES.md`'s index in both repos in the same pass, which is more than a docs-only fix pass should carry.
+- **Follow-up:** Add `_` (and ideally full Unicode-letter support via `\w`) to `_slug()`'s allowed character class and to `_ANCHOR_LINK_RE`'s anchor group in both repos' `test_doc_anchors.py` and `test_issues_index.py`, then regenerate both `ISSUES.md` indexes.
+
+### [2026-09-23, rootstock-practices-adoption branch] `test_doc_anchors.py`'s missing-file and duplicate-slug branches are never exercised against a failing input
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption`.
+- **What:** `test_every_anchor_link_in_claude_md_resolves`'s "target file does not exist" branch and `test_no_target_file_has_duplicate_heading_slugs` only ever run against the real, currently-healthy tree — there's no synthetic case proving either branch actually fires on a real failure, unlike the fenced-code-block and CRLF/BOM tests, which do use synthetic input.
+- **Why parked:** This is a test-coverage gap in a meta-test, not a bug in the guard itself (both branches read correctly by inspection), and outside the fix pass's scope (Critical/Important only).
+- **Follow-up:** Parameterize `_slug`/`_heading_lines`/`_anchor_links` to take `claude_md`/`repo_root` and add `tmp_path`-based cases for a missing target file and for two headings that slugify identically, in both repos.
+
+### [2026-09-23, rootstock-practices-adoption branch] The exempt-heading prefix match in the byte-budget test can be gamed by a second matching heading
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption`.
+- **What:** `tests/test_claude_md_budget.py::_exempt_bytes` exempts *every* `## ` heading starting with `"## Secret handling"`, not just the one canonical section. A second heading like `## Secret handling (misc notes)` anywhere in the file would silently become exempt too; the 32,000-byte whole-file cap is the only thing that would eventually catch it.
+- **Why parked:** No such second heading exists today, and closing this loophole (assert exactly one match, or match the full heading line) is a defensive hardening, not a fix to an active bug.
+- **Follow-up:** Add an assertion that exactly one section heading matches each entry in `EXEMPT_HEADING_PREFIXES`, in both repos' `test_claude_md_budget.py`.
+
+### [2026-09-23, rootstock-practices-adoption branch] Section/heading splitting doesn't handle `~~~` fences or nested backtick counts, and heading extraction for anchors/issues doesn't skip fences at all
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption`.
+- **What:** `test_claude_md_budget.py::_sections`'s fence-skipping toggles on any line starting with three backticks, so a `~~~`-delimited fence is never recognized, and a four-backtick fence containing a three-backtick line inside it would flip the toggle wrongly mid-fence. Separately, `test_doc_anchors.py::_heading_lines` and `test_issues_index.py::_entry_headings` don't skip fenced code blocks at all — they rely entirely on excluding known template-stub headings by exact string match, so a `#`-prefixed example line inside a fence in `rationale.md` or `ISSUES.md` would be treated as a real heading.
+- **Why parked:** Neither file has a fence containing a `#`-prefixed line today, so nothing is broken in practice; the fix touches three separate parsing functions across both repos for a currently-hypothetical input.
+- **Follow-up:** Give `_heading_lines`/`_entry_headings` the same fence-aware skip logic `_sections` already has, and extend that logic to also recognize `~~~` fences and to track fence length so a longer fence containing a shorter fence-marker line doesn't toggle early.
+
+### [2026-09-23, rootstock-practices-adoption branch] The plan's claim that a duplicate `ISSUES.md` heading would fail `test_issues_index.py` is wrong
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption`.
+- **What:** Task 15 Step 2's plan text says a wrong entry count "means two headings slugify identically -- disambiguate one heading's wording." In fact `_index()`/`_entry_headings()` use sets and dicts throughout, so two identical headings silently collapse to one index line and every test still passes — the plan's stated safety net doesn't exist.
+- **Why parked:** This is a plan-documentation defect, not an implementation bug to fix in this branch; `ISSUES.md`'s own headings are already checked for accidental duplication by convention (dated, worded titles), and nothing in the current file collides.
+- **Follow-up:** If this class of index ever needs a real guard, add an explicit duplicate-heading-slug assertion to `test_issues_index.py` mirroring `test_doc_anchors.py::test_no_target_file_has_duplicate_heading_slugs`. No action taken in this branch.
+
+### [2026-09-23, rootstock-practices-adoption branch] Bot's CLAUDE.md budget headroom (~2.0 KB) is below the spec's stated floor of ~2.6 KB
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption`.
+- **What:** The spec states "2.6 KB is the smallest headroom that still clears that bar" for the bot's budgeted CLAUDE.md content. The branch lands at 16,012 budgeted bytes against the 18,000 budget -- 1,988 bytes of headroom, not 2.6 KB. The drift comes from Task 3's collapse landing at 14,908 bytes against the plan's own predicted 14,550, plus a pointer sentence added in Task 5 to keep an anchor reachable (see the SDD ledger's Task 5 ruling).
+- **Why parked:** Still comfortably under the 18,000-byte budget with room for ordinary future edits; relocating ~600 bytes purely to hit an internal spec estimate (not a hard requirement -- the hard requirement is the 18,000 budget itself, which is met) isn't worth a fix-pass slot.
+- **Follow-up:** If budget pressure returns, relocate a further ~600 bytes from `## Substitutions from the brief` or `## Module boundaries and contracts` per the plan's own stated fallback (Task 10 Step 2).
+
+### [2026-09-23, rootstock-practices-adoption branch] The ledger-eligibility rationale's "the image COPYs the whole tree" claim is factually wrong
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption`.
+- **What:** `docs/conventions/rationale.md`'s "Which repeatable checks are ledger-eligible" section argues `deploy-verify` is "structurally unfit for a ledger" because "the deploy image COPYs the whole tree, so 'unchanged version' is essentially never true." Neither this repo's nor the wizard's `Dockerfile` does a blanket `COPY . .` -- both copy an explicit list of files and directories. The conclusion (deploy-verify stays unconditional and non-ledger-eligible) is still correct on the incident ground alone (the 2026-09-03 `python-multipart` crash), but the "structurally unfit" half of the argument as written is disprovable by reading either Dockerfile.
+- **Why parked:** The rule itself (deploy-verify is not ledger-eligible) is not in question and needs no change; only the supporting sentence is inaccurate, and fixing prose that argues for an already-correct, unchanged rule isn't Important/Critical.
+- **Follow-up:** Reword the sentence to argue from the explicit-COPY-list's actual surface (base image, `uv sync`'s resolved lockfile, and every explicitly-listed file/dir all count as "the image's inputs"), or drop the structural half of the argument and rest the rule on the incident alone, in both repos' `rationale.md`.
+
+### [2026-09-23, rootstock-practices-adoption branch] `ISSUES.md`'s `read_index` dropped the spec's `date` field
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption`.
+- **What:** The spec's Tier A description says each index entry lists "anchor slug, date, one-line title, and `parked: true|false`." The implemented `read_index` (Task 14's test, Task 15's generator) carries only `anchor`/`title`/`parked` -- no `date` -- and the plan's own Deviations section doesn't record dropping it.
+- **Why parked:** Most entries' dates aren't reliably extractable from their heading text (many current incident headings carry no bracketed date at all, unlike the newer `[2026-09-17] ...` convention), so backfilling one accurately would require reading and dating all ~50 entries by hand rather than a mechanical regeneration -- more than a docs fix pass should carry.
+- **Follow-up:** If a `date` field is wanted, add it to `_index()`'s required-keys test and backfill it entry-by-entry (not generated), preferring the `[YYYY-MM-DD, ...]`-prefixed convention going forward for new entries so the field becomes mechanically extractable over time.
+
+### [2026-09-23, rootstock-practices-adoption branch] The `ISSUES.md` index generator is fragile (title truncation mid-word, unescaped YAML)
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption`.
+- **What:** The throwaway generator script (Task 15 Step 1) truncates `title` at 110 characters with a plain slice, which can cut mid-word (e.g. "...for defer"), and only escapes `"` before wrapping the value in double quotes -- a heading containing a literal `\` would produce invalid YAML. The index is maintained by hand from here per the plan, so this script's shape is the template anyone regenerating an entry will likely copy.
+- **Why parked:** The generator itself isn't committed (by design -- Task 15 Step 1 calls it a throwaway), and no current heading contains a backslash, so nothing is broken in the committed `ISSUES.md`.
+- **Follow-up:** If the index is ever regenerated wholesale again, truncate on a word boundary and escape backslashes (and any other YAML-significant character) before quoting, in both repos.
+
+### [2026-09-23, rootstock-practices-adoption branch] Tier C's spec-front-matter convention has no discoverability mechanism
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption`.
+- **What:** The "front-matter on specs, and why not on plans" convention (Task 17) lives only in `docs/conventions/rationale.md`, which is not loaded when a spec is first written. No skill template or `CLAUDE.md` line points to it, so a future spec is likely to be written without front-matter simply because nobody read this section before starting.
+- **Why parked:** Wiring this into the `writing-plans`/spec-authoring skill (if one exists for specs specifically) is a process change beyond this plan's stated scope, which only asked for the convention to be recorded.
+- **Follow-up:** If Tier C's adoption rate turns out low in practice, add a one-line pointer to this convention from wherever specs are actually authored (a skill, or a `CLAUDE.md` line under `docs/superpowers/specs/`).
+
+### [2026-09-23, rootstock-practices-adoption branch] Bot's hook-parity bullet doesn't mention the pre-existing `_SINK_DIR` naming exception the wizard's copy does
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption`.
+- **What:** The wizard's `check_env_access.py` deliberately differs from the bot's by one literal (`_SINK_DIR`'s value, named after each project so the two redaction sinks never collide on a shared machine) -- predating this branch, and the wizard's own hook-parity bullet documents the exception. This repo's hook-parity bullet (rephrased by Task 5 to drop the hardcoded paths) still implies full byte-identity with no mention of that exception, so the plan's "Done when" checklist item ("`diff` ... prints nothing") cannot literally pass, and wasn't recorded as run in the SDD ledger.
+- **Why parked:** The `_SINK_DIR` difference itself predates this branch and this branch never touched `.claude/hooks/` (verified: `git log` over the hooks path across this branch's range is empty) -- the only gap is that this repo's own prose doesn't document a pre-existing, already-correct asymmetry the way the wizard's does.
+- **Follow-up:** Add a one-line note to this repo's hook-parity bullet mirroring the wizard's, naming the `_SINK_DIR` exception explicitly so the "Done when" check's expected `diff` output is documented accurately.
 
 ### [2026-09-16, demo-bot branch] Cookie-hostile visitors get an infinite redirect loop, not a working demo
 

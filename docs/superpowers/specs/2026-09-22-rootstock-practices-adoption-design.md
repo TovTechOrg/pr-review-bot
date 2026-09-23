@@ -1,3 +1,26 @@
+---
+title: Adopting selected Rootstock-OS practices across both repos
+date: 2026-09-22
+status: accepted
+sections:
+  - what-this-is-for
+  - what-was-evaluated-and-rejected
+  - the-premise-correction-this-design-rests-on
+  - item-1----a-claudemd-budget-enforced-as-a-repo-property-test
+  - item-2----the-contradiction-rule
+  - item-3----a-cheap-probe-before-escalating
+  - item-4----the-lesson-entry-format-inside-rationalemd
+  - item-5----which-repeatable-checks-are-ledger-eligible
+  - relocations-machine-local-knowledge-leaves-the-repos
+  - anchor-integrity
+  - front-matter-scoped-by-read-pattern
+  - cross-repo-parity-for-the-three-shared-sections
+  - phases
+  - testing
+  - non-goals
+  - open-verification-points
+---
+
 # Adopting selected Rootstock-OS practices across both repos (2026-09-22)
 
 Five procedural practices distilled from the Rootstock-OS Claude Code

@@ -212,12 +212,16 @@ code.
 **The one right way:** Documentation describing the outcome of a live
 verification step is written after that step actually runs.
 
-- **Tried:** Drafting the documentation of a live call's result in advance,
-  from the plan's own task text.
-- **Failed because:** The drafted text asserted a success that had not
-  happened, and transcribing it published an unverified outcome as fact.
+- **Tried:** A plan's task brief drafted doc wording (SETUP.md/README.md/
+  cost.md) as if a live verification step had already succeeded, written
+  during planning before the step ever ran.
+- **Failed because:** The wording asserted a success the plan could not
+  actually know — it was caught before dispatch, by re-reading the brief
+  against the verification task's real (blocked) outcome, but transcribing
+  it verbatim would have shipped dishonest documentation.
 - **Do instead:** Treat a plan's description of a pending result as a
-  placeholder to revise from the real outcome.
+  placeholder to revise from the real outcome, not literal instructions to
+  transcribe.
 
 ### Write the plan file inside the worktree
 
@@ -238,9 +242,11 @@ branch, run `git status` on the *target*, not only on the branch being
 merged in.
 
 - **Tried:** Merging after checking only the incoming branch.
-- **Failed because:** A conflicting local edit or untracked file on the
-  target failed the merge in a way that is confusing to diagnose from the
-  merge error alone.
+- **Failed because:** A conflicting local edit and an untracked file already
+  on the target both blocked the merge (`git log -p -- ISSUES.md` has the
+  full incident, pruned from this file per its own convention) — resolved
+  with a careful `git stash push -u` / merge / `git stash pop` sequence, but
+  only after the merge's own failure was the first signal either existed.
 - **Do instead:** Inspect the target's working tree first.
 
 ### Don't reconfirm the full-suite baseline at the start of every task
@@ -308,3 +314,22 @@ advisory, so there is no manual re-run to prevent. A red run there is the
 normal transient state between a contract change landing here and the
 consumer catching up, and gating anything on it would invert the ownership
 direction the cross-repo contract design establishes.
+
+## Front-matter on specs, and why not on plans (2026-09-23)
+
+New spec documents under `docs/superpowers/specs/` open with a YAML
+front-matter block carrying `title`, `date`, `status`
+(`draft`/`accepted`/`superseded`) and a `sections` list of heading slugs, so
+a reader can `head` the block and `sed` one section instead of reading a
+50 KB document whole.
+
+**Plans are deliberately excluded.** The shared `writing-plans` skill
+requires every plan to *start with* `# <Feature> Implementation Plan`, and
+plan files are consumed by `executing-plans` and
+`subagent-driven-development`. Front-matter above that heading would violate
+the skill's own contract. A plan's task headings already function as its
+index; if a plan needs more, it goes in the body, not above the title.
+
+**Existing documents are not retrofitted.** Roughly fifty historical plans
+at 50-100 KB each are write-once artifacts; indexing them buys nothing. This
+applies to documents created from 2026-09-23 onward.
