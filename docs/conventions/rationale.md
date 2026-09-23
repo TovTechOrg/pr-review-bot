@@ -105,46 +105,6 @@ boot smoke test, not a size assertion) -- the test only guards against
 someone silently reintroducing the anti-pattern, and its regression comment
 carries the measured numbers for anyone re-evaluating this later.
 
-## Impeccable comp-first image generation (manual bridge)
-
-For dashboard redesign work via the Impeccable skill, comp-first image
-generation is wired to Hugging Face's Inference Providers (fal-ai backend,
-`black-forest-labs/FLUX.1-schnell`) rather than Impeccable's own
-`generate-image` CLI command — that command only checks for
-`OPENAI_API_KEY` and has no pluggable backend, so it will report image
-generation as unavailable even though this bridge exists.
-
-- **Script:** `~/.config/impeccable-hf/generate_image.py` — deliberately
-  outside this repo (machine-local tooling, not a project dependency; no
-  entry in `pyproject.toml`, nothing for other contributors to install).
-  Usage: `python3 ~/.config/impeccable-hf/generate_image.py "<prompt>"
-  <output.png> [--width W] [--height H]`.
-- **Token:** `~/.config/impeccable-hf/token` — a Hugging Face access token
-  with "Make calls to Inference Providers" permission, one line, mode 600.
-  Not committed anywhere, not part of this project's own credential set
-  (`GEMINI_API_KEY`/`VERTEX_GCP_SERVICE_ACCOUNT_KEY`/etc.) — same handling
-  discipline as any other credential applies: never print it, never pass it
-  as a literal argument, never let it reach a git commit/PR/Artifact.
-- **Why the router path is hand-rolled and provider-specific:** HF's
-  Inference Providers router (`router.huggingface.co`) proxies to each
-  backend provider's own API rather than exposing one uniform REST shape.
-  The script mirrors `huggingface_hub`'s `inference/_providers/fal_ai.py`
-  (route `/fal-ai/<provider_model_id>`, payload `{"prompt", "image_size"}`,
-  response is a JSON body with an image URL to download, not raw image
-  bytes) because `huggingface_hub` itself isn't installed in this
-  environment (no working `pip`) — this is why it isn't just
-  `provider="auto"` via the official client.
-- **If fal-ai stops serving this model:** check
-  `https://huggingface.co/api/models/black-forest-labs/FLUX.1-schnell?expand=inferenceProviderMapping`
-  for another provider with `"status": "live"`, then update the script's
-  route/payload to that provider's own shape (they differ per provider —
-  don't assume fal-ai's shape generalizes).
-- Confirmed live end-to-end 2026-09-06: produced a real dashboard-shaped
-  comp (nav/sidebar/stat-cards/data-table composition) at 512×512 in one
-  deliberate call — same "one deliberate live call, no burst-testing"
-  discipline as the LLM API testing hygiene rule applies to this too, since
-  it's still a third-party provider's free tier.
-
 ## LLM API testing hygiene: the AI-Studio block incident
 
 Gemini AI-Studio access got **account-level blocked** (`403 PERMISSION_DENIED:
@@ -204,81 +164,147 @@ git status --short`. If that runs, this guidance still holds.
 
 ## Plan-execution / multi-agent process hygiene: full detail
 
-Lessons from running Superpowers-style plans through subagent-driven
-development on this project (see `ISSUES.md` for the incidents these
-generalize from). `CLAUDE.md` states each rule in one line; the elaboration
-below is why each one exists.
+### A brief's "stop and report" is a hard stop
 
-- **A task brief's "stop and report" instruction is a hard stop, not a
-  suggestion.** If an implementer hits an unpredicted failure a brief says to
-  stop on, it must actually stop and return control — not self-resolve the
-  problem and mention the deviation in its report afterward. A controller
-  reviewing a report after the fact cannot approve or reject work that has
-  already been done; by the time it reads "I deviated because...", the
-  deviation has already happened.
-- **When correcting or overriding part of a multi-sentence passage, re-read
-  the whole passage afterward for internal consistency** — not just the
-  clause that was changed. A targeted fix to one sentence is exactly the kind
-  of edit that leaves a contradiction elsewhere in the same passage
-  undetected by the person who made it.
-- **Task-scoped review checks conformance to the brief, not correctness of
-  the brief itself.** Code a plan hands an implementer verbatim — especially
-  for external-API/auth integration (credential construction, OAuth scopes,
-  client setup) — needs the same scrutiny as any other code. Matching the
-  brief exactly does not mean the brief was right; a bug embedded in a plan's
-  own provided snippet will sail through every task-scoped review that only
-  checks "does this match what was asked." **When a task's diff includes this
-  class of code, run the `code-review` skill against that diff immediately,
-  as part of finishing the task — not deferred to final/whole-branch
-  review.** Final review is still a backstop (don't assume a whole-branch
-  review is redundant just because per-task reviews already passed — it is
-  often the first review that would even think to distrust the plan's own
-  code), but it's a backstop, not the primary catch: the Vertex OAuth
-  `scopes=` bug and the `list_vertex_models` SSRF both sailed through
-  multiple per-task reviews before a final review caught them, which is
-  exactly the delay this per-task trigger exists to close.
-- **Documentation describing the outcome of a live-verification step must be
-  written after that step actually runs, not drafted in advance assuming
-  success.** If a plan's task text describes what a doc should say about a
-  pending live call's result, treat that text as a placeholder to revise
-  based on the actual outcome, not as literal instructions to transcribe.
-- **When a plan is authored in the same session that will execute it via a
-  worktree-based flow, write or commit the plan file *inside* the worktree**
-  (or commit it to the branch before creating the worktree). Writing a file
-  to the main checkout and then branching off via `git worktree add` leaves
-  that file invisible to the new worktree, since worktrees only materialize
-  committed content.
-- **Before merging a feature branch into any target branch, check the
-  *target* branch for pre-existing uncommitted changes first** (`git status`
-  there, not just on the branch being merged in) — a conflicting local edit
-  or untracked file on the target can fail the merge in a way that's
-  confusing to debug from the merge failure alone.
-- **Don't ask an implementer subagent to reconfirm a full-suite baseline at
-  the start of every task.** Trust the SDD ledger's last-recorded green
-  state from the prior task's own final run instead. The shared
-  `subagent-driven-development` skill's implementer template already asks
-  for exactly one full-suite run, right before committing — a controller
-  adding its own extra "first, confirm baseline" instruction on top of that
-  is a habit this project fell into in earlier stages, not something the
-  template requires. For a plan's first task, the worktree-setup step that
-  precedes dispatch is normally what already confirms things are green, so
-  there's usually no real gap to fill even there. Reason: measured directly
-  during the 2026-08-19/20 test-suite-performance work — the doubling was
-  never principled, and the case for it is weaker still now that the suite
-  itself is faster (full suite 57s serial → 35s at `-n 4`; the `-m "not db"`
-  fast-iteration subset 31s → 20s — see
-  `docs/superpowers/specs/2026-08-19-test-suite-performance-design.md`
-  section 8). Only add an explicit baseline-reconfirm instruction when
-  there's a concrete reason to distrust the ledger for *this* task
-  specifically — manual edits since the last confirmed-green run, a resumed
-  session after a long gap, or a worktree/branch switch — not as a default
-  precaution on every task.
-- **Every parked/deferred Minor finding from a task-scoped or final
-  whole-branch review must be logged in `ISSUES.md`'s Parked Issues section
-  before the branch is considered done** — not left only in the SDD
-  ledger (deleted once the branch merges) or in a session's own memory,
-  either of which loses the finding the moment the workspace is cleaned up
-  or the conversation ends. Log it there even when a review explicitly
-  judges a finding "no action needed" / harmless-as-is — that judgment call
-  belongs in the entry's **Why parked** line, not as a reason to skip
-  logging it at all.
+**The one right way:** When a task brief says to stop and report, stop and
+return control without fixing anything.
+
+- **Tried:** An implementer hit an unpredicted failure the brief said to stop
+  on, resolved it itself, and noted the deviation in its report afterward.
+- **Failed because:** A controller reading a report after the fact cannot
+  approve or reject work that has already been done. By the time it reads
+  "I deviated because...", the deviation has happened.
+- **Do instead:** Return control at the stop point, describing the failure
+  with no fix applied.
+
+### Re-read the whole passage after correcting part of it
+
+**The one right way:** After changing one sentence of a multi-sentence rule,
+re-read the entire passage for internal consistency.
+
+- **Tried:** A targeted fix to a single clause in a multi-sentence passage.
+- **Failed because:** The fix left a contradiction elsewhere in the same
+  passage, invisible to the person who made it because they were looking at
+  the clause they changed.
+- **Do instead:** Re-read the whole passage, not just the edited clause.
+
+### Task-scoped review checks conformance to the brief, not the brief
+
+**The one right way:** Run the `code-review` skill against a task diff
+immediately when it touches external-API or auth integration — credential
+construction, OAuth scopes, client setup — as part of finishing that task.
+
+- **Tried:** Relying on per-task reviews to catch bugs in code a plan handed
+  the implementer verbatim.
+- **Failed because:** A task-scoped review only asks "does this match what
+  was asked", and matching the brief exactly does not mean the brief was
+  right. The Vertex OAuth `scopes=` bug and the `list_vertex_models` SSRF
+  both sailed through multiple per-task reviews before a final whole-branch
+  review caught them.
+- **Do instead:** Review that class of diff on the spot, at task time.
+
+**Nuance:** Final whole-branch review remains a backstop, not a redundancy —
+it is often the first review that would even think to distrust the plan's own
+code.
+
+### Write live-verification docs after the call, not before
+
+**The one right way:** Documentation describing the outcome of a live
+verification step is written after that step actually runs.
+
+- **Tried:** Drafting the documentation of a live call's result in advance,
+  from the plan's own task text.
+- **Failed because:** The drafted text asserted a success that had not
+  happened, and transcribing it published an unverified outcome as fact.
+- **Do instead:** Treat a plan's description of a pending result as a
+  placeholder to revise from the real outcome.
+
+### Write the plan file inside the worktree
+
+**The one right way:** When a plan is authored in the session that will
+execute it via a worktree, write or commit that plan file inside the
+worktree -- or commit it to the branch before creating the worktree.
+
+- **Tried:** Writing a plan file into the main checkout, then running
+  `git worktree add`.
+- **Failed because:** A worktree materializes only committed content, so the
+  new worktree could not see the file at all.
+- **Do instead:** Commit first, or author inside the worktree.
+
+### Check the target branch for uncommitted changes before merging
+
+**The one right way:** Before merging a feature branch into any target
+branch, run `git status` on the *target*, not only on the branch being
+merged in.
+
+- **Tried:** Merging after checking only the incoming branch.
+- **Failed because:** A conflicting local edit or untracked file on the
+  target failed the merge in a way that is confusing to diagnose from the
+  merge error alone.
+- **Do instead:** Inspect the target's working tree first.
+
+### Don't reconfirm the full-suite baseline at the start of every task
+
+**The one right way:** Trust the SDD ledger's last-recorded green state from
+the prior task's own final run.
+
+This entry has no incident behind it -- it is a measurement result, not a
+failure, and is deliberately left in prose rather than dressed in the
+TRIED/FAILED BECAUSE shape. The shared `subagent-driven-development`
+implementer template already asks for exactly one full-suite run, right
+before committing; a controller adding its own "first, confirm baseline"
+instruction on top of that is a habit this project fell into, not something
+the template requires. For a plan's first task, the worktree-setup step that
+precedes dispatch normally already confirms green. Measured during the
+2026-08-19/20 test-suite-performance work: the doubling was never
+principled, and the case is weaker still now that the suite is faster (full
+suite 57s serial to 35s at `-n 4`; the `-m "not db"` subset 31s to 20s --
+see `docs/superpowers/specs/2026-08-19-test-suite-performance-design.md`
+section 8).
+
+**Nuance:** Add an explicit baseline-reconfirm instruction only when there is
+a concrete reason to distrust the ledger for *this* task -- manual edits
+since the last green run, a resumed session after a long gap, or a
+worktree/branch switch -- never as a default precaution.
+
+### Every parked finding goes in ISSUES.md before the branch is done
+
+**The one right way:** Log every parked or deferred finding from a
+task-scoped or whole-branch review in `ISSUES.md`'s Parked Issues section
+before the branch is considered done.
+
+- **Tried:** Leaving a deferred Minor finding in the SDD ledger, or in the
+  session's own memory.
+- **Failed because:** The ledger is deleted when the branch merges and the
+  session ends with the conversation -- the finding is lost the moment the
+  workspace is cleaned up.
+- **Do instead:** Write it into `ISSUES.md` in that section's existing
+  format.
+
+**Nuance:** Log it even when a review explicitly judges a finding "no action
+needed" or harmless-as-is. That judgment belongs in the entry's **Why
+parked** line, not as a reason to skip logging.
+
+## Which repeatable checks are ledger-eligible (2026-09-22)
+
+"Trust the ledger" is narrower than it sounds. It covers one check, and two
+obvious-looking candidates are deliberately excluded.
+
+**Eligible -- the full-suite `pytest`/`ruff` baseline within a plan's
+execution.** Trust the SDD ledger's last-recorded green state rather than
+reconfirming it at the start of every task. Unchanged; see the hygiene
+section above.
+
+**Not eligible -- `deploy-verify`.** It runs before every push to `main`,
+unconditionally, because of the 2026-09-03 `python-multipart` deploy crash
+that a green suite did not catch. It is also structurally unfit for a
+ledger: the deploy image `COPY`s the whole tree, so "unchanged version" is
+essentially never true at push time. A ledger here would either never hit or
+hit wrongly, and weakening the rule would reopen a closed incident to buy
+nothing.
+
+**Not eligible -- the consumer-contract-lag job.** It is schedule-only and
+advisory, so there is no manual re-run to prevent. A red run there is the
+normal transient state between a contract change landing here and the
+consumer catching up, and gating anything on it would invert the ownership
+direction the cross-repo contract design establishes.

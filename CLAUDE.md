@@ -262,14 +262,16 @@ this repo actually shipped.
   differently than the local dev venv) is the same either way. A green
   `pytest`/`ruff` run does not substitute for this (see the skill for why,
   and the incident it generalizes from).
+  `deploy-verify` is deliberately not ledger-eligible — see
+  `docs/conventions/rationale.md#which-repeatable-checks-are-ledger-eligible-2026-09-22`.
 - **When designing or changing a web page's UI (`dashboard/static/`), invoke
   the `ui-visual-review` skill before calling the work done** — reading
   HTML/CSS and reasoning about layout is not a substitute for actually
   rendering the page (see the skill for why, and the incident it
   generalizes from).
 - **The `.claude/hooks/` files are shared with the sibling repo and must stay
-  byte-identical.** `~/pr-review-bot` and `~/onboarding-wizard` each carry
-  their own copy of `check_env_access.py`, `redact_output.py` and
+  byte-identical.** This repo and the sibling onboarding-wizard checkout each
+  carry their own copy of `check_env_access.py`, `redact_output.py` and
   `check_exfiltration.py`. Neither repo's CI can see the other, so nothing
   mechanical catches drift -- and `check_env_access.py` already drifted once,
   silently, leaving the wizard on the superseded pipe-based wrapper. Changing
@@ -278,6 +280,45 @@ this repo actually shipped.
   printing nothing, before either change is considered done. Per-repo
   differences belong in `check_exfiltration.py`'s `_PROTECTED` list, which was
   designed wide enough that nothing else should need one.
+
+## When a request contradicts an established rule
+
+If a request conflicts with a rule already written down — in this file, in
+the global `~/.claude/CLAUDE.md`, in a committed spec under
+`docs/superpowers/specs/`, in a memory file, or in a recorded decision in
+`ISSUES.md` — **name the conflict and get explicit confirmation before
+proceeding.** Never silently comply, and never silently pick a side.
+
+State which rule it is, where it is written, what each reading would produce,
+and which one you recommend. Then stop.
+
+Two limits keep this from becoming an asking tax:
+
+- **The rule must be written down.** A conflict with an unwritten preference
+  or a stylistic nicety gets a judgment call and a one-line mention, not a
+  block.
+- **The conflict must be material** — proceeding under either reading
+  produces work that is wrong under the other. This is one of the narrow
+  cases where a blocking question is the correct move.
+
+A reaffirmed request is the decision: proceed with the full request, and
+record the resolution as a `feedback` memory so the same contradiction does
+not have to be re-litigated in the next session.
+
+## Probe cheaply before escalating
+
+Before dispatching a subagent that will read many files or run a broad
+review, state in one line which cheap probe you already ran — a grep, a
+glob, a single targeted read — and why it was insufficient. If you have not
+run one, run one first.
+
+This is not a tax on genuine fan-out: "breadth unknown, a grep would need six
+guesses" is a complete and acceptable answer. The rule exists to stop
+reflexive escalation, not to litigate every dispatch.
+
+The cost being managed is tokens and latency, both of which a broad agent
+spends before returning anything — a grep that answers the question costs a
+fraction of an agent that reads forty files to reach the same line.
 
 ## Docker image: no `chown -R`
 
@@ -297,16 +338,6 @@ the files that need it) — never reintroduce a blanket `chown -R /app`.
 needs an actual `docker build`, which `deploy-verify` already does as a
 boot smoke test. Full rationale and measurements:
 `docs/conventions/rationale.md#docker-image-no-chown--r-2026-09-07`.
-
-## Impeccable comp-first image generation (manual bridge)
-
-For dashboard redesign work via the Impeccable skill, comp-first image
-generation is wired to Hugging Face's Inference Providers (fal-ai backend,
-`black-forest-labs/FLUX.1-schnell`) via `~/.config/impeccable-hf/generate_image.py`
-rather than Impeccable's own `generate-image` CLI command, which only checks
-for `OPENAI_API_KEY` and will incorrectly report image generation as
-unavailable. Full usage, credential handling, and fallback instructions if
-fal-ai stops serving this model: `docs/conventions/rationale.md#impeccable-comp-first-image-generation-manual-bridge`.
 
 ## Substitutions from the brief (and why)
 
@@ -367,15 +398,9 @@ narrative: `docs/conventions/rationale.md#llm-api-testing-hygiene-the-ai-studio-
 
 ## Workspace isolation: worktree vs inline
 
-The redaction wrapper (`check_env_access.py` part 2) and the harness's
-`EnterWorktree` isolation guard do not compose — every git command in an
-`EnterWorktree` session gets refused once the wrapper is active, a bare
-`git status` included. **Never use `EnterWorktree` while the wrapper lives.**
-A worktree created manually with plain `git worktree add` and used from an
-ordinary session runs git freely — the wrapper costs one *tool*, not the
-workflow. Full measurement detail and worktree caveats (no `.env`/`.venv`
-in a worktree, `ExitWorktree` won't clean up a manual one, never `EnterWorktree
---path` a manual worktree): `docs/conventions/rationale.md#workspace-isolation-measurement-detail-and-worktree-caveats`.
+`EnterWorktree` must never be used in these repos — the reason is harness-
+level and lives in the global `~/.claude/CLAUDE.md`. Use a plain feature
+branch, or a manual `git worktree add`.
 
 ### Which to use
 
@@ -392,20 +417,19 @@ plans, genuinely independent parallel tasks, and experiments that may be thrown
 away. This path is already sanctioned: the `superpowers:using-git-worktrees`
 skill describes itself as working "via native tools *or git worktree
 fallback*". The existing rule about writing or committing a plan file *inside*
-the worktree still applies — see the next section.
+the worktree still applies — see the next section. Measurement detail and
+worktree caveats (no `.env`/`.venv` in a worktree, `ExitWorktree` won't clean
+up a manual one, never `EnterWorktree --path` a manual worktree):
+`docs/conventions/rationale.md#workspace-isolation-measurement-detail-and-worktree-caveats`.
 
 ## Plan-execution / multi-agent process hygiene
 
 Lessons from running Superpowers-style plans through subagent-driven
-development on this project (see `ISSUES.md` for the incidents these
-generalize from, and `docs/conventions/rationale.md#plan-execution--multi-agent-process-hygiene-full-detail`
-for full elaboration on each):
+development. Each is stated in full, with the incident it generalizes from,
+in `docs/conventions/rationale.md#plan-execution--multi-agent-process-hygiene-full-detail`
+-- read that section before executing a plan. The three that cost the most
+when missed:
 
 - A task brief's "stop and report" instruction is a hard stop, not a suggestion — an implementer must actually stop, not self-resolve and mention the deviation afterward.
-- When correcting or overriding part of a multi-sentence passage, re-read the whole passage afterward for internal consistency, not just the changed clause.
 - Task-scoped review checks conformance to the brief, not correctness of the brief itself — run the `code-review` skill immediately on any task diff touching external-API/auth integration, don't defer to final review.
-- Documentation describing the outcome of a live-verification step must be written after that step actually runs, not drafted in advance assuming success.
-- When a plan is authored in the same session that will execute it via a worktree-based flow, write or commit the plan file *inside* the worktree (or commit it before creating the worktree).
-- Before merging a feature branch into any target branch, check the *target* branch for pre-existing uncommitted changes first, not just the branch being merged in.
-- Don't ask an implementer subagent to reconfirm a full-suite baseline at the start of every task — trust the SDD ledger's last-recorded green state instead, unless there's a concrete reason to distrust it for this task.
 - Every parked/deferred Minor finding from a task-scoped or final whole-branch review must be logged in `ISSUES.md`'s Parked Issues section before the branch is considered done — including findings judged "no action needed."
