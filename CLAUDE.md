@@ -397,15 +397,11 @@ the worktree still applies — see the next section.
 ## Plan-execution / multi-agent process hygiene
 
 Lessons from running Superpowers-style plans through subagent-driven
-development on this project (see `ISSUES.md` for the incidents these
-generalize from, and `docs/conventions/rationale.md#plan-execution--multi-agent-process-hygiene-full-detail`
-for full elaboration on each):
+development. Each is stated in full, with the incident it generalizes from,
+in `docs/conventions/rationale.md#plan-execution--multi-agent-process-hygiene-full-detail`
+-- read that section before executing a plan. The three that cost the most
+when missed:
 
 - A task brief's "stop and report" instruction is a hard stop, not a suggestion — an implementer must actually stop, not self-resolve and mention the deviation afterward.
-- When correcting or overriding part of a multi-sentence passage, re-read the whole passage afterward for internal consistency, not just the changed clause.
 - Task-scoped review checks conformance to the brief, not correctness of the brief itself — run the `code-review` skill immediately on any task diff touching external-API/auth integration, don't defer to final review.
-- Documentation describing the outcome of a live-verification step must be written after that step actually runs, not drafted in advance assuming success.
-- When a plan is authored in the same session that will execute it via a worktree-based flow, write or commit the plan file *inside* the worktree (or commit it before creating the worktree).
-- Before merging a feature branch into any target branch, check the *target* branch for pre-existing uncommitted changes first, not just the branch being merged in.
-- Don't ask an implementer subagent to reconfirm a full-suite baseline at the start of every task — trust the SDD ledger's last-recorded green state instead, unless there's a concrete reason to distrust it for this task.
 - Every parked/deferred Minor finding from a task-scoped or final whole-branch review must be logged in `ISSUES.md`'s Parked Issues section before the branch is considered done — including findings judged "no action needed."
