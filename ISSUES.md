@@ -153,6 +153,39 @@ read_index:
   - anchor: cross-repo-ordering-bug-onboarding-wizards-provisioning-write-defeated-seedruntimeconfigdefaults-leaving-every-wizard-deployed-instance-permanently-stuck-behind-dispatcher-configuration-issue
     title: "Cross-repo ordering bug: onboarding wizard's provisioning write defeated `_seed_runtime_config_defaults`, leav"
     parked: false
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-slug-drops-underscores-producing-anchors-that-dont-match-githubs-real-heading-slugs
+    title: "[2026-09-23, rootstock-practices-adoption branch] `_slug()` drops underscores, producing anchors that don't ma"
+    parked: true
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-testdocanchorspys-missing-file-and-duplicate-slug-branches-are-never-exercised-against-a-failing-input
+    title: "[2026-09-23, rootstock-practices-adoption branch] `test_doc_anchors.py`'s missing-file and duplicate-slug bran"
+    parked: true
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-the-exempt-heading-prefix-match-in-the-byte-budget-test-can-be-gamed-by-a-second-matching-heading
+    title: "[2026-09-23, rootstock-practices-adoption branch] The exempt-heading prefix match in the byte-budget test can "
+    parked: true
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-sectionheading-splitting-doesnt-handle--fences-or-nested-backtick-counts-and-heading-extraction-for-anchorsissues-doesnt-skip-fences-at-all
+    title: "[2026-09-23, rootstock-practices-adoption branch] Section/heading splitting doesn't handle `~~~` fences or nes"
+    parked: true
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-the-plans-claim-that-a-duplicate-issuesmd-heading-would-fail-testissuesindexpy-is-wrong
+    title: "[2026-09-23, rootstock-practices-adoption branch] The plan's claim that a duplicate `ISSUES.md` heading would "
+    parked: true
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-bots-claudemd-budget-headroom-20-kb-is-below-the-specs-stated-floor-of-26-kb
+    title: "[2026-09-23, rootstock-practices-adoption branch] Bot's CLAUDE.md budget headroom (~2.0 KB) is below the spec'"
+    parked: true
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-the-ledger-eligibility-rationales-the-image-copys-the-whole-tree-claim-is-factually-wrong
+    title: "[2026-09-23, rootstock-practices-adoption branch] The ledger-eligibility rationale's 'the image COPYs the whol"
+    parked: true
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-issuesmds-readindex-dropped-the-specs-date-field
+    title: "[2026-09-23, rootstock-practices-adoption branch] `ISSUES.md`'s `read_index` dropped the spec's `date` field"
+    parked: true
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-the-issuesmd-index-generator-is-fragile-title-truncation-mid-word-unescaped-yaml
+    title: "[2026-09-23, rootstock-practices-adoption branch] The `ISSUES.md` index generator is fragile (title truncation"
+    parked: true
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-tier-cs-spec-front-matter-convention-has-no-discoverability-mechanism
+    title: "[2026-09-23, rootstock-practices-adoption branch] Tier C's spec-front-matter convention has no discoverability"
+    parked: true
+  - anchor: 2026-09-23-rootstock-practices-adoption-branch-bots-hook-parity-bullet-doesnt-mention-the-pre-existing-sinkdir-naming-exception-the-wizards-copy-does
+    title: "[2026-09-23, rootstock-practices-adoption branch] Bot's hook-parity bullet doesn't mention the pre-existing `_"
+    parked: true
 ---
 # Issues log — vertex AI provider implementation
 
@@ -338,6 +371,83 @@ Recorded here so they aren't silently lost. Format:
 - **Why parked:** why it didn't get fixed in-session
 - **Follow-up:** what closing it would take
 ```
+
+### [2026-09-23, rootstock-practices-adoption branch] `_slug()` drops underscores, producing anchors that don't match GitHub's real heading slugs
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption` (Opus, single-agent).
+- **What:** `tests/test_doc_anchors.py::_slug()` (and the copy in `tests/test_issues_index.py`) strips every character outside `[a-z0-9 -]`, which drops `_` — but GitHub's real slugger keeps underscores. A heading containing `_` (none of the 10 anchors this was empirically verified against do) would slugify differently here than on GitHub: about 15 `read_index` anchor values in `ISSUES.md` are not real GitHub anchors today, and a future `CLAUDE.md` link to an underscore-containing heading would be marked broken by the guard even if correctly spelled GitHub-style, or would pass the guard while being broken on GitHub if spelled this repo's way.
+- **Why parked:** No anchor link in `CLAUDE.md` currently targets a heading with `_` in it, so nothing is actually broken today; fixing it means widening `_slug()`, `_ANCHOR_LINK_RE`'s anchor character class, and regenerating `ISSUES.md`'s index in both repos in the same pass, which is more than a docs-only fix pass should carry.
+- **Follow-up:** Add `_` (and ideally full Unicode-letter support via `\w`) to `_slug()`'s allowed character class and to `_ANCHOR_LINK_RE`'s anchor group in both repos' `test_doc_anchors.py` and `test_issues_index.py`, then regenerate both `ISSUES.md` indexes.
+
+### [2026-09-23, rootstock-practices-adoption branch] `test_doc_anchors.py`'s missing-file and duplicate-slug branches are never exercised against a failing input
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption`.
+- **What:** `test_every_anchor_link_in_claude_md_resolves`'s "target file does not exist" branch and `test_no_target_file_has_duplicate_heading_slugs` only ever run against the real, currently-healthy tree — there's no synthetic case proving either branch actually fires on a real failure, unlike the fenced-code-block and CRLF/BOM tests, which do use synthetic input.
+- **Why parked:** This is a test-coverage gap in a meta-test, not a bug in the guard itself (both branches read correctly by inspection), and outside the fix pass's scope (Critical/Important only).
+- **Follow-up:** Parameterize `_slug`/`_heading_lines`/`_anchor_links` to take `claude_md`/`repo_root` and add `tmp_path`-based cases for a missing target file and for two headings that slugify identically, in both repos.
+
+### [2026-09-23, rootstock-practices-adoption branch] The exempt-heading prefix match in the byte-budget test can be gamed by a second matching heading
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption`.
+- **What:** `tests/test_claude_md_budget.py::_exempt_bytes` exempts *every* `## ` heading starting with `"## Secret handling"`, not just the one canonical section. A second heading like `## Secret handling (misc notes)` anywhere in the file would silently become exempt too; the 32,000-byte whole-file cap is the only thing that would eventually catch it.
+- **Why parked:** No such second heading exists today, and closing this loophole (assert exactly one match, or match the full heading line) is a defensive hardening, not a fix to an active bug.
+- **Follow-up:** Add an assertion that exactly one section heading matches each entry in `EXEMPT_HEADING_PREFIXES`, in both repos' `test_claude_md_budget.py`.
+
+### [2026-09-23, rootstock-practices-adoption branch] Section/heading splitting doesn't handle `~~~` fences or nested backtick counts, and heading extraction for anchors/issues doesn't skip fences at all
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption`.
+- **What:** `test_claude_md_budget.py::_sections`'s fence-skipping toggles on any line starting with three backticks, so a `~~~`-delimited fence is never recognized, and a four-backtick fence containing a three-backtick line inside it would flip the toggle wrongly mid-fence. Separately, `test_doc_anchors.py::_heading_lines` and `test_issues_index.py::_entry_headings` don't skip fenced code blocks at all — they rely entirely on excluding known template-stub headings by exact string match, so a `#`-prefixed example line inside a fence in `rationale.md` or `ISSUES.md` would be treated as a real heading.
+- **Why parked:** Neither file has a fence containing a `#`-prefixed line today, so nothing is broken in practice; the fix touches three separate parsing functions across both repos for a currently-hypothetical input.
+- **Follow-up:** Give `_heading_lines`/`_entry_headings` the same fence-aware skip logic `_sections` already has, and extend that logic to also recognize `~~~` fences and to track fence length so a longer fence containing a shorter fence-marker line doesn't toggle early.
+
+### [2026-09-23, rootstock-practices-adoption branch] The plan's claim that a duplicate `ISSUES.md` heading would fail `test_issues_index.py` is wrong
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption`.
+- **What:** Task 15 Step 2's plan text says a wrong entry count "means two headings slugify identically -- disambiguate one heading's wording." In fact `_index()`/`_entry_headings()` use sets and dicts throughout, so two identical headings silently collapse to one index line and every test still passes — the plan's stated safety net doesn't exist.
+- **Why parked:** This is a plan-documentation defect, not an implementation bug to fix in this branch; `ISSUES.md`'s own headings are already checked for accidental duplication by convention (dated, worded titles), and nothing in the current file collides.
+- **Follow-up:** If this class of index ever needs a real guard, add an explicit duplicate-heading-slug assertion to `test_issues_index.py` mirroring `test_doc_anchors.py::test_no_target_file_has_duplicate_heading_slugs`. No action taken in this branch.
+
+### [2026-09-23, rootstock-practices-adoption branch] Bot's CLAUDE.md budget headroom (~2.0 KB) is below the spec's stated floor of ~2.6 KB
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption`.
+- **What:** The spec states "2.6 KB is the smallest headroom that still clears that bar" for the bot's budgeted CLAUDE.md content. The branch lands at 16,012 budgeted bytes against the 18,000 budget -- 1,988 bytes of headroom, not 2.6 KB. The drift comes from Task 3's collapse landing at 14,908 bytes against the plan's own predicted 14,550, plus a pointer sentence added in Task 5 to keep an anchor reachable (see the SDD ledger's Task 5 ruling).
+- **Why parked:** Still comfortably under the 18,000-byte budget with room for ordinary future edits; relocating ~600 bytes purely to hit an internal spec estimate (not a hard requirement -- the hard requirement is the 18,000 budget itself, which is met) isn't worth a fix-pass slot.
+- **Follow-up:** If budget pressure returns, relocate a further ~600 bytes from `## Substitutions from the brief` or `## Module boundaries and contracts` per the plan's own stated fallback (Task 10 Step 2).
+
+### [2026-09-23, rootstock-practices-adoption branch] The ledger-eligibility rationale's "the image COPYs the whole tree" claim is factually wrong
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption`.
+- **What:** `docs/conventions/rationale.md`'s "Which repeatable checks are ledger-eligible" section argues `deploy-verify` is "structurally unfit for a ledger" because "the deploy image COPYs the whole tree, so 'unchanged version' is essentially never true." Neither this repo's nor the wizard's `Dockerfile` does a blanket `COPY . .` -- both copy an explicit list of files and directories. The conclusion (deploy-verify stays unconditional and non-ledger-eligible) is still correct on the incident ground alone (the 2026-09-03 `python-multipart` crash), but the "structurally unfit" half of the argument as written is disprovable by reading either Dockerfile.
+- **Why parked:** The rule itself (deploy-verify is not ledger-eligible) is not in question and needs no change; only the supporting sentence is inaccurate, and fixing prose that argues for an already-correct, unchanged rule isn't Important/Critical.
+- **Follow-up:** Reword the sentence to argue from the explicit-COPY-list's actual surface (base image, `uv sync`'s resolved lockfile, and every explicitly-listed file/dir all count as "the image's inputs"), or drop the structural half of the argument and rest the rule on the incident alone, in both repos' `rationale.md`.
+
+### [2026-09-23, rootstock-practices-adoption branch] `ISSUES.md`'s `read_index` dropped the spec's `date` field
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption`.
+- **What:** The spec's Tier A description says each index entry lists "anchor slug, date, one-line title, and `parked: true|false`." The implemented `read_index` (Task 14's test, Task 15's generator) carries only `anchor`/`title`/`parked` -- no `date` -- and the plan's own Deviations section doesn't record dropping it.
+- **Why parked:** Most entries' dates aren't reliably extractable from their heading text (many current incident headings carry no bracketed date at all, unlike the newer `[2026-09-17] ...` convention), so backfilling one accurately would require reading and dating all ~50 entries by hand rather than a mechanical regeneration -- more than a docs fix pass should carry.
+- **Follow-up:** If a `date` field is wanted, add it to `_index()`'s required-keys test and backfill it entry-by-entry (not generated), preferring the `[YYYY-MM-DD, ...]`-prefixed convention going forward for new entries so the field becomes mechanically extractable over time.
+
+### [2026-09-23, rootstock-practices-adoption branch] The `ISSUES.md` index generator is fragile (title truncation mid-word, unescaped YAML)
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption`.
+- **What:** The throwaway generator script (Task 15 Step 1) truncates `title` at 110 characters with a plain slice, which can cut mid-word (e.g. "...for defer"), and only escapes `"` before wrapping the value in double quotes -- a heading containing a literal `\` would produce invalid YAML. The index is maintained by hand from here per the plan, so this script's shape is the template anyone regenerating an entry will likely copy.
+- **Why parked:** The generator itself isn't committed (by design -- Task 15 Step 1 calls it a throwaway), and no current heading contains a backslash, so nothing is broken in the committed `ISSUES.md`.
+- **Follow-up:** If the index is ever regenerated wholesale again, truncate on a word boundary and escape backslashes (and any other YAML-significant character) before quoting, in both repos.
+
+### [2026-09-23, rootstock-practices-adoption branch] Tier C's spec-front-matter convention has no discoverability mechanism
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption`.
+- **What:** The "front-matter on specs, and why not on plans" convention (Task 17) lives only in `docs/conventions/rationale.md`, which is not loaded when a spec is first written. No skill template or `CLAUDE.md` line points to it, so a future spec is likely to be written without front-matter simply because nobody read this section before starting.
+- **Why parked:** Wiring this into the `writing-plans`/spec-authoring skill (if one exists for specs specifically) is a process change beyond this plan's stated scope, which only asked for the convention to be recorded.
+- **Follow-up:** If Tier C's adoption rate turns out low in practice, add a one-line pointer to this convention from wherever specs are actually authored (a skill, or a `CLAUDE.md` line under `docs/superpowers/specs/`).
+
+### [2026-09-23, rootstock-practices-adoption branch] Bot's hook-parity bullet doesn't mention the pre-existing `_SINK_DIR` naming exception the wizard's copy does
+
+- **Found during:** Final whole-branch review of `rootstock-practices-adoption`.
+- **What:** The wizard's `check_env_access.py` deliberately differs from the bot's by one literal (`_SINK_DIR`'s value, named after each project so the two redaction sinks never collide on a shared machine) -- predating this branch, and the wizard's own hook-parity bullet documents the exception. This repo's hook-parity bullet (rephrased by Task 5 to drop the hardcoded paths) still implies full byte-identity with no mention of that exception, so the plan's "Done when" checklist item ("`diff` ... prints nothing") cannot literally pass, and wasn't recorded as run in the SDD ledger.
+- **Why parked:** The `_SINK_DIR` difference itself predates this branch and this branch never touched `.claude/hooks/` (verified: `git log` over the hooks path across this branch's range is empty) -- the only gap is that this repo's own prose doesn't document a pre-existing, already-correct asymmetry the way the wizard's does.
+- **Follow-up:** Add a one-line note to this repo's hook-parity bullet mirroring the wizard's, naming the `_SINK_DIR` exception explicitly so the "Done when" check's expected `diff` output is documented accurately.
 
 ### [2026-09-16, demo-bot branch] Cookie-hostile visitors get an infinite redirect loop, not a working demo
 
