@@ -1,3 +1,162 @@
+---
+read_index:
+  - anchor: controller-mistake-a-broad-grep-for-an-unrelated-keyword-printed-a-full-secret-value
+    title: "Controller mistake: a broad grep for an unrelated keyword printed a full secret value"
+    parked: false
+  - anchor: idle-queue-dispatcher-spammed-one-warningsecond-forever-and-the-notice-sweep-was-functionally-dead-for-deferred-tickets
+    title: "Idle-queue dispatcher spammed one WARNING/second forever, and the notice sweep was functionally dead for defer"
+    parked: false
+  - anchor: harness-surfaced-a-full-env-diff-every-secret-in-the-file-into-the-conversation-with-no-command-run
+    title: "Harness surfaced a full `.env` diff (every secret in the file) into the conversation with no command run"
+    parked: false
+  - anchor: harness-file-changed-externally-notification-fired-twice-for-non-secret-files-during-the-exfiltration-guard-implementation
+    title: "Harness 'file changed externally' notification fired twice for non-secret files during the exfiltration-guard "
+    parked: false
+  - anchor: an-unredacted-full-working-tree-gitleaks-verification-scan-printed-partial-real-private-key-bytes-into-the-conversation
+    title: "An unredacted, full-working-tree gitleaks verification scan printed partial real private-key bytes into the co"
+    parked: false
+  - anchor: the-final-whole-branch-review-caught-a-real-bug-that-all-six-task-scoped-reviews-missed
+    title: "The final whole-branch review caught a real bug that all six task-scoped reviews missed"
+    parked: false
+  - anchor: controller-mistake-printed-a-fragment-of-the-base64-encoded-credential-to-the-transcript
+    title: "Controller mistake: printed a fragment of the base64-encoded credential to the transcript"
+    parked: false
+  - anchor: controller-ran-the-safe-env-presence-check-pattern-against-env-itself--twice-in-two-different-sessions
+    title: "Controller ran the 'safe' `.env` presence-check pattern against `.env` itself — twice, in two different sessio"
+    parked: false
+  - anchor: a-requested-security--code-review-of-the-whole-onboarding-wizard-found-a-real-ssrf-vulnerability-in-the-vertex-credential-frame-plus-9-correctness-bugs--all-fixed-in-one-pass
+    title: "A requested security + code review of the whole onboarding wizard found a real SSRF vulnerability in the Verte"
+    parked: false
+  - anchor: bot-silently-enqueued-nothing-after-a-real-pr-open-cause-still-unconfirmed-added-logging-along-the-whole-webhook-dispatch-chain-to-diagnose-it-live
+    title: "Bot silently enqueued nothing after a real PR open, cause still unconfirmed; added logging along the whole web"
+    parked: false
+  - anchor: live-deployments-environment-tab-listed-zero-render-vars-renderservicename-is-a-render-reserved-env-var-not-a-settable-one
+    title: "Live deployment's Environment tab listed zero Render vars: `RENDER_SERVICE_NAME` is a Render-reserved env var,"
+    parked: false
+  - anchor: controller-ran-a-directory-recursive-grep-that-swept-in-botenv-without-naming-it
+    title: "Controller ran a directory-recursive `grep` that swept in `bot/.env` without naming it"
+    parked: false
+  - anchor: checkenvaccesspys-bash-rewrite-made-the-harnesss-own-worktree-isolation-guard-block-every-command-in-a-fresh-worktree-session
+    title: "`check_env_access.py`'s Bash rewrite made the harness's own worktree-isolation guard block every command, in a"
+    parked: false
+  - anchor: 2026-09-16-demo-bot-branch-cookie-hostile-visitors-get-an-infinite-redirect-loop-not-a-working-demo
+    title: "[2026-09-16, demo-bot branch] Cookie-hostile visitors get an infinite redirect loop, not a working demo"
+    parked: true
+  - anchor: 2026-09-16-demo-bot-branch-a-logged-out-visitors-provider-choice-is-dropped-one-hop-before-loginhtml-ever-sees-it
+    title: "[2026-09-16, demo-bot branch] A logged-out visitor's `?provider=` choice is dropped one hop before `login.html"
+    parked: true
+  - anchor: 2026-09-16-demo-bot-branch-the-demos-fix-wave-introduced-a-few-small-non-blocking-gaps-alongside-the-two-above
+    title: "[2026-09-16, demo-bot branch] The demo's fix wave introduced a few small, non-blocking gaps alongside the two "
+    parked: true
+  - anchor: 2026-09-16-demo-bot-branch-democontentpys-third-canned-files-diff-hunk-body-lines-arent-recognized-as-added-by-diffutilsannotateandcap
+    title: "[2026-09-16, demo-bot branch] `demo/content.py`'s third canned file's diff hunk body lines aren't recognized a"
+    parked: true
+  - anchor: 2026-09-16-demo-bot-branch-demogithubapppyclearschedulenotice-is-a-complete-no-op
+    title: "[2026-09-16, demo-bot branch] `demo/github_app.py::clear_schedule_notice` is a complete no-op"
+    parked: true
+  - anchor: demogithubapppy-has-two-small-latent-inconsistencies-both-currently-unreachable
+    title: "`demo/github_app.py` has two small latent inconsistencies, both currently unreachable"
+    parked: true
+  - anchor: the-demos-script-srcdemo-staticdemojs-tag-also-loads-on-the-real-non-demo-dashboardlogin-pages
+    title: "The demo's `<script src='/demo-static/demo.js'>` tag also loads on the real, non-demo dashboard/login pages"
+    parked: true
+  - anchor: dashboardstaticdashboardhtmls-info-tooltip-mobile-overflow-bug-likely-also-exists-in-the-real-non-demo-dashboard
+    title: "`dashboard/static/dashboard.html`'s `.info-tooltip` mobile-overflow bug likely also exists in the real (non-de"
+    parked: true
+  - anchor: dockerfiledemo-doesnt-explain-why-copy-dashboard-dashboard-is-required
+    title: "`Dockerfile.demo` doesn't explain why `COPY dashboard ./dashboard` is required"
+    parked: true
+  - anchor: the-demo-test-suites-demoenvundoglobalrebinding-fixture-pair-is-now-copy-pasted-across-three-test-files
+    title: "The demo test suite's `demo_env`/`_undo_global_rebinding` fixture pair is now copy-pasted across three test fi"
+    parked: true
+  - anchor: cis-demo-image-boot-step-never-docker-rms-its-container
+    title: "CI's demo-image boot step never `docker rm`s its container"
+    parked: true
+  - anchor: readconfigvalues-blankzero-handling-briefly-makes-usagecaptokens0-a-hard-422-instead-of-the-old-silent-cap-off
+    title: "`readConfigValue`'s blank/zero handling briefly makes `usage_cap_tokens=0` a hard 422 instead of the old silen"
+    parked: true
+  - anchor: the-count-kind-steppers-mobile-touch-target-is-38px-tall-short-of-the-plans-own-stated-44px-goal
+    title: "The `count`-kind stepper's mobile touch target is ~38px tall, short of the plan's own stated ~44px goal"
+    parked: true
+  - anchor: cooldown-previews-reaching-value-at-the-31st-re-review-tail-names-the-wrong-re-review-number-when-the-cap-is-hit-between-levels-6-and-30
+    title: "Cooldown preview's 'reaching {value} at the 31st re-review' tail names the wrong re-review number when the cap"
+    parked: true
+  - anchor: live-cooldown-preview-keeps-rendering-chips-for-an-individually-invalid-field-value-eg-a-negative-base-when-no-cross-field-rule-catches-it
+    title: "Live cooldown preview keeps rendering chips for an individually-invalid field value (e.g. a negative base) whe"
+    parked: true
+  - anchor: ci-run-for-the-dashboard-typed-config-controls-merge-logged-several-warnings-all-pre-existing-infrastructure-noise-unrelated-to-the-change
+    title: "CI run for the dashboard-typed-config-controls merge logged several warnings, all pre-existing infrastructure "
+    parked: true
+  - anchor: no-mechanical-backstop-for-outbound-exfiltration-of-a-secret-bearing-file
+    title: "No mechanical backstop for outbound exfiltration of a secret-bearing file"
+    parked: true
+  - anchor: a-redaction-sink-holding-unredacted-output-can-outlive-its-session-indefinitely
+    title: "A redaction sink holding unredacted output can outlive its session indefinitely"
+    parked: true
+  - anchor: scriptssetoverridepy---model--clear-model-writes-to-a-column-the-dispatcher-no-longer-reads
+    title: "`scripts/set_override.py --model`/`--clear-model` writes to a column the dispatcher no longer reads"
+    parked: true
+  - anchor: scriptscheckconsumercontractpys---bot-contract-override-silently-skips-the-committed-contract-stalenessmissing-cross-check
+    title: "`scripts/check_consumer_contract.py`'s `--bot-contract` override silently skips the committed-contract stalene"
+    parked: true
+  - anchor: scriptscheckconsumercontractpys-flatten-silently-collapses-duplicate-column-keys-in-a-consumers-vendored-contract
+    title: "`scripts/check_consumer_contract.py`'s `_flatten()` silently collapses duplicate `column` keys in a consumer's"
+    parked: true
+  - anchor: scriptscheckconsumercontractpys-generic-diff-framing-has-exactly-one-hardcoded-identity-key-column
+    title: "`scripts/check_consumer_contract.py`'s generic-diff framing has exactly one hardcoded identity key (`'column'`"
+    parked: true
+  - anchor: scriptscheckconsumercontractpys-flatten-cant-distinguish-an-empty-block-from-a-missing-one
+    title: "`scripts/check_consumer_contract.py`'s `_flatten()` can't distinguish an empty block from a missing one"
+    parked: true
+  - anchor: scriptscheckconsumercontractpys-error-path-edges-left-uncovered-after-the-final-review
+    title: "`scripts/check_consumer_contract.py`'s error-path edges left uncovered after the final review"
+    parked: true
+  - anchor: scriptscheckconsumercontractpys-differencescompare-do-some-redundant-work
+    title: "`scripts/check_consumer_contract.py`'s `differences()`/`compare()` do some redundant work"
+    parked: true
+  - anchor: teststeststoreschemapyexpectedcolumns-is-an-undocumented-fifth-touchpoint-for-a-new-runtimeconfigslotconfig-column
+    title: "`tests/test_store_schema.py::EXPECTED_COLUMNS` is an undocumented fifth touchpoint for a new `runtime_config`/"
+    parked: true
+  - anchor: a-persistent-local-test-postgres-container-is-a-leak-hazard-for-any-future-throwaway-schema-drill-like-stage-5-task-1s
+    title: "A persistent local test Postgres container is a leak hazard for any future throwaway-schema drill like Stage 5"
+    parked: true
+  - anchor: the-environment-tabs-per-slot-config-editor-silently-discards-unsaved-edits-in-every-other-row-on-any-rows-save
+    title: "The Environment tab's per-slot config editor silently discards unsaved edits in every other row on any row's S"
+    parked: true
+  - anchor: setoverridepy---clear-model-with-activation-probes-the-model-its-about-to-delete-then-arms-a-slot-with-no-model-at-all
+    title: "`set_override.py --clear-model` (with activation) probes the model it's about to delete, then arms a slot with"
+    parked: true
+  - anchor: a-404-from-the-vertex-entitlement-probe-is-always-attributed-to-the-model-even-when-a-wrong-project-or-location-caused-it
+    title: "A 404 from the vertex entitlement probe is always attributed to the model, even when a wrong project or locati"
+    parked: true
+  - anchor: googleauthexceptionstransporterror-during-a-probe-maps-to-providerunreachable-not-modelprobeunavailable
+    title: "`google.auth.exceptions.TransportError` during a probe maps to `provider_unreachable`, not `model_probe_unavai"
+    parked: true
+  - anchor: the-per-row-vertex-baselines-location-fallback-changed-from-vertexlocations0-to--when-task-7-made-the-baseline-map-provider-agnostic
+    title: "The per-row vertex baseline's location fallback changed from `vertexLocations[0]` to `''` when Task 7 made the"
+    parked: true
+  - anchor: new-probemodelcheck-test-coverage-has-a-few-pinning-gaps
+    title: "New probe/model_check test coverage has a few pinning gaps"
+    parked: true
+  - anchor: 2026-09-17-postpendingnotices-new-throttled-tuning-cache-refresh-is-redundant-not-just-unnecessary-while-the-queue-is-busy
+    title: "[2026-09-17] `post_pending_notices`' new throttled tuning-cache refresh is redundant, not just unnecessary, wh"
+    parked: true
+  - anchor: 2026-09-17-softcoded-demoguide-urls-demostaticdemojss-served-response-lost-etaglast-modified
+    title: "[2026-09-17] Softcoded demo/guide URLs: `demo/static/demo.js`'s served response lost `ETag`/`Last-Modified`"
+    parked: true
+  - anchor: 2026-09-17-softcoded-demoguide-urls-the-four-new-envconfigexample-entries-are-untested-against-scriptsinitenvpys-prompt-flow
+    title: "[2026-09-17] Softcoded demo/guide URLs: the four new `.env.config.example` entries are untested against `scrip"
+    parked: true
+  - anchor: design-gaps
+    title: "Design Gaps"
+    parked: true
+  - anchor: botscriptsdeploypy---sync-env-and-botscriptssetoverridepy-are-now-redundant-with-the-dashboard-environment-tab
+    title: "`bot/scripts/deploy.py --sync-env` and `bot/scripts/set_override.py` are now redundant with the dashboard Envi"
+    parked: true
+  - anchor: cross-repo-ordering-bug-onboarding-wizards-provisioning-write-defeated-seedruntimeconfigdefaults-leaving-every-wizard-deployed-instance-permanently-stuck-behind-dispatcher-configuration-issue
+    title: "Cross-repo ordering bug: onboarding wizard's provisioning write defeated `_seed_runtime_config_defaults`, leav"
+    parked: true
+---
 # Issues log — vertex AI provider implementation
 
 Running log of anything that went wrong (mine or a subagent's) while executing
