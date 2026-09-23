@@ -270,8 +270,8 @@ this repo actually shipped.
   rendering the page (see the skill for why, and the incident it
   generalizes from).
 - **The `.claude/hooks/` files are shared with the sibling repo and must stay
-  byte-identical.** `~/pr-review-bot` and `~/onboarding-wizard` each carry
-  their own copy of `check_env_access.py`, `redact_output.py` and
+  byte-identical.** This repo and the sibling onboarding-wizard checkout each
+  carry their own copy of `check_env_access.py`, `redact_output.py` and
   `check_exfiltration.py`. Neither repo's CI can see the other, so nothing
   mechanical catches drift -- and `check_env_access.py` already drifted once,
   silently, leaving the wizard on the superseded pipe-based wrapper. Changing
@@ -299,16 +299,6 @@ the files that need it) — never reintroduce a blanket `chown -R /app`.
 needs an actual `docker build`, which `deploy-verify` already does as a
 boot smoke test. Full rationale and measurements:
 `docs/conventions/rationale.md#docker-image-no-chown--r-2026-09-07`.
-
-## Impeccable comp-first image generation (manual bridge)
-
-For dashboard redesign work via the Impeccable skill, comp-first image
-generation is wired to Hugging Face's Inference Providers (fal-ai backend,
-`black-forest-labs/FLUX.1-schnell`) via `~/.config/impeccable-hf/generate_image.py`
-rather than Impeccable's own `generate-image` CLI command, which only checks
-for `OPENAI_API_KEY` and will incorrectly report image generation as
-unavailable. Full usage, credential handling, and fallback instructions if
-fal-ai stops serving this model: `docs/conventions/rationale.md#impeccable-comp-first-image-generation-manual-bridge`.
 
 ## Substitutions from the brief (and why)
 
@@ -369,15 +359,9 @@ narrative: `docs/conventions/rationale.md#llm-api-testing-hygiene-the-ai-studio-
 
 ## Workspace isolation: worktree vs inline
 
-The redaction wrapper (`check_env_access.py` part 2) and the harness's
-`EnterWorktree` isolation guard do not compose — every git command in an
-`EnterWorktree` session gets refused once the wrapper is active, a bare
-`git status` included. **Never use `EnterWorktree` while the wrapper lives.**
-A worktree created manually with plain `git worktree add` and used from an
-ordinary session runs git freely — the wrapper costs one *tool*, not the
-workflow. Full measurement detail and worktree caveats (no `.env`/`.venv`
-in a worktree, `ExitWorktree` won't clean up a manual one, never `EnterWorktree
---path` a manual worktree): `docs/conventions/rationale.md#workspace-isolation-measurement-detail-and-worktree-caveats`.
+`EnterWorktree` must never be used in these repos — the reason is harness-
+level and lives in the global `~/.claude/CLAUDE.md`. Use a plain feature
+branch, or a manual `git worktree add`.
 
 ### Which to use
 
@@ -394,7 +378,10 @@ plans, genuinely independent parallel tasks, and experiments that may be thrown
 away. This path is already sanctioned: the `superpowers:using-git-worktrees`
 skill describes itself as working "via native tools *or git worktree
 fallback*". The existing rule about writing or committing a plan file *inside*
-the worktree still applies — see the next section.
+the worktree still applies — see the next section. Measurement detail and
+worktree caveats (no `.env`/`.venv` in a worktree, `ExitWorktree` won't clean
+up a manual one, never `EnterWorktree --path` a manual worktree):
+`docs/conventions/rationale.md#workspace-isolation-measurement-detail-and-worktree-caveats`.
 
 ## Plan-execution / multi-agent process hygiene
 
