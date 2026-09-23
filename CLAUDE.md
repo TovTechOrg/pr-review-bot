@@ -281,6 +281,45 @@ this repo actually shipped.
   differences belong in `check_exfiltration.py`'s `_PROTECTED` list, which was
   designed wide enough that nothing else should need one.
 
+## When a request contradicts an established rule
+
+If a request conflicts with a rule already written down — in this file, in
+the global `~/.claude/CLAUDE.md`, in a committed spec under
+`docs/superpowers/specs/`, in a memory file, or in a recorded decision in
+`ISSUES.md` — **name the conflict and get explicit confirmation before
+proceeding.** Never silently comply, and never silently pick a side.
+
+State which rule it is, where it is written, what each reading would produce,
+and which one you recommend. Then stop.
+
+Two limits keep this from becoming an asking tax:
+
+- **The rule must be written down.** A conflict with an unwritten preference
+  or a stylistic nicety gets a judgment call and a one-line mention, not a
+  block.
+- **The conflict must be material** — proceeding under either reading
+  produces work that is wrong under the other. This is one of the narrow
+  cases where a blocking question is the correct move.
+
+A reaffirmed request is the decision: proceed with the full request, and
+record the resolution as a `feedback` memory so the same contradiction does
+not have to be re-litigated in the next session.
+
+## Probe cheaply before escalating
+
+Before dispatching a subagent that will read many files or run a broad
+review, state in one line which cheap probe you already ran — a grep, a
+glob, a single targeted read — and why it was insufficient. If you have not
+run one, run one first.
+
+This is not a tax on genuine fan-out: "breadth unknown, a grep would need six
+guesses" is a complete and acceptable answer. The rule exists to stop
+reflexive escalation, not to litigate every dispatch.
+
+The cost being managed is tokens and latency, both of which a broad agent
+spends before returning anything — a grep that answers the question costs a
+fraction of an agent that reads forty files to reach the same line.
+
 ## Docker image: no `chown -R`
 
 `Dockerfile` creates `appuser` and switches to it via `USER appuser` before
