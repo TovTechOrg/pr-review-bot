@@ -324,3 +324,27 @@ before the branch is considered done.
 **Nuance:** Log it even when a review explicitly judges a finding "no action
 needed" or harmless-as-is. That judgment belongs in the entry's **Why
 parked** line, not as a reason to skip logging.
+
+## Which repeatable checks are ledger-eligible (2026-09-22)
+
+"Trust the ledger" is narrower than it sounds. It covers one check, and two
+obvious-looking candidates are deliberately excluded.
+
+**Eligible -- the full-suite `pytest`/`ruff` baseline within a plan's
+execution.** Trust the SDD ledger's last-recorded green state rather than
+reconfirming it at the start of every task. Unchanged; see the hygiene
+section above.
+
+**Not eligible -- `deploy-verify`.** It runs before every push to `main`,
+unconditionally, because of the 2026-09-03 `python-multipart` deploy crash
+that a green suite did not catch. It is also structurally unfit for a
+ledger: the deploy image `COPY`s the whole tree, so "unchanged version" is
+essentially never true at push time. A ledger here would either never hit or
+hit wrongly, and weakening the rule would reopen a closed incident to buy
+nothing.
+
+**Not eligible -- the consumer-contract-lag job.** It is schedule-only and
+advisory, so there is no manual re-run to prevent. A red run there is the
+normal transient state between a contract change landing here and the
+consumer catching up, and gating anything on it would invert the ownership
+direction the cross-repo contract design establishes.

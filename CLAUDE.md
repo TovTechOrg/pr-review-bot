@@ -262,6 +262,8 @@ this repo actually shipped.
   differently than the local dev venv) is the same either way. A green
   `pytest`/`ruff` run does not substitute for this (see the skill for why,
   and the incident it generalizes from).
+  `deploy-verify` is deliberately not ledger-eligible — see
+  `docs/conventions/rationale.md#which-repeatable-checks-are-ledger-eligible-2026-09-22`.
 - **When designing or changing a web page's UI (`dashboard/static/`), invoke
   the `ui-visual-review` skill before calling the work done** — reading
   HTML/CSS and reasoning about layout is not a substitute for actually
